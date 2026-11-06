@@ -72,6 +72,7 @@ type Graph struct {
 	GridLat0   float64
 	GridLon0   float64
 	GridStep   float64
+	bbox       [4]float64 // minLat, minLon, maxLat, maxLon (zeros = scan)
 
 	Lat, Lon []int32
 	Off      []uint64
@@ -137,6 +138,10 @@ func Open(path string) (*Graph, error) {
 	var off [numSections]uint64
 	for i := 0; i < numSections; i++ {
 		off[i] = be.Uint64(data[c:])
+		c += 8
+	}
+	for i := 0; i < 4; i++ {
+		g.bbox[i] = math.Float64frombits(be.Uint64(data[c:]))
 		c += 8
 	}
 
@@ -220,6 +225,8 @@ type Builder struct {
 	GridNLat, GridNLon int
 	GOff               []uint64
 	GNodes             []uint32
+	MinLat, MinLon     float64
+	MaxLat, MaxLon     float64
 }
 
 // BuildGrid creates the uniform grid used for snapping.
@@ -244,6 +251,10 @@ func (b *Builder) BuildGrid(step float64) {
 		}
 	}
 	b.GridStep = step
+	b.MinLat = float64(minLat) / E7
+	b.MinLon = float64(minLon) / E7
+	b.MaxLat = float64(maxLat) / E7
+	b.MaxLon = float64(maxLon) / E7
 	b.GridLat0 = float64(minLat)/E7 - step
 	b.GridLon0 = float64(minLon)/E7 - step
 	b.GridNLat = int((float64(maxLat)/E7-b.GridLat0)/step) + 1
@@ -352,6 +363,10 @@ func (b *Builder) Write(path string) error {
 		be.PutUint64(hdr[c:], secOff[i])
 		c += 8
 	}
+	hdrF64(hdr, &c, b.MinLat)
+	hdrF64(hdr, &c, b.MinLon)
+	hdrF64(hdr, &c, b.MaxLat)
+	hdrF64(hdr, &c, b.MaxLon)
 	if _, err := bw.Write(hdr); err != nil {
 		return err
 	}
@@ -466,6 +481,9 @@ func hdrF64(d []byte, c *uint64, v float64) {
 func (g *Graph) Bounds() (minLat, minLon, maxLat, maxLon float64) {
 	if g.NodeCount == 0 {
 		return 0, 0, 0, 0
+	}
+	if g.bbox[0] != 0 || g.bbox[2] != 0 {
+		return g.bbox[0], g.bbox[1], g.bbox[2], g.bbox[3]
 	}
 	la, lo := g.Lat[0], g.Lon[0]
 	mnLat, mxLat, mnLon, mxLon := la, la, lo, lo

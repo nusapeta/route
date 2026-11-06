@@ -24,6 +24,9 @@ import (
 type Options struct {
 	GridStep float64 // spatial grid cell size in degrees (default 0.02)
 	Workers  int     // pbf decode workers
+	// Order selects the node numbering: "hilbert" (default, page-local) or
+	// "osm" (keep the id order; used for A/B measurements).
+	Order    string
 	Progress func(phase string, n int64)
 }
 
@@ -101,10 +104,12 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	}
 
 	// reorder nodes along a Hilbert curve so routing stays page-local
-	perm := spatialOrder(lat, lon, valid)
-	lat, lon = applyPerm(perm, lat, lon)
-	for i := range flat {
-		flat[i] = int64(perm[flat[i]])
+	if opt.Order != "osm" {
+		perm := spatialOrder(lat, lon, valid)
+		lat, lon = applyPerm(perm, lat, lon)
+		for i := range flat {
+			flat[i] = int64(perm[flat[i]])
+		}
 	}
 
 	n := len(ids)

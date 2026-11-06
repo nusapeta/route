@@ -84,6 +84,23 @@ Terukur:
 Rute lintas-region (mis. Merak -> Bakauheni) belum didukung. Kalau butuh,
 gabungkan jadi satu graph dari pbf nasional (butuh mesin 16 GB saat build).
 
+## Benchmark
+
+```bash
+bin/rid-bench -graph data/java.graph -n 120 -emit-pairs pairs.csv   # fix workload
+bin/rid-bench -graph data/java.graph -pairs pairs.csv -eps 1.5      # percentile
+```
+Temuan utama (601 pasang tetap, Java):
+- ε=1.5 → 28% lebih cepat dari ε=1.0, **tanpa** mengubah panjang rute (526/526 sama).
+- Hilbert ordering → p50 7-20% lebih cepat, RSS metropolitan 1.2 GB → 675 MB.
+- p50: 1.2 ms (≤5 km), 62 ms (38 km), 146 ms (63 km). p95 di 63 km: 472 ms.
+
+## Paper
+
+`paper/` berisi draf short paper (ACM `acmart`), `refs.bib` (DOI terverifikasi),
+`RESULTS.md` (semua angka + cara reproduksi), `EXPERIMENTS.md` (checklist
+kekurangan: baseline OSRM, ground truth Google, turn restriction, build nasional).
+
 ## Format file
 
 Lihat doc comment `internal/graph/format.go`. Header 256 B + 14 section
