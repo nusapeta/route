@@ -98,6 +98,35 @@ Startup 10 ms.
 Untuk mesin kecil: `-conc 1` (memori ~4x lebih hemat, query diserialkan) dan
 `GOMEMLIMIT=512MiB`.
 
+## 3b. Kapasitas (terukur di i3-6100T, 2C/4T)
+
+| rute | server p50 | RPS puncak |
+|---|---|---|
+| 7 km | 47 ms | ~75 |
+| 15 km | 136 ms | ~17 |
+| 148 km | 4,2 s | ~0,6 |
+
+Konfigurasi di `docker-compose.yml` sengaja `-conc 4` (2 core fisik): dengan
+`-conc 1` throughput rute 15 km cuma ~7 RPS. Klien lebih dari 4 bersamaan
+hanya menambah antrean. Ukur sendiri:
+
+```bash
+scripts/loadtest.py http://127.0.0.1:8080 -from -7.8435,110.3929 -to -7.7393,110.3760 -c 4 -n 32
+```
+
+Untuk pemakaian bersama, batasi di reverse proxy (Caddy):
+
+```
+routeid.lan {
+    rate_limit {
+        zone routeid { key {remote_host} events 30 window 1m }
+    }
+    reverse_proxy 127.0.0.1:8080 {
+        transport http { response_header_timeout 30s }
+    }
+}
+```
+
 ## 4. Keamanan
 
 Server ini **tanpa autentikasi**, `Access-Control-Allow-Origin: *`, dan tanpa

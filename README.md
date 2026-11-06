@@ -203,6 +203,30 @@ make build && bin/rid-server -graph data/java.graph -addr :8080
 scripts/smoke.sh http://127.0.0.1:8080
 ```
 
+## Kapasitas (terukur)
+
+Homelab uji: i3-6100T (2 core/4 thread), container 1,5 GiB, `-conc 4`.
+Load test: `scripts/loadtest.py`.
+
+| rute | server p50 (1 query) | RPS puncak | concurrency jenuh |
+|---|---|---|---|
+| 7 km (Palembang) | 47 ms | **~75** | 4 |
+| 15 km (Yogyakarta) | 136 ms | **~17** | 4 |
+| 148 km (Jakarta–Bandung) | 4,2 s | **~0,6** | 4 |
+
+Catatan penting:
+
+- `-conc 1` (default lama) membatasi ke ~7 RPS untuk rute 15 km; menaikkan
+  `-conc` ke 4 menaikkan throughput ~2,4x dan konkurensi klien di atas 4 tidak
+  menambah apa pun (sudah jenuh di 2 core fisik).
+- RPS berbanding terbalik dengan panjang rute; A* naik superlinear.
+- Antrean memperburuk latency, bukan throughput: pada c=4 rute 15 km, p50 klien
+  226 ms sementara server 226 ms (murni antre).
+- Satu query 148 km menempati 1 slot workspaces selama 4–7 s. Kalau app lo
+  banyak query panjang, siapkan timeout klien ≥10 s dan rate limit per-IP.
+- Memori puncak terukur saat 4x rute 148 km paralel: 745 MiB (di bawah limit
+  1,5 GiB, tanpa OOM).
+
 ## Deploy (homelab)
 
 Docker Compose dan systemd unit siap pakai ada di `deploy/` — lihat

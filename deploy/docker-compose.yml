@@ -26,10 +26,10 @@ services:
       - -conc
       - "1"
     environment:
-      GOMEMLIMIT: 768MiB
-    # batas kasar: ~600 MB puncak untuk rute panjang (lihat paper/RESULTS.md §5)
-    mem_limit: 1g
-    memswap_limit: 1g
+      GOMEMLIMIT: 1GiB
+    # terukur: 4x rute 148 km paralel = 745 MiB; sisakan kepala (paper/RESULTS.md §5)
+    mem_limit: 1536m
+    memswap_limit: 1536m
     stop_grace_period: 25s
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]

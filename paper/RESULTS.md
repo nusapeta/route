@@ -120,6 +120,22 @@ Memori container setelah semua query di atas: **471 MiB** dari limit 1 GiB
 (`docker stats`), RAM host terpakai 3,812 MB dari 7,830 MB. Latency Jakarta ->
 Bandung 16% lebih lambat dari mesin uji (3.59 s), sesuai rasio clock.
 
+Throughput (`scripts/loadtest.py`, keep-alive, 24–80 request per konfigurasi):
+
+| rute | `-conc` | klien c | RPS | server p50 |
+|---|---|---|---|---|
+| 7 km | 4 | 4 | 74.6 | 47 ms |
+| 7 km | 4 | 8 | 72.9 | 79 ms |
+| 15 km | 1 | 1 | 7.1 | 135 ms |
+| 15 km | 2 | 4 | 12.6 | 243 ms |
+| 15 km | 4 | 4 | 16.9 | 226 ms |
+| 148 km | 4 | 4 | 0.59 | 6,649 ms |
+
+Saturasi tercapai pada 4 query paralel: 2 core fisik, tiap query memakai satu
+core penuh. Menambah konkurensi klien di atas itu hanya memperpanjang antrean
+(p50 15 km naik 226 -> 486 ms tanpa kenaikan RPS). Memori puncak pada 4x rute
+148 km paralel: 745 MiB, tanpa OOM pada limit 1.5 GiB.
+
 ## 6. Multi-region (Java + Sumatra, satu proses)
 
 | query | rute | latency | region |
