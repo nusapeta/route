@@ -1,0 +1,3 @@
+{"graph":"data/java.graph","bans":3794,"only":155,"samples":3564,
+"strict_violations":0,"strict_errors":0,"strict_fallbacks":113,"loose_violations":3414,"loose_errors":0,"non_vacuous":3414,
+"strict_violation_pct":0.0000,"loose_violation_pct":95.7912}

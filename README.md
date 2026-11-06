@@ -16,7 +16,7 @@ Kebutuhan: 2 titik lat/lng, rute ≤50 km, mobil, Indonesia, akurat, resource ri
 | Latency 6 km | 13 ms | 10-30 ms |
 | Latency 25 km | 120-180 ms | 10-30 ms |
 | Latency 50 km | 95-160 ms | 10-30 ms |
-| Turn restriction | belum | ya |
+| Turn restriction | ya (edge-based A*) | ya |
 | Traffic / ETA real-time | tidak | tidak |
 
 Trade-off yang diterima: rute jauh (>60 km) melambat karena tanpa CH/MLD.
@@ -101,16 +101,43 @@ Temuan utama (601 pasang tetap, Java):
 `RESULTS.md` (semua angka + cara reproduksi), `EXPERIMENTS.md` (checklist
 kekurangan: baseline OSRM, ground truth Google, turn restriction, build nasional).
 
+## Turn restriction
+
+A* berjalan di atas **edge**, bukan node (`internal/graph/astar.go`): state =
+edge yang baru dilewati, sehingga pasangan (edge masuk, edge keluar) bisa
+diperiksa terhadap larangan belok.
+
+```bash
+bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
+#   restrictions: seen=4653 usable=4203 via_node=2808 via_way=1258 #                 ban=3911 only=155 skipped{...unresolved=67}
+bin/rid-restcheck -graph data/java.graph        # uji kepatuhan
+bin/rid-bench -graph data/java.graph -no-restrictions   # baseline A/B
+```
+
+Yang dimodelkan: `no_left_turn`, `no_right_turn`, `no_u_turn`,
+`no_straight_on`, `no_entry`, `no_exit` → daftar pasangan terlarang;
+`only_*` → daftar pasangan yang diizinkan (sisanya dilarang). Via-node dan
+via-way (termasuk rantai beberapa via-way) didukung.
+
+Yang **tidak** dimodelkan (dan dilaporkan di statistik): `restriction:conditional`
+(berbasis waktu), `except=` untuk moda selain mobil, dan via-way yang tidak bisa
+dirantai. Via-way dilarang secara konservatif (blokir masuk via-way dari arah
+yang dibatasi) — kalau ini membuat tujuan tak terjangkau, router otomatis ulang
+tanpa restriction dan menandai `"fallback": true` di respons.
+
+Biaya format: 8 B per pasangan. Jawa: ~4.1 k pasangan = **32 KB** (0,003% dari
+graf). Bandingkan tabel CSR penuh: 8 B x 46,7 jt edge = 374 MB.
+
 ## Format file
 
 Lihat doc comment `internal/graph/format.go`. Header 256 B + 14 section
-(Lat, Lon, CSR Off/To/Len/Time, geometri interior, grid, turn restriction).
+(Lat, Lon, CSR Off/To/Len/Time, geometri interior, grid, lalu section
+`Ban`/`Only` berisi pasangan edge terlarang/diizinkan). Versi format 2;
+file versi 1 tetap terbaca dengan restriction dimatikan.
 
 ## Roadmap (urutan dampak)
 
-1. **Turn restriction** (`type=restriction`) → edge-based graph. Ini yang
-   membedakan "akurat" dan "kadang ngawur" di Jakarta/Bandung.
-2. **Snap ke edge** (proyeksi ke ruas), bukan ke node terdekat.
+1. **Snap ke edge** (proyeksi ke ruas), bukan ke node terdekat.
 3. **Ferry** sudah ikut, tapi belum ada penalti waktu tunggu.
 4. **Build nasional**: 1.66 GB pbf, butuh ~10-16 GB RAM saat ekstrak.
    Sisanya runtime ringan karena mmap.

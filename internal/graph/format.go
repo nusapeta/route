@@ -32,7 +32,13 @@ import (
 
 const (
 	// Version of the file format.
-	Version = 1
+	//
+	// v2 adds sparse turn restriction sections (sTurnOff = banned
+	// (from,to) edge pairs, sTurnTo = allowed pairs for only_* rules) plus
+	// header counters. v1 files still load, with restrictions disabled.
+	Version = 2
+	// VersionMin is the oldest readable format version.
+	VersionMin = 1
 
 	magicLE     = 0x47444952 // "RIDG"
 	headerSize  = 256
@@ -85,8 +91,12 @@ type Graph struct {
 	CLon     []int32
 	GOff     []uint64
 	GNodes   []uint32
-	TurnOff  []uint64
-	TurnTo   []uint32
+	// Ban holds sorted packed (fromEdge<<32|toEdge) transitions forbidden by
+	// an OSM turn restriction. Only holds the permitted successor of a
+	// fromEdge for only_* rules (every other successor is forbidden).
+	Ban     []uint64
+	Only    []uint64
+	Skipped uint32 // restrictions dropped at build time
 }
 
 // Open memory maps a graph file.
@@ -115,9 +125,17 @@ func Open(path string) (*Graph, error) {
 		syscall.Munmap(data)
 		return nil, errors.New("graph: bad magic (not a routeid graph)")
 	}
-	if v := be.Uint32(data[4:]); v != Version {
+	if v := be.Uint32(data[4:]); v < VersionMin || v > Version {
 		syscall.Munmap(data)
-		return nil, fmt.Errorf("graph: version %d, want %d", v, Version)
+		return nil, fmt.Errorf("graph: version %d, supported %d..%d", v, VersionMin, Version)
+	}
+	ver := be.Uint32(data[4:])
+	banCount := uint32(0)
+	onlyCount := uint32(0)
+	if ver >= 2 {
+		banCount = be.Uint32(data[200:])
+		onlyCount = be.Uint32(data[204:])
+		g.Skipped = be.Uint32(data[208:])
 	}
 
 	g.NodeCount = be.Uint32(data[8:])
@@ -159,10 +177,12 @@ func Open(path string) (*Graph, error) {
 	if g.GridNLat > 0 && g.GridNLon > 0 {
 		cells = uint32(g.GridNLat * g.GridNLon)
 	}
-	g.GOff = u64s(data, off[sGOff], cells+1)
-	g.GNodes = u32s(data, off[sGNodes], g.GridCount)
-	g.TurnOff = u64s(data, off[sTurnOff], 0)
-	g.TurnTo = u32s(data, off[sTurnTo], 0)
+	if cells > 0 {
+		g.GOff = u64s(data, off[sGOff], cells+1)
+		g.GNodes = u32s(data, off[sGNodes], g.GridCount)
+	}
+	g.Ban = u64s(data, off[sTurnOff], banCount)
+	g.Only = u64s(data, off[sTurnTo], onlyCount)
 	return g, nil
 }
 
@@ -225,6 +245,8 @@ type Builder struct {
 	GridNLat, GridNLon int
 	GOff               []uint64
 	GNodes             []uint32
+	Ban, Only          []uint64
+	RestSkipped        uint32
 	MinLat, MinLon     float64
 	MaxLat, MaxLon     float64
 }
@@ -324,8 +346,8 @@ func (b *Builder) Write(path string) error {
 		4 * uint64(len(b.CLon)),
 		8 * uint64(len(b.GOff)),
 		4 * uint64(len(b.GNodes)),
-		8 * uint64(len(b.TurnOff)),
-		4 * uint64(len(b.TurnTo)),
+		8 * uint64(len(b.Ban)),
+		8 * uint64(len(b.Only)),
 	}
 	if cells == 0 {
 		sizes[sGOff] = 0
@@ -355,6 +377,9 @@ func (b *Builder) Write(path string) error {
 	be.PutUint32(hdr[20:], uint32(len(b.GNodes)))
 	be.PutUint32(hdr[24:], uint32(b.GridNLat))
 	be.PutUint32(hdr[28:], uint32(b.GridNLon))
+	be.PutUint32(hdr[200:], uint32(len(b.Ban)))
+	be.PutUint32(hdr[204:], uint32(len(b.Only)))
+	be.PutUint32(hdr[208:], b.RestSkipped)
 	c := uint64(32)
 	hdrF64(hdr, &c, b.GridLat0)
 	hdrF64(hdr, &c, b.GridLon0)
@@ -455,8 +480,8 @@ func (b *Builder) Write(path string) error {
 		func() error { return writeI32s(b.CLon) },
 		func() error { return writeU64s(b.GOff) },
 		func() error { return writeU32s(b.GNodes) },
-		func() error { return writeU64s(b.TurnOff) },
-		func() error { return writeU32s(b.TurnTo) },
+		func() error { return writeU64s(b.Ban) },
+		func() error { return writeU64s(b.Only) },
 	}
 	for i, step := range steps {
 		if err := pad(secOff[i]); err != nil {

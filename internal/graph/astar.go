@@ -11,6 +11,8 @@ type Route struct {
 	DistanceM  uint32
 	TimeDs     uint32
 	Expansions int
+	// Fallback is set when restrictions were dropped to find a path.
+	Fallback bool
 }
 
 // ErrNoRoute is returned when the destination is unreachable.
@@ -30,9 +32,10 @@ const (
 
 // Router runs weighted A* queries over a Graph with a bounded workspace pool.
 type Router struct {
-	g    *Graph
-	pool chan *workspace
-	eps  float32 // heuristic weight: 1.0 = optimal, 1.25 = ~4x faster
+	g      *Graph
+	pool   chan *workspace
+	eps    float32 // heuristic weight: 1.0 = optimal, 1.25 = ~4x faster
+	strict bool    // enforce turn restrictions
 }
 
 // NewRouter creates a router; concurrency bounds peak memory.
@@ -44,7 +47,7 @@ func NewRouter(g *Graph, concurrency int) *Router {
 	for slots < g.NodeCount && slots < 1<<20 {
 		slots <<= 1
 	}
-	r := &Router{g: g, pool: make(chan *workspace, concurrency), eps: 1.5}
+	r := &Router{g: g, pool: make(chan *workspace, concurrency), eps: 1.5, strict: true}
 	for i := 0; i < concurrency; i++ {
 		r.pool <- newWorkspace(slots)
 	}
@@ -53,6 +56,12 @@ func NewRouter(g *Graph, concurrency int) *Router {
 
 // Epsilon reports the heuristic weight.
 func (r *Router) Epsilon() float32 { return r.eps }
+
+// Strict reports whether turn restrictions are enforced.
+func (r *Router) Strict() bool { return r.strict }
+
+// SetStrict toggles turn restriction enforcement (used for A/B measurement).
+func (r *Router) SetStrict(v bool) { r.strict = v }
 
 // SetEpsilon adjusts the heuristic weight (1.0 = optimal but slow).
 func (r *Router) SetEpsilon(eps float32) {
@@ -163,8 +172,20 @@ type item struct {
 
 type itemHeap []item
 
+// invalidEdge marks "no predecessor" in the workspace.
+const invalidEdge = ^uint32(0)
+
 // Route finds the fastest path between two node indexes.
+//
+// The search state is the edge just traversed, not the node. That is what
+// makes turn restrictions expressible: the transition (arrival edge,
+// departure edge) is exactly the pair an OSM restriction forbids.
 func (r *Router) Route(src, dst uint32) (Route, error) {
+	return r.RouteStrict(src, dst, r.strict)
+}
+
+// RouteStrict overrides the router's restriction policy for a single query.
+func (r *Router) RouteStrict(src, dst uint32, strict bool) (Route, error) {
 	g := r.g
 	if src >= g.NodeCount || dst >= g.NodeCount {
 		return Route{}, ErrNoRoute
@@ -172,12 +193,33 @@ func (r *Router) Route(src, dst uint32) (Route, error) {
 	if src == dst {
 		return Route{Nodes: []uint32{src}}, nil
 	}
+	res, err := r.search(src, dst, strict)
+	if err != nil && strict && (len(g.Ban) > 0 || len(g.Only) > 0) {
+		// A restriction may have made the destination unreachable (bad OSM
+		// data, or our conservative via-way handling). Retry unrestricted and
+		// flag the answer so callers can count it.
+		if res2, err2 := r.search(src, dst, false); err2 == nil {
+			res2.Fallback = true
+			return res2, nil
+		}
+	}
+	return res, err
+}
+
+func (r *Router) search(src, dst uint32, restrict bool) (Route, error) {
+	g := r.g
 	w := <-r.pool
 	defer func() { r.pool <- w }()
 	w.reset()
 
-	w.set(src, 0, src)
-	w.heap = append(w.heap, item{src, r.heur(src, dst)})
+	for e := g.Off[src]; e < g.Off[src+1]; e++ {
+		ee := uint32(e)
+		g0 := float32(g.Time[ee])
+		if !w.set(ee, g0, invalidEdge) {
+			return Route{}, ErrTooFar
+		}
+		heapPush(&w.heap, item{ee, g0 + r.heurEdge(ee, dst)})
+	}
 
 	var expanded int
 	for len(w.heap) > 0 {
@@ -186,30 +228,41 @@ func (r *Router) Route(src, dst uint32) (Route, error) {
 		if !ok {
 			continue
 		}
-		if cur.node == dst {
-			res, err := r.reconstruct(w, src, dst)
+		if g.To[cur.node] == dst {
+			res, err := r.reconstruct(w, src, cur.node)
 			res.Expansions = expanded
 			return res, err
 		}
-		if cur.f > gCur+r.heur(cur.node, dst)+0.5 {
-			continue // stale
+		if cur.f > gCur+r.heurEdge(cur.node, dst)+0.5 {
+			continue // stale entry
 		}
 		expanded++
 		if expanded > maxExpansions {
 			return Route{}, ErrTooFar
 		}
-		for e := g.Off[cur.node]; e < g.Off[cur.node+1]; e++ {
-			to := g.To[e]
-			ng := gCur + float32(g.Time[e])
-			if old, _, seen := w.get(to); !seen || ng < old {
-				if !w.set(to, ng, cur.node) {
-					return Route{}, ErrTooFar
-				}
-				heapPush(&w.heap, item{to, ng + r.heur(to, dst)})
+		head := g.Off[g.To[cur.node]]
+		headEnd := g.Off[g.To[cur.node]+1]
+		for e := head; e < headEnd; e++ {
+			ee := uint32(e)
+			if restrict && g.Forbidden(cur.node, ee) {
+				continue
 			}
+			ng := gCur + float32(g.Time[ee])
+			if old, _, seen := w.get(ee); seen && ng >= old {
+				continue
+			}
+			if !w.set(ee, ng, cur.node) {
+				return Route{}, ErrTooFar
+			}
+			heapPush(&w.heap, item{ee, ng + r.heurEdge(ee, dst)})
 		}
 	}
 	return Route{}, ErrNoRoute
+}
+
+// heurEdge estimates the remaining cost from the head of edge e to b.
+func (r *Router) heurEdge(e, b uint32) float32 {
+	return r.heur(r.g.To[e], b)
 }
 
 func (r *Router) heur(a, b uint32) float32 {
@@ -219,36 +272,30 @@ func (r *Router) heur(a, b uint32) float32 {
 	return r.eps * float32(d/maxSpeedMps*10) // deciseconds
 }
 
-func (r *Router) reconstruct(w *workspace, src, dst uint32) (Route, error) {
-	var rev []uint32
-	n := dst
+// reconstruct walks the came-from chain of edges and turns it into a node
+// sequence src..dst plus aggregated length and time.
+func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
+	var edges []uint32
+	e := goal
 	for {
-		rev = append(rev, n)
-		if n == src {
+		edges = append(edges, e)
+		_, came, ok := w.get(e)
+		if !ok || came == invalidEdge {
 			break
 		}
-		_, came, ok := w.get(n)
-		if !ok || came == n {
-			break
-		}
-		n = came
-		if len(rev) > 2_000_000 {
+		e = came
+		if len(edges) > 2_000_000 {
 			return Route{}, ErrNoRoute
 		}
 	}
-	nodes := make([]uint32, len(rev))
-	for i := range rev {
-		nodes[len(rev)-1-i] = rev[i]
-	}
+	nodes := make([]uint32, 0, len(edges)+1)
+	nodes = append(nodes, src)
 	var dist, tm uint32
-	for i := 0; i+1 < len(nodes); i++ {
-		for e := r.g.Off[nodes[i]]; e < r.g.Off[nodes[i]+1]; e++ {
-			if r.g.To[e] == nodes[i+1] {
-				dist += r.g.Len[e]
-				tm += r.g.Time[e]
-				break
-			}
-		}
+	for i := len(edges) - 1; i >= 0; i-- {
+		x := edges[i]
+		nodes = append(nodes, r.g.To[x])
+		dist += r.g.Len[x]
+		tm += r.g.Time[x]
 	}
 	return Route{Nodes: nodes, DistanceM: dist, TimeDs: tm}, nil
 }

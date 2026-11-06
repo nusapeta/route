@@ -96,3 +96,54 @@ adalah high-water mark yang bisa direklaim kernel di bawah tekanan memori.
 
 Seleksi region dilakukan dengan snap terdekat (bukan bbox saja, karena extract
 per pulau saling tumpang tindih).
+
+## 7. Turn restriction (v2)
+
+Ekstraksi relasi `type=restriction` dari `java-latest.osm.pbf`:
+
+| kategori | jumlah |
+|---|---|
+| relasi `type=restriction` | 4.653 |
+| usable (from+to way ada di profil mobil) | 4.203 (90,3%) |
+| via-node (berhasil di-resolve) | 2.808 |
+| via-way (berhasil di-resolve) | 1.258 |
+| pasangan terlarang (`no_*`) | 3.794 |
+| aturan izin (`only_*`) | 155 |
+| gagal: no_in / no_out / no_node | 11 / 38 / 1 |
+| gagal: rantai via-way / `only_*` + via-way | 29 |
+| tidak dimodelkan: conditional / except / bad_type / not_car | 2 / 16 / 184 / 227 |
+
+Ukuran tambahan pada graf: 3.949 pasangan × 8 B = **31,6 KB** (0,003% dari
+1.019 MB). Alternatif CSR penuh akan butuh 8 B × 46,7 jt edge = 374 MB.
+
+Kepatuhan (`bin/rid-restcheck -graph data/java.graph`, seluruh 3.564 pasangan
+yang bisa dirutekan, mesin yang sama):
+
+| | pelanggaran | fallback | error | mean latensi |
+|---|---|---|---|---|
+| strict (default) | **0 (0,00%)** | 113 (3,17%) | 0 | 81,2 ms |
+| longgar (tanpa restriction) | **3.414 (95,79%)** | 0 | 0 | 2 µs |
+
+`non_vacuous = 3.414 / 3.564 = 95,79%`: pada 95,79% kasus, rute terpendek
+memang **ingin** mengambil belokan terlarang — jadi uji ini tidak vakum.
+Fallback = kasus di mana larangan (umumnya via-way konservatif) membuat tujuan
+tak terjangkau; router mengulang tanpa restriction dan menandai
+`"fallback": true`.
+
+Biaya latensi (Java, ε=1.5, 60 pasang per bucket, strict vs longgar):
+
+| bucket | strict p50 | longgar p50 | strict p95 | longgar p95 |
+|---|---|---|---|---|
+| 0–5 km | 4,2 ms | 3,9 ms | 21,9 ms | 59,6 ms |
+| 5–15 km | 45,7 ms | 28,5 ms | 299,1 ms | 302,2 ms |
+| 15–30 km | 165,0 ms | 151,9 ms | 882,7 ms | 807,8 ms |
+| 30–50 km | 792,7 ms | 712,6 ms | 2.494,7 ms | 2.246,6 ms |
+
+Ekspansi A* praktis sama (±0,1%): pengecekan larangan hanya menambah satu
+binary search 13 langkah pada transisi yang benar-benar dibatasi.
+
+```bash
+./bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
+./bin/rid-restcheck -graph data/java.graph -json paper/restrcheck-java.json
+./bin/rid-bench -graph data/java.graph -no-restrictions   # baseline A/B
+```

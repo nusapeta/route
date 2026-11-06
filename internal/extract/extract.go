@@ -26,8 +26,12 @@ type Options struct {
 	Workers  int     // pbf decode workers
 	// Order selects the node numbering: "hilbert" (default, page-local) or
 	// "osm" (keep the id order; used for A/B measurements).
-	Order    string
-	Progress func(phase string, n int64)
+	Order string
+	// NoRestrictions disables parsing of OSM turn restriction relations.
+	NoRestrictions bool
+	// OnRestrictions receives the restriction parsing summary, if set.
+	OnRestrictions func(RestrictionStats)
+	Progress       func(phase string, n int64)
 }
 
 // defaultSpeedKMH is the fallback speed per highway class, tuned for Indonesia
@@ -79,7 +83,7 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	defer f.Close()
 
 	// pass 1: ways
-	flat, wayOff, speeds, dirs, err := readWays(ctx, f, opt.Workers, progress)
+	flat, wayOff, speeds, dirs, wayIDs, err := readWays(ctx, f, opt.Workers, progress)
 	if err != nil {
 		return err
 	}
@@ -104,12 +108,14 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	}
 
 	// reorder nodes along a Hilbert curve so routing stays page-local
+	var perm []uint32
 	if opt.Order != "osm" {
-		perm := spatialOrder(lat, lon, valid)
+		perm = spatialOrder(lat, lon, valid)
 		lat, lon = applyPerm(perm, lat, lon)
 		for i := range flat {
 			flat[i] = int64(perm[flat[i]])
 		}
+		valid = applyPermBools(perm, valid)
 	}
 
 	n := len(ids)
@@ -190,6 +196,29 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	b.BuildGrid(opt.GridStep)
 	progress("grid cells", int64(b.GridNLat*b.GridNLon))
 
+	// turn restrictions: needs the finished CSR plus the way->node mapping
+	if !opt.NoRestrictions {
+		rv := &restView{
+			wayIDs:   wayIDs,
+			wayIndex: buildWayIndex(wayIDs),
+			flat:     flat,
+			wayOff:   wayOff,
+			off:      off,
+			to:       b.To,
+			ids:      ids,
+			perm:     perm,
+			nNodes:   uint32(n),
+		}
+		rs, err := buildRestrictions(ctx, f, opt.Workers, progress, rv)
+		if err != nil {
+			return err
+		}
+		b.Ban, b.Only, b.RestSkipped = rs.ban, rs.only, rs.stats.Skipped()
+		if opt.OnRestrictions != nil {
+			opt.OnRestrictions(rs.stats)
+		}
+	}
+
 	if err := b.Write(outPath); err != nil {
 		return err
 	}
@@ -201,7 +230,7 @@ type wayRec struct {
 	dir   int8    // 0 both, 1 forward only, -1 backward only
 }
 
-func readWays(ctx context.Context, f *os.File, workers int, progress func(string, int64)) (flat []int64, wayOff []int, speeds []float64, dirs []int8, err error) {
+func readWays(ctx context.Context, f *os.File, workers int, progress func(string, int64)) (flat []int64, wayOff []int, speeds []float64, dirs []int8, wayIDs []int64, err error) {
 	sc := osmpbf.New(ctx, f, workers)
 	defer sc.Close()
 	sc.SkipNodes = true
@@ -211,6 +240,7 @@ func readWays(ctx context.Context, f *os.File, workers int, progress func(string
 	flat = make([]int64, 0, 1<<22)
 	speeds = make([]float64, 0, 1<<20)
 	dirs = make([]int8, 0, 1<<20)
+	wayIDs = make([]int64, 0, 1<<20)
 
 	var scanned int64
 	for sc.Scan() {
@@ -232,12 +262,13 @@ func readWays(ctx context.Context, f *os.File, workers int, progress func(string
 		wayOff = append(wayOff, len(flat))
 		speeds = append(speeds, speed)
 		dirs = append(dirs, dir)
+		wayIDs = append(wayIDs, int64(w.ID))
 	}
 	if err := sc.Err(); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	progress("ways scanned", scanned)
-	return flat, wayOff, speeds, dirs, nil
+	return flat, wayOff, speeds, dirs, wayIDs, nil
 }
 
 func readNodes(ctx context.Context, f *os.File, ids []int64, workers int, progress func(string, int64)) (lat, lon []int32, valid []bool, err error) {

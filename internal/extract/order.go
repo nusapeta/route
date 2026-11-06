@@ -93,3 +93,13 @@ func applyPerm(perm []uint32, lat, lon []int32) ([]int32, []int32) {
 	}
 	return nLat, nLon
 }
+
+// applyPermBools reorders a per-node flag slice with the same permutation used
+// for the coordinates, so indexes stay meaningful after Hilbert ordering.
+func applyPermBools(perm []uint32, in []bool) []bool {
+	out := make([]bool, len(in))
+	for i := range in {
+		out[perm[i]] = in[i]
+	}
+	return out
+}

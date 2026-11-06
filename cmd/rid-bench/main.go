@@ -31,6 +31,7 @@ func main() {
 	csvOut := flag.String("csv", "", "write raw samples to CSV")
 	pairsIn := flag.String("pairs", "", "route fixed pairs from CSV (from_lat,from_lon,to_lat,to_lon)")
 	pairsOut := flag.String("emit-pairs", "", "write the sampled coordinate pairs and exit")
+	noStrict := flag.Bool("no-restrictions", false, "ignore turn restrictions (baseline)")
 	flag.Parse()
 
 	g, err := graph.Open(*graphPath)
@@ -39,6 +40,9 @@ func main() {
 	}
 	defer g.Close()
 	r := graph.NewRouter(g, 1)
+	if *noStrict {
+		r.SetStrict(false)
+	}
 	r.SetEpsilon(float32(*eps))
 
 	buckets := []struct {

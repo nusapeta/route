@@ -18,6 +18,7 @@ func main() {
 	grid := flag.Float64("grid", 0.02, "snap grid cell size in degrees")
 	workers := flag.Int("workers", runtime.GOMAXPROCS(0), "pbf decoder workers")
 	order := flag.String("order", "hilbert", "node numbering: hilbert|osm")
+	noRest := flag.Bool("no-restrictions", false, "skip OSM turn restriction relations")
 	flag.Parse()
 
 	if *pbf == "" {
@@ -27,9 +28,13 @@ func main() {
 
 	start := time.Now()
 	err := extract.Build(context.Background(), *pbf, *out, extract.Options{
-		GridStep: *grid,
-		Workers:  *workers,
-		Order:    *order,
+		GridStep:       *grid,
+		Workers:        *workers,
+		Order:          *order,
+		NoRestrictions: *noRest,
+		OnRestrictions: func(s extract.RestrictionStats) {
+			log.Printf("%s", s.String())
+		},
 		Progress: func(phase string, n int64) {
 			log.Printf("%-14s %d  (%s)", phase, n, time.Since(start).Round(time.Second))
 		},

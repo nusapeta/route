@@ -69,7 +69,10 @@ speed-up technique. Our contributions are:
   \item measurements on real Indonesian extracts (Java, Sumatra) covering build
         cost, memory behaviour, latency percentiles and a distance-bucket
         breakdown;
-  \item an explicit list of what is \emph{not} solved---turn restrictions,
+  \item an edge-based search that enforces OSM turn restrictions with a
+        32\,KB sparse transition table, evaluated with a compliance harness on
+        all 3.5\,k restrictions of Java;
+  \item an explicit list of what is \emph{not} solved---edge snapping,
         long-route latency, traffic---so that the result is not misread as an
         OSRM replacement.
 \end{itemize}
@@ -150,8 +153,17 @@ thrashing. We keep the OSM-id order behind a flag
 (\texttt{-order osm}) for A/B measurement.
 
 \subsection{Search}
-We run A* with an admissible geometric bound: $h(n) = \varepsilon \cdot
-\|n,t\| / v_{\max}$, with $v_{\max}=130$\,km/h and an inflation factor
+The search state is the \emph{edge} just traversed, not the node. This costs
+nothing in the data layout---successors of state $e$ are the CSR range of its
+head node---and it is what makes turn restrictions expressible: an OSM
+restriction constrains the pair (arrival edge, departure edge). Two sparse
+6\,B/8\,B tables are kept: a sorted array of packed forbidden pairs and a sorted
+array of permitted pairs for \texttt{only\_*} rules, so a lookup is one binary
+search over about 4\,k entries and a route through unrestricted territory pays a
+single key comparison per transition.
+
+We run A* with an admissible geometric bound: $h(e) = \varepsilon \cdot
+\|\mathrm{head}(e),t\| / v_{\max}$, with $v_{\max}=130$\,km/h and an inflation factor
 $\varepsilon \ge 1$. Costs are travel times, so the returned route is the fastest
 path under static speeds, which matches how hosted APIs choose routes (important:
 minimising distance instead would produce visibly different polylines). The open
@@ -307,6 +319,21 @@ Medan (13\,km) in 53\,ms, Palembang (10.9\,km) in 56\,ms, Bandar Lampung (3.6\,k
 in 9\,ms and Jakarta (56.5\,km) in 103\,ms. Cross-strait queries (Merak--Bakauheni,
 Bali--Lombok) are rejected: the topology trades them for build feasibility.
 
+\subsection{Turn-restriction compliance}
+The Java extract contains 4{,}653 \texttt{type=restriction} relations; 4{,}203
+survive the car profile, resolving to 3{,}794 forbidden transitions and 155
+permit-lists (31.6\,KB, i.e. 0.003\,\% of the 1{,}019\,MB graph; a dense CSR
+over edges would need 374\,MB). We route the tail of the incoming edge to the
+head of the outgoing edge for every restriction and check whether the returned
+path still contains the forbidden transition. Without enforcement 95.8\,\% of
+the 3{,}564 routable restrictions are violated, which shows the harness is not
+vacuous (the shortest path really wants that turn); with enforcement the
+violation count is \textbf{0}. For 3.2\,\% of cases enforcing the restriction
+makes the pair unreachable, mostly because a via-way restriction is modelled
+conservatively; the server then retries unrestricted and flags the response
+(\texttt{fallback}). Median latency changes by less than a millisecond per
+bucket and expansion counts by 0.1\,\%.
+
 \subsection{Reference points and honesty about baselines}
 We did not benchmark OSRM on this machine: the container runtime available to us
 was not usable, so published/typical figures (a few GB of graph, roughly
@@ -323,12 +350,11 @@ measured in a minute per island. If the product needs accurate ETAs in congestio
 or worldwide coverage, hosted APIs remain better value.
 
 \paragraph{What dominates accuracy now.}
-Turn restrictions. The current graph is node-based, so a \texttt{type=restriction}
-relation is ignored; in Jakarta and Bandung that produces routes a local driver
-would not take. The fix is an edge-expanded graph plus a banned-transition table
-(the format already reserves sections for it). The second gap is snapping to edges
-rather than nodes, which can be off by up to a few hundred metres where way nodes
-are sparse.
+Snapping. Points are attached to the nearest node, so the first and last few
+hundred metres can be off where way nodes are sparse; projecting onto segments is
+the next fix and is cheap relative to the graph work. Time-dependent
+(\texttt{restriction:conditional}) and vehicle-class restrictions are counted but
+not applied, and via-way restrictions are enforced conservatively.
 
 \paragraph{Long routes.}
 Without a hierarchy the search degrades super-linearly: at 100\,km road distance

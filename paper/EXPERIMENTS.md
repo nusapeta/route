@@ -57,13 +57,19 @@ Rencana:
 Target yang bisa dijanjikan di paper: **median selisih jarak <5 %, p95 <12 %**.
 Kalau tidak tercapai, perbaiki dulu (E3/E4) sebelum submit.
 
-## E3. Turn restriction (gap akurasi terbesar)
+## E3. Turn restriction — SELESAI (kode + pengukuran)
 
-Format sudah menyediakan section `TurnOff`/`TurnTo` tapi kosong. Pekerjaan:
-1. Ekstrak relasi `type=restriction` (+ `restriction:conditional` diabaikan).
-2. Bangun edge-based graph (state = directed edge); atau tetap node-based tapi
-   simpan banned transition (from_edge, to_edge) → butuh edge id di path.
-3. Uji: minimal 20 restriksi manual di Jakarta/Bandung, plus delta metrik E2.
+Implementasi: state A* = edge (bukan node), tabel sparse pasangan terlarang di
+format v2 (`Ban`) dan pasangan yang diizinkan untuk `only_*` (`Only`).
+Ekstraksi: `internal/extract/restriction.go`. Uji kepatuhan: `cmd/rid-restcheck`.
+
+Hasil Jawa (lihat `RESULTS.md` §7): 4.653 relasi → 4.203 usable, 3.794 pasangan
+terlarang + 155 aturan `only_*` (32 KB). Kepatuhan: 0 pelanggaran dari 3.564
+sampel (dengan restriction) vs 95,79% pelanggaran tanpa restriction.
+Sisa 3,17% sampel jatuh ke fallback tanpa restriction (data OSM/rantai via-way).
+
+Sisa pekerjaan untuk versi jurnal: `restriction:conditional` (berbasis waktu)
+dan via-way yang dilarang konservatif (butuh state machine / edge splitting).
 
 ## E4. Snap ke edge, bukan node
 

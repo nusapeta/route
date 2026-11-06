@@ -71,7 +71,7 @@ func main() {
 		mnLat, mnLon, mxLat, mxLon := g.Bounds()
 		const pad = 0.05
 		rg := &region{
-			name: filepath.Base(p), g: g, r: graph.NewRouter(g, *conc),
+			name: strings.TrimSuffix(filepath.Base(p), ".graph"), g: g, r: graph.NewRouter(g, *conc),
 			minLat: mnLat - pad, maxLat: mxLat + pad,
 			minLon: mnLon - pad, maxLon: mxLon + pad,
 		}
@@ -148,13 +148,18 @@ func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		MinLon float64 `json:"min_lon"`
 		MaxLat float64 `json:"max_lat"`
 		MaxLon float64 `json:"max_lon"`
+		Bans   int     `json:"bans"`
+		Only   int     `json:"only_rules"`
+		Skip   uint32  `json:"restrictions_skipped"`
 	}
 	out := struct {
 		OK      bool   `json:"ok"`
 		Regions []info `json:"regions"`
 	}{OK: true}
 	for _, rg := range s.regions {
-		out.Regions = append(out.Regions, info{rg.name, rg.g.NodeCount, rg.g.EdgeCount, rg.minLat, rg.minLon, rg.maxLat, rg.maxLon})
+		rs := rg.g.Restrictions()
+		out.Regions = append(out.Regions, info{rg.name, rg.g.NodeCount, rg.g.EdgeCount, rg.minLat, rg.minLon, rg.maxLat, rg.maxLon,
+			rs.Ban, rs.Only, rs.Skipped})
 	}
 	writeJSON(w, out)
 }
@@ -184,7 +189,8 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	rg := rgF
-	res, err := rg.r.Route(src, dst)
+	strict := q.Get("restrictions") != "0"
+	res, err := rg.r.RouteStrict(src, dst, strict)
 	if err != nil {
 		httpErr(w, 422, err.Error())
 		return
@@ -210,6 +216,9 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		"region":      rg.name,
 		"snap_from_m": math.Round(d1),
 		"snap_to_m":   math.Round(d2),
+	}
+	if res.Fallback {
+		body["fallback"] = true
 	}
 	if q.Get("format") == "polyline" {
 		body["polyline"] = EncodePolyline(pts, 5)
