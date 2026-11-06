@@ -137,6 +137,14 @@ mengetahui apakah perubahannya benar.
 | Ferry connector melanggar aturan "satu region per rute" | kompleksitas | batasi hanya pasangan selat yang terdefinisi |
 | Terlalu banyak fitur -> keluar dari identitas ringan | kehilangan pembeda | setiap fitur diuji terhadap tabel budget di atas |
 
+## Catatan yang belum jadi milestone
+
+- **Satu graph nasional** (1,66 GB pbf, ~5 GB RAM) hanya masuk akal dengan
+  streaming extractor yang menulis langsung ke file; multi-region per pulau
+  sudah memberi hasil yang sama dengan memori jauh lebih kecil.
+- **Hierarki dua tingkat** (highway/core) baru dipertimbangkan jika ada kebutuhan
+  rute >60 km atau <20 ms; CH/MLD penuh tetap ditolak.
+
 ## Cara mengukur (jangan improvisasi)
 
 - Throughput & latensi: `scripts/loadtest.py` (kelas rute 7/15/42/148 km).

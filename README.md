@@ -436,18 +436,6 @@ Lihat doc comment `internal/graph/format.go`. Header 256 B + 14 section
 `Ban`/`Only` berisi pasangan edge terlarang/diizinkan). Versi format 2;
 file versi 1 tetap terbaca dengan restriction dimatikan.
 
-## Roadmap (ringkas)
-
-Rencana lengkap: [`docs/ROADMAP.md`](docs/ROADMAP.md) (budget + milestone) dan
-[`docs/BACKLOG.md`](docs/BACKLOG.md) (masalah, rencana, kriteria lulus).
-Ringkasnya: M1 metadata + golden test, M2 snap ke ruas, M3 ALT/bidirectional untuk
-2x densitas, M4 pengamanan produksi, M5 profil motor + semua pulau + ferry,
-M6 baseline OSRM dan ground truth.
-
-Sengaja ditolak: traffic real-time, cakupan dunia, CH/MLD penuh, turn-by-turn
-instruction. Satu graph nasional (1,66 GB pbf, ~5 GB RAM) tetap mungkin lewat
-streaming extractor, tapi bukan prioritas dibanding multi-region per pulau.
-
 ## Catatan data
 
 ## Lisensi
