@@ -216,6 +216,10 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Route-Region", rg.name)
 	w.Header().Set("X-Route-Expansions", strconv.Itoa(res.Expansions))
 	body := map[string]any{
+		// echo of what the server actually parsed, so clients can prove the
+		// round trip (wrong lat/lng order shows up here immediately)
+		"from":        []float64{fLat, fLon},
+		"to":          []float64{tLat, tLon},
 		"distance_m":  res.DistanceM,
 		"duration_s":  float64(res.TimeDs) / 10,
 		"region":      rg.name,
