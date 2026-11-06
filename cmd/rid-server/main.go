@@ -2,6 +2,7 @@ package main
 
 import (
 	"compress/gzip"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -240,7 +241,12 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 
 	switch p.format {
 	case "polyline":
-		body["polyline"] = EncodePolyline(pts, 5)
+		enc := EncodePolyline(pts, 5)
+		body["polyline"] = enc
+		// The Google polyline charset includes '\\' (backslash). In JSON that
+		// character is displayed as two, so copy-pasting it from a JSON viewer
+		// breaks naive decoders. Base64 has no such ambiguity.
+		body["polyline_b64"] = base64.StdEncoding.EncodeToString([]byte(enc))
 	case "geojson":
 		// GeoJSON is safe to copy-paste: no backslash escapes, so it drops
 		// straight into geojson.io without tripping a polyline decoder.

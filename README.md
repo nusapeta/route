@@ -172,6 +172,18 @@ curl -s "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,11
 Kalau file picker tidak menampilkan `/tmp`, tulis GeoJSON ke folder project
 (`scripts/route2geojson.py r.json > r.geojson`) lalu buka dari situ.
 
+**`polyline_b64`.** Karena charset polyline memuat `\`, respons
+`format=polyline` juga menyertakan `polyline_b64` (base64 dari string yang
+sama). Versi ini bebas backslash, jadi aman di-copy-paste. Decoder lokal yang
+menerima JSON, base64, maupun polyline mentah (termasuk yang backslash-nya
+sudah dobel):
+
+```bash
+curl -s ".../route?from=..&to=..&format=polyline" > rp.json
+scripts/polyline-decode.py rp.json                 # ringkasan + cek points_n
+scripts/polyline-decode.py rp.json > r.geojson     # siap tempel ke geojson.io
+```
+
 **Peringatan `polyline`:** encoding polyline Google memakai seluruh rentang
 karakter printable, termasuk `\` (backslash). Di JSON karakter itu tampil
 sebagai `\\`, dan banyak decoder (termasuk situs decoder online) berhenti

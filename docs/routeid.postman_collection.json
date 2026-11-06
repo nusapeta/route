@@ -19,7 +19,7 @@
         "method": "GET",
         "header": [],
         "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593",
-        "description": "Array [lat,lng]. Pakai ini kalau mau melihat koordinat."
+        "description": "Array [lat,lng]. Paling aman untuk dilihat manusia."
       }
     },
     {
@@ -28,20 +28,29 @@
         "method": "GET",
         "header": [],
         "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=geojson",
-        "description": "Respons berisi field geojson: FeatureCollection. Copy isi field itu ke geojson.io. Tidak ada backslash, jadi aman dari decoder yang ngaco."
+        "description": "Field geojson berisi FeatureCollection. Copy isi field itu ke geojson.io. Nol backslash."
       }
     },
     {
-      "name": "4. route polyline (HATI-HATI saat copy)",
+      "name": "4. route polyline",
       "request": {
         "method": "GET",
         "header": [],
         "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline",
-        "description": "String ter-encode. Tampilan JSON menulis backslash sebagai dua karakter; copy-paste mentah ke decoder online akan memotong garis. Pakai format geojson untuk cek visual."
+        "description": "Format Google, kompatibel decoder mana pun. Respons juga memuat polyline_b64."
       }
     },
     {
-      "name": "5. route POST objek",
+      "name": "5. route polyline base64 (aman copy)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline&polyline_enc=b64",
+        "description": "polyline_b64 = base64 dari string polyline. Tanpa backslash, jadi tidak bisa rusak saat copy-paste."
+      }
+    },
+    {
+      "name": "6. route POST objek",
       "request": {
         "method": "POST",
         "header": [
@@ -63,7 +72,7 @@
       }
     },
     {
-      "name": "6. route POST string",
+      "name": "7. route POST string",
       "request": {
         "method": "POST",
         "header": [
@@ -85,7 +94,7 @@
       }
     },
     {
-      "name": "7. restrictions=0 (pembanding)",
+      "name": "8. restrictions=0 (pembanding)",
       "request": {
         "method": "GET",
         "header": [],
@@ -93,7 +102,7 @@
       }
     },
     {
-      "name": "8. error 422 beda region",
+      "name": "9. error 422 beda region",
       "request": {
         "method": "GET",
         "header": [],

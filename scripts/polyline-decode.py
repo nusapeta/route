@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Decode polyline routeid dengan aman, apa pun bentuk inputnya.
+
+Menerima (auto-deteksi):
+  1. file respons JSON /route  -> pakai polyline_b64, polyline, atau points
+  2. string base64             -> isi field polyline_b64
+  3. string polyline mentah    -> tempelan dari JSON yang backslash-nya dobel
+                                  ('\\\\' dikembalikan jadi '\\' otomatis)
+  stdin juga bisa (pakai '-' sebagai path)
+
+Pakai:
+    scripts/polyline-decode.py r.json                 # ringkasan
+    scripts/polyline-decode.py r.json > r.geojson     # GeoJSON
+    scripts/polyline-decode.py --points r.json        # cetak semua titik
+
+Tes cepat: jumlah titik harus sama dengan points_n dari server.
+"""
+import base64
+import binascii
+import json
+import sys
+
+
+def decode_polyline(s):
+    pts, i, lat, lng = [], 0, 0, 0
+    while i < len(s):
+        vals = []
+        for _ in range(2):
+            shift = result = 0
+            while True:
+                if i >= len(s):
+                    raise ValueError(
+                        f"polyline terpotong di karakter {i}/{len(s)} — "
+                        "kemungkinan backslash ter-escape saat copy-paste"
+                    )
+                b = ord(s[i]) - 63
+                i += 1
+                result |= (b & 0x1F) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            vals.append(~(result >> 1) if result & 1 else result >> 1)
+        lat += vals[0]
+        lng += vals[1]
+        pts.append([lat / 1e5, lng / 1e5])
+    return pts
+
+
+def from_json(d):
+    note = "json:points"
+    if d.get("polyline_b64"):
+        return decode_polyline(base64.b64decode(d["polyline_b64"]).decode()), "json:polyline_b64"
+    if d.get("polyline"):
+        return decode_polyline(d["polyline"]), "json:polyline"
+    if d.get("points"):
+        return [list(p) for p in d["points"]], note
+    raise SystemExit("respons tidak punya points / polyline / polyline_b64")
+
+
+def main():
+    args = [a for a in sys.argv[1:] if a != "--points"]
+    show_points = "--points" in sys.argv
+    src = args[0] if args else "-"
+    raw = sys.stdin.read() if src == "-" else open(src).read()
+    raw = raw.strip()
+
+    if raw.startswith("{"):
+        d = json.loads(raw)
+        if "error" in d:
+            raise SystemExit(f"server error: {d['error']}")
+        pts, how = from_json(d)
+        meta = d
+    else:
+        meta, pts, how = {}, None, None
+        # coba base64 dulu (karakter base64 jauh lebih sempit dari polyline)
+        try:
+            dec = base64.b64decode(raw, validate=True).decode()
+            if dec and all(ord(c) >= 63 for c in dec):
+                pts, how = decode_polyline(dec), "base64"
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            pass
+        if pts is None:
+            if "\\\\" in raw:
+                print(f"catatan: {raw.count(chr(92)*2)} backslash dobel diperbaiki", file=sys.stderr)
+                raw = raw.replace("\\\\", "\\")
+            pts, how = decode_polyline(raw), "polyline mentah"
+
+    lats = [p[0] for p in pts]
+    lons = [p[1] for p in pts]
+    print(f"sumber     : {how}", file=sys.stderr)
+    print(f"titik      : {len(pts)}", file=sys.stderr)
+    if meta.get("points_n") is not None:
+        cocok = "COCOK" if len(pts) == meta["points_n"] else "TIDAK COCOK — string rusak"
+        print(f"points_n   : {meta['points_n']} ({cocok})", file=sys.stderr)
+    print(f"bbox       : [{min(lats):.6f}, {min(lons):.6f}, {max(lats):.6f}, {max(lons):.6f}]", file=sys.stderr)
+    print(f"awal/akhir : {pts[0]} -> {pts[-1]}", file=sys.stderr)
+    if meta.get("to"):
+        print(f"echo to    : {meta['to']}", file=sys.stderr)
+
+    if show_points:
+        json.dump(pts, sys.stdout, indent=0)
+        print()
+        return
+
+    json.dump(
+        {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"kind": "route", "distance_m": meta.get("distance_m")},
+                    "geometry": {"type": "LineString", "coordinates": [[p[1], p[0]] for p in pts]},
+                }
+            ],
+        },
+        sys.stdout,
+        indent=1,
+    )
+
+
+if __name__ == "__main__":
+    main()
