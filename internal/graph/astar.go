@@ -51,6 +51,9 @@ func NewRouter(g *Graph, concurrency int) *Router {
 	return r
 }
 
+// Epsilon reports the heuristic weight.
+func (r *Router) Epsilon() float32 { return r.eps }
+
 // SetEpsilon adjusts the heuristic weight (1.0 = optimal but slow).
 func (r *Router) SetEpsilon(eps float32) {
 	if eps >= 1 {

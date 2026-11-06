@@ -10,6 +10,8 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,42 +19,144 @@ import (
 	"routeid/internal/graph"
 )
 
+// region is one graph file plus the box it covers.
+type region struct {
+	name string
+	g    *graph.Graph
+	r    *graph.Router
+	// padded extent in degrees
+	minLat, minLon, maxLat, maxLon float64
+}
+
+func (rg *region) contains(lat, lon float64) bool {
+	return lat >= rg.minLat && lat <= rg.maxLat && lon >= rg.minLon && lon <= rg.maxLon
+}
+
 type server struct {
-	g        *graph.Graph
-	r        *graph.Router
+	regions  []*region
 	maxSnapM float64
 }
 
+type strList []string
+
+func (s *strList) String() string { return strings.Join(*s, ",") }
+func (s *strList) Set(v string) error {
+	for _, p := range strings.Split(v, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			*s = append(*s, p)
+		}
+	}
+	return nil
+}
+
 func main() {
-	path := flag.String("graph", "map.graph", "graph file")
+	var graphs strList
+	flag.Var(&graphs, "graph", "graph file(s); repeat or comma-separate for multi-region")
 	addr := flag.String("addr", ":8080", "listen address")
-	conc := flag.Int("conc", 4, "concurrent routing workspaces")
+	conc := flag.Int("conc", 4, "concurrent routing workspaces per region")
 	snap := flag.Float64("snap", 3000, "max snap distance in meters")
 	flag.Parse()
 
-	g, err := graph.Open(*path)
-	if err != nil {
-		log.Fatalf("open graph: %v", err)
+	if len(graphs) == 0 {
+		log.Fatal("need at least one -graph")
 	}
-	st, _ := os.Stat(*path)
-	log.Printf("graph: %d nodes, %d edges, %.0f MB on disk (mmap)", g.NodeCount, g.EdgeCount, float64(st.Size())/1e6)
 
-	s := &server{g: g, r: graph.NewRouter(g, *conc), maxSnapM: *snap}
+	s := &server{maxSnapM: *snap}
+	for _, p := range expand(graphs) {
+		g, err := graph.Open(p)
+		if err != nil {
+			log.Fatalf("open %s: %v", p, err)
+		}
+		mnLat, mnLon, mxLat, mxLon := g.Bounds()
+		const pad = 0.05
+		rg := &region{
+			name: filepath.Base(p), g: g, r: graph.NewRouter(g, *conc),
+			minLat: mnLat - pad, maxLat: mxLat + pad,
+			minLon: mnLon - pad, maxLon: mxLon + pad,
+		}
+		st, _ := os.Stat(p)
+		log.Printf("region %-24s %8.2f M nodes %8.2f M edges %7.0f MB  bbox %.2f,%.2f..%.2f,%.2f",
+			rg.name, float64(g.NodeCount)/1e6, float64(g.EdgeCount)/1e6, float64(st.Size())/1e6,
+			mnLat, mnLon, mxLat, mxLon)
+		s.regions = append(s.regions, rg)
+	}
+	sort.Slice(s.regions, func(i, j int) bool { return s.regions[i].name < s.regions[j].name })
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, "ok\n")
-	})
+	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/route", s.handleRoute)
 
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           gzipWrap(mux),
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 	}
-	log.Printf("listening on %s", *addr)
+	log.Printf("listening on %s (%d region(s))", *addr, len(s.regions))
 	log.Fatal(srv.ListenAndServe())
+}
+
+// expand resolves globs and directories into graph files.
+func expand(in []string) []string {
+	var out []string
+	for _, p := range in {
+		if strings.ContainsAny(p, "*?[") {
+			m, err := filepath.Glob(p)
+			if err == nil {
+				out = append(out, m...)
+				continue
+			}
+		}
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			m, _ := filepath.Glob(filepath.Join(p, "*.graph"))
+			out = append(out, m...)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// pickSnap returns the region whose graph has the closest node to the point.
+// Bounding boxes overlap between island extracts, so snapping decides.
+func (s *server) pickSnap(lat, lon float64) (*region, uint32, float64, bool) {
+	var bestRg *region
+	var bestNode uint32
+	bestD := s.maxSnapM
+	for _, rg := range s.regions {
+		if !rg.contains(lat, lon) {
+			continue
+		}
+		n, d, ok := rg.g.Nearest(lat, lon, bestD)
+		if ok && d <= bestD {
+			bestRg, bestNode, bestD = rg, n, d
+		}
+	}
+	if bestRg == nil {
+		return nil, 0, 0, false
+	}
+	return bestRg, bestNode, bestD, true
+}
+
+func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	type info struct {
+		Name   string  `json:"name"`
+		Nodes  uint32  `json:"nodes"`
+		Edges  uint32  `json:"edges"`
+		MinLat float64 `json:"min_lat"`
+		MinLon float64 `json:"min_lon"`
+		MaxLat float64 `json:"max_lat"`
+		MaxLon float64 `json:"max_lon"`
+	}
+	out := struct {
+		OK      bool   `json:"ok"`
+		Regions []info `json:"regions"`
+	}{OK: true}
+	for _, rg := range s.regions {
+		out.Regions = append(out.Regions, info{rg.name, rg.g.NodeCount, rg.g.EdgeCount, rg.minLat, rg.minLon, rg.maxLat, rg.maxLon})
+	}
+	writeJSON(w, out)
 }
 
 func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
@@ -69,13 +173,18 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	}
 
 	start := time.Now()
-	src, d1, ok1 := s.g.Nearest(fLat, fLon, s.maxSnapM)
-	dst, d2, ok2 := s.g.Nearest(tLat, tLon, s.maxSnapM)
+	rgF, src, d1, ok1 := s.pickSnap(fLat, fLon)
+	rgT, dst, d2, ok2 := s.pickSnap(tLat, tLon)
 	if !ok1 || !ok2 {
-		httpErr(w, 422, "no road within snap distance")
+		httpErr(w, 422, "no road within snap distance (region not loaded?)")
 		return
 	}
-	res, err := s.r.Route(src, dst)
+	if rgF != rgT {
+		httpErr(w, 422, "cross-region route not supported ("+rgF.name+" -> "+rgT.name+")")
+		return
+	}
+	rg := rgF
+	res, err := rg.r.Route(src, dst)
 	if err != nil {
 		httpErr(w, 422, err.Error())
 		return
@@ -84,7 +193,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	pts := make([][2]float64, 0, len(res.Nodes)+2)
 	pts = append(pts, [2]float64{fLat, fLon})
 	for _, n := range res.Nodes {
-		lat, lon := s.g.Coords(n)
+		lat, lon := rg.g.Coords(n)
 		pts = append(pts, [2]float64{lat, lon})
 	}
 	pts = append(pts, [2]float64{tLat, tLon})
@@ -93,24 +202,21 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.Header().Set("X-Route-Ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
-	switch q.Get("format") {
-	case "polyline":
-		writeJSON(w, map[string]any{
-			"distance_m":  res.DistanceM,
-			"duration_s":  float64(res.TimeDs) / 10,
-			"polyline":    EncodePolyline(pts, 5),
-			"snap_from_m": math.Round(d1),
-			"snap_to_m":   math.Round(d2),
-		})
-	default:
-		writeJSON(w, map[string]any{
-			"distance_m":  res.DistanceM,
-			"duration_s":  float64(res.TimeDs) / 10,
-			"points":      pts,
-			"snap_from_m": math.Round(d1),
-			"snap_to_m":   math.Round(d2),
-		})
+	w.Header().Set("X-Route-Region", rg.name)
+	w.Header().Set("X-Route-Expansions", strconv.Itoa(res.Expansions))
+	body := map[string]any{
+		"distance_m":  res.DistanceM,
+		"duration_s":  float64(res.TimeDs) / 10,
+		"region":      rg.name,
+		"snap_from_m": math.Round(d1),
+		"snap_to_m":   math.Round(d2),
 	}
+	if q.Get("format") == "polyline" {
+		body["polyline"] = EncodePolyline(pts, 5)
+	} else {
+		body["points"] = pts
+	}
+	writeJSON(w, body)
 }
 
 func parsePoint(s string) (lat, lon float64, err error) {

@@ -20,6 +20,7 @@
 package graph
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,8 +28,6 @@ import (
 	"os"
 	"syscall"
 	"unsafe"
-
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -317,7 +316,6 @@ func (b *Builder) Write(path string) error {
 		8 * uint64(len(b.TurnOff)),
 		4 * uint64(len(b.TurnTo)),
 	}
-	// grid offsets are only meaningful when cells > 0
 	if cells == 0 {
 		sizes[sGOff] = 0
 	}
@@ -328,85 +326,162 @@ func (b *Builder) Write(path string) error {
 		secOff[i] = cur
 		cur = align8(cur + sizes[i])
 	}
-	total := cur
 
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if err := f.Truncate(int64(total)); err != nil {
-		return err
-	}
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(total), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
-	if err != nil {
-		return err
-	}
-	defer syscall.Munmap(data)
-
+	bw := bufio.NewWriterSize(f, 1<<20)
 	be := binary.LittleEndian
-	be.PutUint32(data[0:], magicLE)
-	be.PutUint32(data[4:], Version)
-	be.PutUint32(data[8:], uint32(len(b.Lat)))
-	be.PutUint32(data[12:], uint32(len(b.To)))
-	be.PutUint32(data[16:], uint32(len(b.CLat)))
-	be.PutUint32(data[20:], uint32(len(b.GNodes)))
-	be.PutUint32(data[24:], uint32(b.GridNLat))
-	be.PutUint32(data[28:], uint32(b.GridNLon))
+
+	hdr := make([]byte, headerSize)
+	be.PutUint32(hdr[0:], magicLE)
+	be.PutUint32(hdr[4:], Version)
+	be.PutUint32(hdr[8:], uint32(len(b.Lat)))
+	be.PutUint32(hdr[12:], uint32(len(b.To)))
+	be.PutUint32(hdr[16:], uint32(len(b.CLat)))
+	be.PutUint32(hdr[20:], uint32(len(b.GNodes)))
+	be.PutUint32(hdr[24:], uint32(b.GridNLat))
+	be.PutUint32(hdr[28:], uint32(b.GridNLon))
 	c := uint64(32)
-	putF64(data, &c, b.GridLat0)
-	putF64(data, &c, b.GridLon0)
-	putF64(data, &c, b.GridStep)
+	hdrF64(hdr, &c, b.GridLat0)
+	hdrF64(hdr, &c, b.GridLon0)
+	hdrF64(hdr, &c, b.GridStep)
 	for i := 0; i < numSections; i++ {
-		be.PutUint64(data[c:], secOff[i])
+		be.PutUint64(hdr[c:], secOff[i])
 		c += 8
 	}
-
-	putI32(data, secOff[sLat], b.Lat)
-	putI32(data, secOff[sLon], b.Lon)
-	putU64(data, secOff[sOff], b.Off)
-	putU32(data, secOff[sTo], b.To)
-	putU32(data, secOff[sLen], b.Len)
-	putU32(data, secOff[sTime], b.Time)
-	putU32(data, secOff[sGO], b.GO)
-	for i, v := range b.GL {
-		be.PutUint16(data[secOff[sGL]+uint64(i)*2:], v)
+	if _, err := bw.Write(hdr); err != nil {
+		return err
 	}
-	putI32(data, secOff[sCLat], b.CLat)
-	putI32(data, secOff[sCLon], b.CLon)
-	putU64(data, secOff[sGOff], b.GOff)
-	putU32(data, secOff[sGNodes], b.GNodes)
-	putU64(data, secOff[sTurnOff], b.TurnOff)
-	putU32(data, secOff[sTurnTo], b.TurnTo)
 
-	return unix.Msync(data, unix.MS_SYNC)
+	written := uint64(headerSize)
+	pad := func(to uint64) error {
+		for written < to {
+			n := to - written
+			if n > 1<<20 {
+				n = 1 << 20
+			}
+			if _, err := bw.Write(make([]byte, n)); err != nil {
+				return err
+			}
+			written += n
+		}
+		return nil
+	}
+	writeI32s := func(v []int32) error {
+		var buf [8192]byte
+		for i := 0; i < len(v); i++ {
+			off := (i % 2048) * 4
+			be.PutUint32(buf[off:], uint32(v[i]))
+			if off == 8188 || i == len(v)-1 {
+				if _, err := bw.Write(buf[:off+4]); err != nil {
+					return err
+				}
+				written += uint64(off + 4)
+			}
+		}
+		return nil
+	}
+	writeU32s := func(v []uint32) error {
+		var buf [8192]byte
+		for i := 0; i < len(v); i++ {
+			off := (i % 2048) * 4
+			be.PutUint32(buf[off:], v[i])
+			if off == 8188 || i == len(v)-1 {
+				if _, err := bw.Write(buf[:off+4]); err != nil {
+					return err
+				}
+				written += uint64(off + 4)
+			}
+		}
+		return nil
+	}
+	writeU64s := func(v []uint64) error {
+		var buf [8192]byte
+		for i := 0; i < len(v); i++ {
+			off := (i % 1024) * 8
+			be.PutUint64(buf[off:], v[i])
+			if off == 8184 || i == len(v)-1 {
+				if _, err := bw.Write(buf[:off+8]); err != nil {
+					return err
+				}
+				written += uint64(off + 8)
+			}
+		}
+		return nil
+	}
+	writeU16s := func(v []uint16) error {
+		var buf [8192]byte
+		for i := 0; i < len(v); i++ {
+			off := (i % 4096) * 2
+			be.PutUint16(buf[off:], v[i])
+			if off == 8190 || i == len(v)-1 {
+				if _, err := bw.Write(buf[:off+2]); err != nil {
+					return err
+				}
+				written += uint64(off + 2)
+			}
+		}
+		return nil
+	}
+
+	steps := []func() error{
+		func() error { return writeI32s(b.Lat) },
+		func() error { return writeI32s(b.Lon) },
+		func() error { return writeU64s(b.Off) },
+		func() error { return writeU32s(b.To) },
+		func() error { return writeU32s(b.Len) },
+		func() error { return writeU32s(b.Time) },
+		func() error { return writeU32s(b.GO) },
+		func() error { return writeU16s(b.GL) },
+		func() error { return writeI32s(b.CLat) },
+		func() error { return writeI32s(b.CLon) },
+		func() error { return writeU64s(b.GOff) },
+		func() error { return writeU32s(b.GNodes) },
+		func() error { return writeU64s(b.TurnOff) },
+		func() error { return writeU32s(b.TurnTo) },
+	}
+	for i, step := range steps {
+		if err := pad(secOff[i]); err != nil {
+			return err
+		}
+		if err := step(); err != nil {
+			return err
+		}
+	}
+	if err := bw.Flush(); err != nil {
+		return err
+	}
+	return f.Sync()
 }
 
-func putF64(d []byte, c *uint64, v float64) {
+func hdrF64(d []byte, c *uint64, v float64) {
 	binary.LittleEndian.PutUint64(d[*c:], math.Float64bits(v))
 	*c += 8
 }
 
-func putI32(d []byte, off uint64, v []int32) {
-	if len(v) == 0 {
-		return
+// Bounds returns the geographic extent of the graph in degrees.
+func (g *Graph) Bounds() (minLat, minLon, maxLat, maxLon float64) {
+	if g.NodeCount == 0 {
+		return 0, 0, 0, 0
 	}
-	dst := unsafe.Slice((*int32)(unsafe.Pointer(&d[off])), len(v))
-	copy(dst, v)
-}
-
-func putU32(d []byte, off uint64, v []uint32) {
-	if len(v) == 0 {
-		return
+	la, lo := g.Lat[0], g.Lon[0]
+	mnLat, mxLat, mnLon, mxLon := la, la, lo, lo
+	for i := uint32(1); i < g.NodeCount; i++ {
+		if g.Lat[i] < mnLat {
+			mnLat = g.Lat[i]
+		}
+		if g.Lat[i] > mxLat {
+			mxLat = g.Lat[i]
+		}
+		if g.Lon[i] < mnLon {
+			mnLon = g.Lon[i]
+		}
+		if g.Lon[i] > mxLon {
+			mxLon = g.Lon[i]
+		}
 	}
-	dst := unsafe.Slice((*uint32)(unsafe.Pointer(&d[off])), len(v))
-	copy(dst, v)
-}
-
-func putU64(d []byte, off uint64, v []uint64) {
-	if len(v) == 0 {
-		return
-	}
-	dst := unsafe.Slice((*uint64)(unsafe.Pointer(&d[off])), len(v))
-	copy(dst, v)
+	return float64(mnLat) / E7, float64(mnLon) / E7, float64(mxLat) / E7, float64(mxLon) / E7
 }

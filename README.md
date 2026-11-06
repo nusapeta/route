@@ -64,6 +64,26 @@ Polyline: precision **5** (~1.1 m), decode di Dart standar.
 
 Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`.
 
+## Multi-region (per pulau)
+
+Graph bisa dipecah per pulau lalu disajikan satu server; region dipilih dari
+snap terdekat (bbox antar-extract saling tumpang tindih):
+
+```bash
+bin/rid-server -graph java.graph,sumatra.graph -addr :8080
+bin/rid-server -graph data/ -addr :8080          # semua *.graph di direktori
+```
+
+Terukur:
+| region | node | edge | disk | build | peak RAM build |
+|---|---|---|---|---|---|
+| java | 22.7 M | 46.7 M | 972 MB | 74 s | 3.8 GB |
+| sumatra | 11.9 M | 24.3 M | 533 MB | 18 s | 1.2 GB |
+| nasional (est.) | ~44 M | ~90 M | ~2.0-2.2 GB | ~3 mnt | ~7-8 GB |
+
+Rute lintas-region (mis. Merak -> Bakauheni) belum didukung. Kalau butuh,
+gabungkan jadi satu graph dari pbf nasional (butuh mesin 16 GB saat build).
+
 ## Format file
 
 Lihat doc comment `internal/graph/format.go`. Header 256 B + 14 section
