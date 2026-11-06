@@ -23,8 +23,9 @@ services:
       - /data/sumatra.graph
       - -addr
       - :8080
+      # 2 core fisik: 4 workspace -> throughput ~2,4x dibanding conc 1
       - -conc
-      - "1"
+      - "4"
     environment:
       GOMEMLIMIT: 1GiB
     # terukur: 4x rute 148 km paralel = 745 MiB; sisakan kepala (paper/RESULTS.md §5)
