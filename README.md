@@ -124,6 +124,25 @@ Catatan lapangan:
 - Field `fallback: true` berarti larangan belok dilepas agar rute ketemu —
   berguna untuk telemetri, bukan untuk user.
 
+### Coba tanpa app (Hoppscotch / Postman / curl)
+
+Import `docs/routeid.postman_collection.json` di Hoppscotch
+(Collections → Import → Postman) atau Postman. Isinya 5 request siap pakai:
+`healthz`, GET polyline, POST JSON, versi `points` (array, tanpa decode),
+dan satu kasus 422 (dua titik beda region).
+
+Atau manual di Hoppscotch:
+
+| field | isi |
+|---|---|
+| Method | `GET` |
+| URL | `http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.2297,106.8166&format=polyline` |
+
+`http://127.0.0.1:8080` boleh dipanggil dari `hoppscotch.io` (HTTPS) karena
+server mengirim `Access-Control-Allow-Private-Network: true`. Kalau browser
+tetap memblokir, pakai Hoppscotch desktop, atau tunnel:
+`cloudflared tunnel --url http://localhost:8080`.
+
 Smoke test sebelum nyentuh app:
 ```bash
 make build && bin/rid-server -graph data/java.graph -addr :8080

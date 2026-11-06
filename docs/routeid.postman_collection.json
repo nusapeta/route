@@ -1,0 +1,83 @@
+{
+  "info": {
+    "name": "routeid",
+    "description": "Router OSM Indonesia. Import di Hoppscotch (Collections > Import > Postman) atau Postman.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base", "value": "http://127.0.0.1:8080" },
+    { "key": "from", "value": "-6.2088,106.8456" },
+    { "key": "to", "value": "-6.2297,106.8166" }
+  ],
+  "item": [
+    {
+      "name": "healthz",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base}}/healthz", "host": ["{{base}}"], "path": ["healthz"] }
+      }
+    },
+    {
+      "name": "route GET polyline",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/route?from={{from}}&to={{to}}&format=polyline",
+          "host": ["{{base}}"],
+          "path": ["route"],
+          "query": [
+            { "key": "from", "value": "{{from}}" },
+            { "key": "to", "value": "{{to}}" },
+            { "key": "format", "value": "polyline" },
+            { "key": "simplify", "value": "8", "disabled": true },
+            { "key": "restrictions", "value": "0", "disabled": true }
+          ]
+        }
+      }
+    },
+    {
+      "name": "route POST json",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"from\": { \"lat\": -6.2088, \"lng\": 106.8456 },\n  \"to\": { \"lat\": -6.2297, \"lng\": 106.8166 },\n  \"format\": \"polyline\",\n  \"simplify\": 0,\n  \"restrictions\": true\n}"
+        },
+        "url": { "raw": "{{base}}/route", "host": ["{{base}}"], "path": ["route"] }
+      }
+    },
+    {
+      "name": "route points (array, no decode)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/route?from={{from}}&to={{to}}&simplify=15",
+          "host": ["{{base}}"],
+          "path": ["route"],
+          "query": [
+            { "key": "from", "value": "{{from}}" },
+            { "key": "to", "value": "{{to}}" },
+            { "key": "simplify", "value": "15" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "422 beda region (Jakarta -> Lampung)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/route?from=-6.2088,106.8456&to=-5.4292,105.2611&format=polyline",
+          "host": ["{{base}}"],
+          "path": ["route"],
+          "query": [
+            { "key": "from", "value": "-6.2088,106.8456" },
+            { "key": "to", "value": "-5.4292,105.2611" },
+            { "key": "format", "value": "polyline" }
+          ]
+        }
+      }
+    }
+  ]
+}

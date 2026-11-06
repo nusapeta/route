@@ -361,6 +361,11 @@ func cors(h http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Route-Ms, X-Route-Region, X-Route-Expansions")
+		// Chrome asks for this before an HTTPS page may reach a LAN/localhost
+		// service (Private Network Access), e.g. hoppscotch.io -> localhost.
+		if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+			w.Header().Set("Access-Control-Allow-Private-Network", "true")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
