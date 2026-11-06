@@ -220,6 +220,19 @@ Terukur (VmHWM):
 | sumatra | 11.9 M | 24.3 M | 533 MB | 23 s | 1.4 GB |
 | nasional (est.) | ~44 M | ~90 M | ~2.0-2.2 GB | ~3 mnt | ~5 GB dgn `GOMEMLIMIT=5GiB` |
 
+Cek sehat graph per region sebelum dipakai (snap per titik + peta lubang):
+
+```bash
+bin/rid-graphinfo -graph data/sumatra.graph                       # header + grid
+bin/rid-graphinfo -graph data/sumatra.graph -at 3.5952,98.6722    # snap Medan
+bin/rid-graphinfo -graph data/sumatra.graph \
+  -scan 3.0,98.0,4.2,99.2,0.05                                    # rapat: lubang data
+```
+
+Uji yang sudah lolos di satu proses (java + sumatra): Jakarta->Bandung
+(`java`, 148.5 km), Medan->Binjai (`sumatra`, 22.7 km), Medan->Parapat
+(175.0 km), Banda Aceh->Medan (578.7 km), RSS total 357 MB (mmap).
+
 Rute lintas-region (mis. Merak -> Bakauheni) belum didukung: dua titik harus
 jatuh di satu region, kalau tidak server membalas `422`. Kalau butuh, gabungkan
 jadi satu graph dari pbf nasional (`scripts/build-national.sh`) — butuh mesin
@@ -231,6 +244,7 @@ jadi satu graph dari pbf nasional (`scripts/build-national.sh`) — butuh mesin
 cmd/rid-extract      pbf -> .graph (offline, bulanan)
 cmd/rid-server       HTTP /route, /healthz (prod)
 cmd/rid-route        CLI satu rute (debug)
+cmd/rid-graphinfo    inspeksi header/grid + probe snap & scan lubang data
 cmd/rid-bench        benchmark latency/akurasi + baseline -no-restrictions
 cmd/rid-restcheck    harness kepatuhan turn restriction
 cmd/rid-restats      audit data relasi restriction di pbf
