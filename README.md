@@ -67,6 +67,69 @@ Polyline: precision **5** (~1.1 m), decode di Dart standar.
 
 Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`.
 
+## Integrasi Flutter
+
+Server: `GET /route` (query string) atau `POST /route` (JSON) — dua-duanya
+menerima `"lat,lng"` maupun `{"lat":..,"lng":..}`. Respons berisi
+`distance_m`, `duration_s`, `polyline` (precision 5), `bbox` (siap dipakai
+`CameraUpdate.newLatLngBounds`) dan `points_n`.
+
+```dart
+final res = await http.post(
+  Uri.parse('$base/route'),
+  headers: {'Content-Type': 'application/json'},
+  body: jsonEncode({
+    'from': {'lat': fromLat, 'lng': fromLng},
+    'to':   {'lat': toLat,   'lng': toLng},
+    'format': 'polyline',
+  }),
+);
+final j = jsonDecode(res.body) as Map<String, dynamic>;
+final pts = decodePolyline(j['polyline'] as String);
+final km = (j['distance_m'] as num) / 1000;
+
+GoogleMap(
+  polylines: {Polyline(polylineId: const PolylineId('r'), points: pts, width: 5)},
+  initialCameraPosition: CameraPosition(target: pts.first, zoom: 14),
+);
+
+// precision-5 polyline decoder (1e-5 deg), tanpa dependency tambahan
+List<LatLng> decodePolyline(String s) {
+  final out = <LatLng>[];
+  var i = 0, lat = 0, lng = 0;
+  while (i < s.length) {
+    var shift = 0, result = 0, b;
+    do { b = s.codeUnitAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; }
+    while (b >= 0x20);
+    lat += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do { b = s.codeUnitAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; }
+    while (b >= 0x20);
+    lng += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    out.add(LatLng(lat / 1e5, lng / 1e5));
+  }
+  return out;
+}
+```
+
+Catatan lapangan:
+- **Emulator Android** tidak bisa `127.0.0.1` — pakai `10.0.2.2:8080`.
+- **HP fisik** pakai IP LAN laptop (`ip addr`), pastikan `-addr :8080` (bukan
+  `127.0.0.1`) dan firewall lokal mengizinkan.
+- **flutter web** sudah aman: CORS `*` + preflight `OPTIONS` ditangani server.
+- `simplify=<meter>` kalau payload terlalu besar (mis. `simplify=8`).
+- Respons 422 dengan `{"error":...}` untuk kasus normal (di luar Indonesia,
+  tidak ada jalan dalam radius snap, dua titik beda region). Tampilkan apa
+  adanya saat development.
+- Field `fallback: true` berarti larangan belok dilepas agar rute ketemu —
+  berguna untuk telemetri, bukan untuk user.
+
+Smoke test sebelum nyentuh app:
+```bash
+make build && bin/rid-server -graph data/java.graph -addr :8080
+scripts/smoke.sh http://127.0.0.1:8080
+```
+
 ## Multi-region (per pulau)
 
 Graph bisa dipecah per pulau lalu disajikan satu server; region dipilih dari
@@ -98,10 +161,11 @@ cmd/rid-route        CLI satu rute (debug)
 cmd/rid-bench        benchmark latency/akurasi + baseline -no-restrictions
 cmd/rid-restcheck    harness kepatuhan turn restriction
 cmd/rid-restats      audit data relasi restriction di pbf
+cmd/rid-snapcheck    ukur galat snapping (node vs ruas)
 internal/extract     parsing OSM, profil mobil, restriction, urutan Hilbert
 internal/graph       format biner, mmap, snapping, A*
 paper/               draf ACM + RESULTS.md (semua angka) + EXPERIMENTS.md
-scripts/             fetch.sh, build-national.sh
+scripts/             fetch.sh, build-national.sh, smoke.sh
 ```
 
 ## Test

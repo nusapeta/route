@@ -89,7 +89,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           gzipWrap(mux),
+		Handler:           cors(gzipWrap(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      60 * time.Second,
 	}
@@ -164,14 +164,20 @@ func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, out)
 }
 
+type routeParams struct {
+	fLat, fLon, tLat, tLon float64
+	format                 string
+	simplify               float64
+	restrictions           bool
+}
+
 func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
-	q := req.URL.Query()
-	fLat, fLon, err1 := parsePoint(q.Get("from"))
-	tLat, tLon, err2 := parsePoint(q.Get("to"))
-	if err1 != nil || err2 != nil {
-		httpErr(w, 400, "from/to must be lat,lng")
+	p, err := readRouteParams(req)
+	if err != nil {
+		httpErr(w, 400, err.Error())
 		return
 	}
+	fLat, fLon, tLat, tLon := p.fLat, p.fLon, p.tLat, p.tLon
 	if !inIndonesia(fLat, fLon) || !inIndonesia(tLat, tLon) {
 		httpErr(w, 400, "coordinates outside Indonesia")
 		return
@@ -189,8 +195,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	rg := rgF
-	strict := q.Get("restrictions") != "0"
-	res, err := rg.r.RouteStrict(src, dst, strict)
+	res, err := rg.r.RouteStrict(src, dst, p.restrictions)
 	if err != nil {
 		httpErr(w, 422, err.Error())
 		return
@@ -203,8 +208,8 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		pts = append(pts, [2]float64{lat, lon})
 	}
 	pts = append(pts, [2]float64{tLat, tLon})
-	if tol, _ := strconv.ParseFloat(q.Get("simplify"), 64); tol > 0 {
-		pts = Simplify(pts, tol)
+	if p.simplify > 0 {
+		pts = Simplify(pts, p.simplify)
 	}
 
 	w.Header().Set("X-Route-Ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
@@ -220,7 +225,16 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	if res.Fallback {
 		body["fallback"] = true
 	}
-	if q.Get("format") == "polyline" {
+	// bbox lets the app fit the camera without decoding the polyline
+	minLat, minLon, maxLat, maxLon := pts[0][0], pts[0][1], pts[0][0], pts[0][1]
+	for _, pt := range pts[1:] {
+		minLat, maxLat = math.Min(minLat, pt[0]), math.Max(maxLat, pt[0])
+		minLon, maxLon = math.Min(minLon, pt[1]), math.Max(maxLon, pt[1])
+	}
+	body["bbox"] = []float64{minLat, minLon, maxLat, maxLon}
+	body["points_n"] = len(pts)
+
+	if p.format == "polyline" {
 		body["polyline"] = EncodePolyline(pts, 5)
 	} else {
 		body["points"] = pts
@@ -228,7 +242,89 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, body)
 }
 
-func parsePoint(s string) (lat, lon float64, err error) {
+// readRouteParams accepts both ?from=lat,lng query strings and a JSON POST
+// body, so clients can avoid URL escaping.
+func readRouteParams(req *http.Request) (routeParams, error) {
+	q := req.URL.Query()
+	out := routeParams{
+		format:       q.Get("format"),
+		restrictions: q.Get("restrictions") != "0",
+	}
+	fromRaw, toRaw := q.Get("from"), q.Get("to")
+	out.simplify, _ = strconv.ParseFloat(q.Get("simplify"), 64)
+
+	if req.Method == http.MethodPost {
+		var body struct {
+			From         json.RawMessage `json:"from"`
+			To           json.RawMessage `json:"to"`
+			Format       string          `json:"format"`
+			Simplify     float64         `json:"simplify"`
+			Restrictions *bool           `json:"restrictions"`
+		}
+		dec := json.NewDecoder(io.LimitReader(req.Body, 8<<10))
+		if err := dec.Decode(&body); err != nil {
+			return out, fmt.Errorf("bad json body: %w", err)
+		}
+		if len(body.From) > 0 {
+			fromRaw = rawPointText(body.From)
+		}
+		if len(body.To) > 0 {
+			toRaw = rawPointText(body.To)
+		}
+		if body.Format != "" {
+			out.format = body.Format
+		}
+		if body.Simplify > 0 {
+			out.simplify = body.Simplify
+		}
+		if body.Restrictions != nil {
+			out.restrictions = *body.Restrictions
+		}
+	}
+
+	var err error
+	if out.fLat, out.fLon, err = parsePoint(fromRaw); err != nil {
+		return out, fmt.Errorf("from must be \"lat,lng\" or {\"lat\":..,\"lng\":..}")
+	}
+	if out.tLat, out.tLon, err = parsePoint(toRaw); err != nil {
+		return out, fmt.Errorf("to must be \"lat,lng\" or {\"lat\":..,\"lng\":..}")
+	}
+	return out, nil
+}
+
+// rawPointText unwraps a JSON value into the text form parsePoint expects:
+// a quoted string stays bare, an object keeps its braces.
+func rawPointText(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return string(raw)
+}
+
+// parsePoint accepts "lat,lng" and {"lat":..,"lng":..} (also "lon"/"lng"/"long").
+func parsePoint(raw string) (lat, lon float64, err error) {
+	if strings.HasPrefix(raw, "{") {
+		var obj map[string]float64
+		if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+			return 0, 0, fmt.Errorf("bad point object")
+		}
+		lat, lon = obj["lat"], obj["lng"]
+		if lon == 0 {
+			lon = obj["lon"]
+		}
+		if lon == 0 {
+			lon = obj["long"]
+		}
+		if lat == 0 && lon == 0 {
+			return 0, 0, fmt.Errorf("bad point object")
+		}
+		return lat, lon, nil
+	}
+	return parsePointString(raw)
+}
+
+func parsePointString(s string) (lat, lon float64, err error) {
 	parts := strings.Split(s, ",")
 	if len(parts) != 2 {
 		return 0, 0, fmt.Errorf("bad point")
@@ -256,6 +352,21 @@ func writeJSON(w http.ResponseWriter, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	enc.Encode(v)
+}
+
+// cors keeps browser-based clients (flutter web, map previews) working.
+func cors(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Route-Ms, X-Route-Region, X-Route-Expansions")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 func gzipWrap(h http.Handler) http.Handler {
