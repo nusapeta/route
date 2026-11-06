@@ -126,6 +126,13 @@ Catatan lapangan:
 
 ### Coba tanpa app (Hoppscotch / Postman / curl)
 
+Dua collection tersedia:
+
+| file | host | isi |
+|---|---|---|
+| `docs/routeid-homelab.postman_collection.json` | `http://192.168.1.219:8080` | 14 request: tiap kelas rute (7/15/42/148/579 km), POST, dan 3 kasus error. Ada test script Postman (cek `points_n`, `polyline_b64`, status 422/400). |
+| `docs/routeid.postman_collection.json` | `http://127.0.0.1:8080` | versi lokal, 8 request |
+
 Import `docs/routeid.postman_collection.json` di Hoppscotch
 (Collections → Import → Postman) atau Postman (File → Import). Isinya 7 request
 siap tekan, **tanpa variabel** (URL absolut `http://127.0.0.1:8080`) supaya
