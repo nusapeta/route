@@ -207,7 +207,6 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 			to:       b.To,
 			ids:      ids,
 			perm:     perm,
-			nNodes:   uint32(n),
 		}
 		rs, err := buildRestrictions(ctx, f, opt.Workers, progress, rv)
 		if err != nil {
@@ -223,11 +222,6 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 		return err
 	}
 	return nil
-}
-
-type wayRec struct {
-	speed float64 // m/s
-	dir   int8    // 0 both, 1 forward only, -1 backward only
 }
 
 func readWays(ctx context.Context, f *os.File, workers int, progress func(string, int64)) (flat []int64, wayOff []int, speeds []float64, dirs []int8, wayIDs []int64, err error) {

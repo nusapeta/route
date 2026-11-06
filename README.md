@@ -40,19 +40,22 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
 ## Pakai
 
 ```bash
-go build -o bin/rid-extract ./cmd/rid-extract
-go build -o bin/rid-server  ./cmd/rid-server
-go build -o bin/rid-route   ./cmd/rid-route
-
-# build graph (Java: 22.7 M node, 74 s, ~2 GB RAM)
-bin/rid-extract -pbf java-latest.osm.pbf -out java.graph
+make build          # semua binary ke bin/
+make fetch REGION=java
+make java           # unduh + build data/java.graph
 
 # cek rute
-bin/rid-route -graph java.graph -from -6.1754,106.8272 -to -6.5950,106.8166
+bin/rid-route -graph data/java.graph -from -6.1754,106.8272 -to -6.5950,106.8166
 
 # server
-bin/rid-server -graph java.graph -addr :8080 -conc 4
+bin/rid-server -graph data/java.graph -addr :8080 -conc 4
 curl 'localhost:8080/route?from=-6.1754,106.8272&to=-6.5950,106.8166&format=polyline'
+```
+
+Tanpa `make`:
+```bash
+go build -o bin/ ./cmd/...
+GOMEMLIMIT=2GiB bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
 ```
 
 Response:
@@ -70,19 +73,46 @@ Graph bisa dipecah per pulau lalu disajikan satu server; region dipilih dari
 snap terdekat (bbox antar-extract saling tumpang tindih):
 
 ```bash
-bin/rid-server -graph java.graph,sumatra.graph -addr :8080
+bin/rid-server -graph data/java.graph,data/sumatra.graph -addr :8080
 bin/rid-server -graph data/ -addr :8080          # semua *.graph di direktori
 ```
 
-Terukur:
+Terukur (VmHWM):
 | region | node | edge | disk | build | peak RAM build |
 |---|---|---|---|---|---|
-| java | 22.7 M | 46.7 M | 972 MB | 74 s | 3.8 GB |
-| sumatra | 11.9 M | 24.3 M | 533 MB | 18 s | 1.2 GB |
-| nasional (est.) | ~44 M | ~90 M | ~2.0-2.2 GB | ~3 mnt | ~7-8 GB |
+| java | 22.7 M | 46.7 M | 1.019 MB | 86 s | 3.2 GB (1.8 GB dgn `GOMEMLIMIT=1800MiB`) |
+| sumatra | 11.9 M | 24.3 M | 533 MB | 23 s | 1.4 GB |
+| nasional (est.) | ~44 M | ~90 M | ~2.0-2.2 GB | ~3 mnt | ~5 GB dgn `GOMEMLIMIT=5GiB` |
 
-Rute lintas-region (mis. Merak -> Bakauheni) belum didukung. Kalau butuh,
-gabungkan jadi satu graph dari pbf nasional (butuh mesin 16 GB saat build).
+Rute lintas-region (mis. Merak -> Bakauheni) belum didukung: dua titik harus
+jatuh di satu region, kalau tidak server membalas `422`. Kalau butuh, gabungkan
+jadi satu graph dari pbf nasional (`scripts/build-national.sh`) — butuh mesin
+≥8 GB atau streaming extractor yang belum ada.
+
+## Repo layout
+
+```
+cmd/rid-extract      pbf -> .graph (offline, bulanan)
+cmd/rid-server       HTTP /route, /healthz (prod)
+cmd/rid-route        CLI satu rute (debug)
+cmd/rid-bench        benchmark latency/akurasi + baseline -no-restrictions
+cmd/rid-restcheck    harness kepatuhan turn restriction
+cmd/rid-restats      audit data relasi restriction di pbf
+internal/extract     parsing OSM, profil mobil, restriction, urutan Hilbert
+internal/graph       format biner, mmap, snapping, A*
+paper/               draf ACM + RESULTS.md (semua angka) + EXPERIMENTS.md
+scripts/             fetch.sh, build-national.sh
+```
+
+## Test
+
+```bash
+make test     # go vet + go test ./...
+```
+
+Unit test mencakup round-trip format (termasuk Ban/Only), semantik
+`only_*`, dan pembuktian router memilih jalan memutar 2 hop saat belokan
+terlarang. CI (GitHub Actions) menjalankan vet + test + build di tiap push.
 
 ## Benchmark
 
@@ -139,8 +169,8 @@ file versi 1 tetap terbaca dengan restriction dimatikan.
 
 1. **Snap ke edge** (proyeksi ke ruas), bukan ke node terdekat.
 3. **Ferry** sudah ikut, tapi belum ada penalti waktu tunggu.
-4. **Build nasional**: 1.66 GB pbf, butuh ~10-16 GB RAM saat ekstrak.
-   Sisanya runtime ringan karena mmap.
+4. **Build nasional**: 1.66 GB pbf, ~5 GB RAM dengan `GOMEMLIMIT` (streaming
+   extractor bisa menurunkannya ke <1 GB). Runtime tetap ringan karena mmap.
 5. **Hierarchy/CH** kalau butuh rute >60 km atau <20 ms.
 6. **Validation harness**: 300-500 pasang koordinat vs Google Routes API,
    target jarak ±5-8% untuk 95% sampel.

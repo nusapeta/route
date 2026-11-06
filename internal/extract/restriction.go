@@ -32,7 +32,6 @@ type RestrictionStats struct {
 	RNotOnWay uint32 // via node is not part of the from/to way node list
 	RNoIn     uint32 // no directed edge entering the via node from the from way
 	RNoOut    uint32 // no directed edge leaving the via node into the to way
-	RNoEntry  uint32 // via-way: no edge from the from way into the via way
 }
 
 func (s *RestrictionStats) String() string {
@@ -52,7 +51,7 @@ func (s *RestrictionStats) String() string {
 		" not_on_way=" + itoa(s.RNotOnWay) +
 		" no_in=" + itoa(s.RNoIn) +
 		" no_out=" + itoa(s.RNoOut) +
-		" no_entry=" + itoa(s.RNoEntry) + "}}"
+		"}}"
 }
 
 func itoa(v uint32) string {
@@ -81,7 +80,6 @@ type restView struct {
 	to       []uint32
 	ids      []int64  // osm node ids, sorted (pre-permutation order)
 	perm     []uint32 // pre-rank -> final rank, nil when order=osm
-	nNodes   uint32
 }
 
 type restResult struct {
