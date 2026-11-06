@@ -1,82 +1,92 @@
 {
   "info": {
     "name": "routeid",
-    "description": "Router OSM Indonesia. Import di Hoppscotch (Collections > Import > Postman) atau Postman.",
+    "description": "Router OSM Indonesia. Semua URL absolut: http://127.0.0.1:8080 (jalankan bin/rid-server -graph data/java.graph -addr :8080). Import di Hoppscotch: Collections > Import > Postman; di Postman: File > Import. Tidak ada variabel, jadi langsung bisa di-enter.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "variable": [
-    { "key": "base", "value": "http://127.0.0.1:8080" },
-    { "key": "from", "value": "-6.2088,106.8456" },
-    { "key": "to", "value": "-6.2297,106.8166" }
-  ],
   "item": [
     {
-      "name": "healthz",
+      "name": "1. healthz (cek region)",
       "request": {
         "method": "GET",
-        "url": { "raw": "{{base}}/healthz", "host": ["{{base}}"], "path": ["healthz"] }
+        "header": [],
+        "url": "http://127.0.0.1:8080/healthz"
       }
     },
     {
-      "name": "route GET polyline",
+      "name": "2. route GET polyline",
       "request": {
         "method": "GET",
-        "url": {
-          "raw": "{{base}}/route?from={{from}}&to={{to}}&format=polyline",
-          "host": ["{{base}}"],
-          "path": ["route"],
-          "query": [
-            { "key": "from", "value": "{{from}}" },
-            { "key": "to", "value": "{{to}}" },
-            { "key": "format", "value": "polyline" },
-            { "key": "simplify", "value": "8", "disabled": true },
-            { "key": "restrictions", "value": "0", "disabled": true }
-          ]
-        }
+        "header": [],
+        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.2297,106.8166&format=polyline"
       }
     },
     {
-      "name": "route POST json",
+      "name": "3. route GET points (tanpa decode)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.2297,106.8166&simplify=15"
+      }
+    },
+    {
+      "name": "4. route POST json",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "http://127.0.0.1:8080/route",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"from\": { \"lat\": -6.2088, \"lng\": 106.8456 },\n  \"to\": { \"lat\": -6.2297, \"lng\": 106.8166 },\n  \"format\": \"polyline\",\n  \"simplify\": 0,\n  \"restrictions\": true\n}"
-        },
-        "url": { "raw": "{{base}}/route", "host": ["{{base}}"], "path": ["route"] }
-      }
-    },
-    {
-      "name": "route points (array, no decode)",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base}}/route?from={{from}}&to={{to}}&simplify=15",
-          "host": ["{{base}}"],
-          "path": ["route"],
-          "query": [
-            { "key": "from", "value": "{{from}}" },
-            { "key": "to", "value": "{{to}}" },
-            { "key": "simplify", "value": "15" }
-          ]
+          "raw": "{\n  \"from\": { \"lat\": -6.2088, \"lng\": 106.8456 },\n  \"to\": { \"lat\": -6.2297, \"lng\": 106.8166 },\n  \"format\": \"polyline\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         }
       }
     },
     {
-      "name": "422 beda region (Jakarta -> Lampung)",
+      "name": "5. route POST string coords",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "http://127.0.0.1:8080/route",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"from\": \"-6.2088,106.8456\",\n  \"to\": \"-6.2297,106.8166\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "6. tanpa restriction (pembanding)",
       "request": {
         "method": "GET",
-        "url": {
-          "raw": "{{base}}/route?from=-6.2088,106.8456&to=-5.4292,105.2611&format=polyline",
-          "host": ["{{base}}"],
-          "path": ["route"],
-          "query": [
-            { "key": "from", "value": "-6.2088,106.8456" },
-            { "key": "to", "value": "-5.4292,105.2611" },
-            { "key": "format", "value": "polyline" }
-          ]
-        }
+        "header": [],
+        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.2297,106.8166&restrictions=0"
+      }
+    },
+    {
+      "name": "7. error 422 beda region (Jakarta -> Lampung)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-5.4292,105.2611"
       }
     }
   ]

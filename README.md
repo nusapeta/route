@@ -127,9 +127,14 @@ Catatan lapangan:
 ### Coba tanpa app (Hoppscotch / Postman / curl)
 
 Import `docs/routeid.postman_collection.json` di Hoppscotch
-(Collections → Import → Postman) atau Postman. Isinya 5 request siap pakai:
-`healthz`, GET polyline, POST JSON, versi `points` (array, tanpa decode),
-dan satu kasus 422 (dua titik beda region).
+(Collections → Import → Postman) atau Postman (File → Import). Isinya 7 request
+siap tekan, **tanpa variabel** (URL absolut `http://127.0.0.1:8080`) supaya
+tidak gagal `Invalid URL` gara-gara environment tidak ikut ter-import:
+`healthz`, GET polyline, GET `points`, POST objek, POST string, perbandingan
+`restrictions=0`, dan satu kasus 422.
+
+Kalau dijalankan di emulator/HP, ganti `127.0.0.1` jadi `10.0.2.2` (emulator
+Android) atau IP LAN mesin (`hostname -I`).
 
 Atau manual di Hoppscotch:
 
