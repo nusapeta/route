@@ -2,3 +2,9 @@ bin/
 *.graph
 *.osm.pbf
 data/
+
+# artefak debug lokal (respons /route, polyline, geojson)
+r.json
+rp.json
+r.polyline
+*.geojson
