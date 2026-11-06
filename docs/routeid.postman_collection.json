@@ -10,7 +10,8 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "http://127.0.0.1:8080/healthz"
+        "url": "http://127.0.0.1:8080/healthz",
+        "description": ""
       }
     },
     {
@@ -37,7 +38,7 @@
         "method": "GET",
         "header": [],
         "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline",
-        "description": "Format Google, kompatibel decoder mana pun. Respons juga memuat polyline_b64."
+        "description": "Format Google (kompatibel semua decoder). Respons juga memuat polyline_b64 = base64 dari string yang sama; pakai yang b64 kalau mau copy-paste, karena charset polyline memuat '\\' yang tampil dobel di JSON."
       }
     },
     {
@@ -50,7 +51,7 @@
       }
     },
     {
-      "name": "6. route POST objek",
+      "name": "5. route POST objek",
       "request": {
         "method": "POST",
         "header": [
@@ -68,11 +69,12 @@
               "language": "json"
             }
           }
-        }
+        },
+        "description": ""
       }
     },
     {
-      "name": "7. route POST string",
+      "name": "6. route POST string",
       "request": {
         "method": "POST",
         "header": [
@@ -90,23 +92,26 @@
               "language": "json"
             }
           }
-        }
+        },
+        "description": ""
       }
     },
     {
-      "name": "8. restrictions=0 (pembanding)",
+      "name": "7. restrictions=0 (pembanding)",
       "request": {
         "method": "GET",
         "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&restrictions=0"
+        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&restrictions=0",
+        "description": ""
       }
     },
     {
-      "name": "9. error 422 beda region",
+      "name": "8. error 422 beda region",
       "request": {
         "method": "GET",
         "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-5.4292,105.2611"
+        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-5.4292,105.2611",
+        "description": ""
       }
     }
   ]
