@@ -1,0 +1,10 @@
+bin/
+data/
+.git/
+paper/results/
+*.graph
+*.osm.pbf
+r.json
+rp.json
+r.polyline
+*.geojson

@@ -39,5 +39,8 @@ sumatra: build
 bench: build
 	bin/rid-bench -graph data/java.graph -pairs paper/results/pairs-java.csv
 
+docker: build
+	cd deploy && docker compose build
+
 restcheck: build
 	bin/rid-restcheck -graph data/java.graph -json paper/restrcheck-java.json

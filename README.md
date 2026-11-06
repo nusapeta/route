@@ -203,6 +203,17 @@ make build && bin/rid-server -graph data/java.graph -addr :8080
 scripts/smoke.sh http://127.0.0.1:8080
 ```
 
+## Deploy (homelab)
+
+Docker Compose dan systemd unit siap pakai ada di `deploy/` — lihat
+[`deploy/README.md`](deploy/README.md) untuk langkah lengkap, batas memori,
+dan catatan keamanan. Ringkasnya:
+
+```bash
+cd deploy && docker compose up -d --build     # atau deploy/routeid.service
+scripts/smoke.sh http://127.0.0.1:8080
+```
+
 ## Multi-region (per pulau)
 
 Graph bisa dipecah per pulau lalu disajikan satu server; region dipilih dari

@@ -1,0 +1,42 @@
+# Homelab deploy: Jawa + Sumatra, satu proses.
+#   cd deploy && docker compose up -d --build
+# Graph dibangun sekali di host (butuh RAM lebih besar dari saat run):
+#   make java sumatra
+services:
+  routeid:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: routeid:local
+    container_name: routeid
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../data:/data:ro
+    command:
+      - -graph
+      - /data/java.graph
+      - -graph
+      - /data/sumatra.graph
+      - -addr
+      - :8080
+      - -conc
+      - "2"
+    environment:
+      GOMEMLIMIT: 768MiB
+    # batas kasar: ~600 MB puncak untuk rute panjang (lihat paper/RESULTS.md §5)
+    mem_limit: 1g
+    memswap_limit: 1g
+    stop_grace_period: 25s
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

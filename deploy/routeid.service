@@ -1,0 +1,37 @@
+# systemd unit (tanpa Docker). Sesuaikan path & user.
+#   sudo install -m 0644 deploy/routeid.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now routeid
+[Unit]
+Description=routeid router (OSM Indonesia: java + sumatra)
+Documentation=https://github.com/opensec-git/routeid
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=routeid
+Group=routeid
+WorkingDirectory=/srv/routeid
+ExecStart=/srv/routeid/bin/rid-server -graph /srv/routeid/data/java.graph -graph /srv/routeid/data/sumatra.graph -addr :8080 -conc 2
+Environment=GOMEMLIMIT=768MiB
+Restart=always
+RestartSec=2s
+TimeoutStopSec=25s
+# anggaran memori: puncak terukur ~600 MB untuk rute lintas provinsi
+MemoryMax=1200M
+MemoryHigh=900M
+# hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+ReadOnlyPaths=/srv/routeid/data
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

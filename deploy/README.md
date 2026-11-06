@@ -1,0 +1,98 @@
+# Deploy di homelab (Jawa + Sumatra)
+
+Dua cara: Docker Compose (paling cepat) atau systemd (tanpa Docker).
+Dua-duanya memakai graph yang sudah dibangun di host — image tidak pernah
+memuat data 1,5 GB.
+
+## 0. Bangun graph (sekali, di host)
+
+Build jauh lebih berat dari run: puncak ~2,5 GB (Java) dan ~1,4 GB (Sumatra).
+Kalau RAM pas-pasan, batasi Go: `GOMEMLIMIT=1800MiB make java`.
+
+```bash
+make build
+./bin/rid-extract -pbf data/java-latest.osm.pbf    -out data/java.graph
+./bin/rid-extract -pbf data/sumatra-latest.osm.pbf -out data/sumatra.graph
+ls -lh data/*.graph          # java ~972 MB, sumatra ~509 MB
+```
+
+## 1a. Docker Compose
+
+```bash
+sudo usermod -aG docker "$USER"   # sekali, lalu login ulang
+cd deploy
+docker compose up -d --build
+docker compose ps                 # STATUS harus (healthy)
+curl -s localhost:8080/healthz
+```
+
+Batas memori 1 GB (`mem_limit`), graceful stop 25 s, log diputar 3x10 MB.
+
+## 1b. systemd (tanpa Docker)
+
+```bash
+sudo useradd --system --home /srv/routeid --shell /usr/sbin/nologin routeid
+sudo mkdir -p /srv/routeid/bin && sudo cp bin/rid-server /srv/routeid/bin/
+sudo cp -r data /srv/routeid/            # java.graph + sumatra.graph
+sudo chown -R routeid:routeid /srv/routeid
+sudo install -m 0644 deploy/routeid.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now routeid
+systemctl status routeid --no-pager
+```
+
+Unit sudah membatasi `MemoryMax=1200M` dan mengeraskan filesystem
+(`ProtectSystem=strict`, data read-only).
+
+## 2. Verifikasi
+
+```bash
+scripts/smoke.sh http://127.0.0.1:8080
+./bin/rid-graphinfo -graph data/sumatra.graph -at 3.5952,98.6722   # snap Medan
+```
+
+Contoh cepat:
+
+```bash
+curl -s "127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.9175,107.6191&format=geojson" \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['region'],d['distance_m'],'m')"
+```
+
+## 3. Resource saat run (terukur, mesin 2C/4T 7 GB)
+
+| keadaan | RSS |
+|---|---|
+| idle | 15 MB |
+| 20x rute 15 km | 89 MB |
+| 1x rute 148 km | 401 MB |
+| 1x rute 578 km | 613 MB |
+| puncak (banyak rute panjang) | ~850 MB |
+
+CPU 1 core penuh selama satu query: 128 ms (15 km), 3,6 s (148 km),
+1,7 s (578 km). Disk 1,48 GB, wajib SSD (halaman mmap dibaca saat disentuh).
+Startup 10 ms.
+
+Untuk mesin kecil: `-conc 1` (memori ~4x lebih hemat, query diserialkan) dan
+`GOMEMLIMIT=512MiB`.
+
+## 4. Keamanan
+
+Server ini **tanpa autentikasi**, `Access-Control-Allow-Origin: *`, dan tanpa
+rate limit. Untuk homelab:
+
+- bind ke LAN saja: `-addr 192.168.x.x:8080`, jangan `0.0.0.0` bila tak perlu.
+- taruh di belakang reverse proxy (Caddy/nginx) kalau harus HTTPS; proxy juga
+  sebaiknya membatasi ukuran/rate.
+- jangan expose ke internet tanpa auth + rate limit — satu query rute panjang
+  memakan 1 core selama beberapa detik.
+
+## 5. Update data OSM
+
+```bash
+curl -O https://download.geofabrik.de/asia/indonesia/java-latest.osm.pbf
+make build && ./bin/rid-extract -pbf java-latest.osm.pbf -out data/java.graph
+docker compose restart      # atau: sudo systemctl restart routeid
+```
+
+Untuk update tanpa downtime: bangun ke nama lain (`java-new.graph`), lalu
+jalankan dua server di port berbeda dan alihkan proxy.

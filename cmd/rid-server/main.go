@@ -2,6 +2,7 @@ package main
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -11,10 +12,12 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"routeid/internal/graph"
@@ -94,8 +97,28 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      60 * time.Second,
 	}
+	// Graceful shutdown so `docker stop` / `systemctl restart` can finish the
+	// request in flight instead of killing a multi-second long-distance route.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
 	log.Printf("listening on %s (%d region(s))", *addr, len(s.regions))
-	log.Fatal(srv.ListenAndServe())
+
+	select {
+	case err := <-errCh:
+		log.Fatalf("serve: %v", err)
+	case <-ctx.Done():
+		stop()
+		log.Printf("shutdown signal received, draining")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+		log.Printf("stopped")
+	}
 }
 
 // expand resolves globs and directories into graph files.
