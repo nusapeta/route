@@ -1,0 +1,4 @@
+bin/
+*.graph
+*.osm.pbf
+data/
