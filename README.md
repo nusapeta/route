@@ -214,6 +214,20 @@ Load test: `scripts/loadtest.py`.
 | 15 km (Yogyakarta) | 136 ms | **~17** | 4 |
 | 148 km (Jakarta–Bandung) | 4,2 s | **~0,6** | 4 |
 
+Kalau rute dibatasi maksimum 40 km (batas desain aplikasi), acuan yang dipakai
+adalah baris 42 km (Jakarta -> Cikarang), bukan 148 km:
+
+| `-conc` | RPS | server p50 | p95 klien |
+|---|---|---|---|
+| 1 | 4,97 | 191 ms | 224 ms |
+| 2 | 8,72 | 219 ms | 251 ms |
+| 4 | 10,93 | 326 ms | 439 ms |
+| 8 | 11,76 | 628 ms | 744 ms (antre) |
+
+Saturasi di ~11–12 RPS: pada `-conc 4`, CPU terpakai ~3,5 core-ekuivalen
+(rata-rata 10,9 query x 0,33 s), jadi menambah container tidak menambah RPS
+selama core fisiknya tetap 2.
+
 Catatan penting:
 
 - `-conc 1` (default lama) membatasi ke ~7 RPS untuk rute 15 km; menaikkan

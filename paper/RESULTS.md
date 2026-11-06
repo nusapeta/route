@@ -131,6 +131,19 @@ Throughput (`scripts/loadtest.py`, keep-alive, 24–80 request per konfigurasi):
 | 15 km | 4 | 4 | 16.9 | 226 ms |
 | 148 km | 4 | 4 | 0.59 | 6,649 ms |
 
+Pada kelas rute yang dibatasi maksimum 40 km (Jakarta -> Cikarang, 41.977 m):
+
+| `-conc` | klien c | RPS | server p50 | p95 klien |
+|---|---|---|---|---|
+| 1 | 1 | 4,97 | 191 ms | 224 ms |
+| 2 | 2 | 8,72 | 219 ms | 251 ms |
+| 4 | 4 | 10,93 | 326 ms | 439 ms |
+| 4 | 8 | 11,76 | 628 ms | 744 ms |
+
+Saturasi ~11–12 RPS. Rata-rata pemakaian CPU 10,9 x 0,326 s = 3,6 core-ekuivalen,
+yaitu seluruh 2 core fisik + SMT; menambah container kedua pada mesin yang sama
+tidak menaikkan throughput, hanya menambah antrean.
+
 Saturasi tercapai pada 4 query paralel: 2 core fisik, tiap query memakai satu
 core penuh. Menambah konkurensi klien di atas itu hanya memperpanjang antrean
 (p50 15 km naik 226 -> 486 ms tanpa kenaikan RPS). Memori puncak pada 4x rute
