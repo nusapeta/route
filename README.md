@@ -155,15 +155,20 @@ scripts/route2geojson.py /tmp/r.json > /tmp/r.geojson
 Ringkasan (jumlah titik, bbox, ujung, jarak) dicetak ke stderr; tempel isi
 `/tmp/r.geojson` ke https://geojson.io untuk melihat garisnya di peta.
 
+Kalau file picker tidak menampilkan `/tmp`, tulis GeoJSON ke folder project
+(`scripts/route2geojson.py r.json > r.geojson`) lalu buka dari situ.
+
 **Peringatan `polyline`:** encoding polyline Google memakai seluruh rentang
 karakter printable, termasuk `\` (backslash). Di JSON karakter itu tampil
 sebagai `\\`, dan banyak decoder (termasuk situs decoder online) berhenti
 atau melompat di titik itu — garis jadi terpotong di tengah jalan tanpa error
-apa pun. Kalau butuh polyline untuk dicek manual, ekstrak dulu lewat JSON
-parser, jangan copy-paste teks JSON mentah:
+apa pun. Polyline hanya ada kalau request memakai `format=polyline`, dan
+jangan copy-paste teks JSON mentah — ekstrak lewat JSON parser:
 
 ```bash
-python3 -c "import json;print(json.load(open('/tmp/r.json'))['polyline'])" > /tmp/r.polyline
+curl -s "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline" \
+  > rp.json
+python3 -c "import json;print(json.load(open('rp.json'))['polyline'])" > r.polyline
 ```
 
 Smoke test sebelum nyentuh app:
