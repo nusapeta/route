@@ -24,6 +24,10 @@ LaTeX belum terpasang di mesin ini (tidak ada `pdflatex`/`tectonic`). Dua opsi:
 
 ## Klaim yang sudah didukung data
 
+Ledger lengkap (klaim, angka, bukti, status) ada di
+[`COMPARISON.md`](COMPARISON.md). Aturannya: hanya angka terukur yang boleh masuk
+kolom routeid; kolom pembanding menunggu E1.
+
 - Ekstraksi Java: 58 s, peak 2.5 GB, graph 1 019 MB (Tabel 1).
 - Latency per bucket dengan 601 pasang tetap (Tabel 2).
 - ε=1.5 tidak mengubah panjang rute pada 526/526 pasang; ε=2.0 → 1 kasus +11 %

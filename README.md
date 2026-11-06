@@ -5,22 +5,64 @@ Bukan OSRM: graph binary hasil ekstraksi OSM + weighted A*, di-`mmap`.
 
 ## Kenapa
 
-Kebutuhan: 2 titik lat/lng, rute ≤50 km, mobil, Indonesia, akurat, resource ringan.
+Kebutuhan: 2 titik lat/lng, rute <=50 km, mobil, Indonesia, akurat, resource
+ringan, jalan tanpa bayar per-request.
 
-| | routeid (Java) | OSRM MLD (Java) |
-|---|---|---|
-| Graph di disk | 1019 MB | ~1-2 GB |
-| RSS saat start | **15 MB** | ~1-1.5 GB |
-| RSS setelah 4× rute 50 km | **104 MB** | tetap 1-1.5 GB |
-| Preprocess (22.7 M node, 46.7 M edge) | **74 s** | ~15-40 menit |
-| Latency 6 km | 13 ms | 10-30 ms |
-| Latency 25 km | 120-180 ms | 10-30 ms |
-| Latency 50 km | 95-160 ms | 10-30 ms |
-| Turn restriction | ya (edge-based A*) | ya |
-| Traffic / ETA real-time | tidak | tidak |
+Angka routeid di bawah **semua terukur di repo ini** (perintahnya ada di
+`paper/RESULTS.md`). Angka OSRM adalah konteks dari dokumentasi/pengalaman umum,
+**bukan** head-to-head — E1 di `paper/EXPERIMENTS.md` belum dijalankan.
 
-Trade-off yang diterima: rute jauh (>60 km) melambat karena tanpa CH/MLD.
-Untuk ≤50 km + cache, hasilnya cukup.
+| | routeid (Java) | OSRM MLD (Java) | status OSRM |
+|---|---|---|---|
+| Graph di disk | 972 MB | ~1-2 GB | dokumentasi |
+| RSS start-up | **15 MB** | ~1-1.5 GB | dokumentasi |
+| RSS 1x rute 148 km | **385 MB** (bertambah per workspace) | tetap ~1-1.5 GB | dokumentasi |
+| Preprocess 22,7 jt node | **58 s** (1,9 GB dgn `GOMEMLIMIT`) | ~15-40 menit | dokumentasi |
+| Latency 15 km | 136-155 ms | ~10-30 ms | dokumentasi |
+| Latency 42 km | 191 ms (1 query) | ~10-30 ms | dokumentasi |
+| Throughput 42 km | 10,9 RPS @4 core-thread | belum diukur | - |
+| Turn restriction | ya (edge-based A*), 3.795 ban / 155 only_rules | ya | dokumentasi |
+| Traffic / ETA real-time | tidak | tidak | - |
+| Binary / image | 6,6 MB statis / image 23 MB | image + profile Lua | dokumentasi |
+
+Kolom yang paling penting untuk app: **rute <=42 km selesai di 0,2-0,4 detik**
+dan prosesnya memakai 15 MB saat idle, bukan 1 GB. Trade-off yang diterima:
+tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
+40 km di app justru menjaga angka ini tetap bagus.
+
+### Keunggulan yang bisa dipertahankan
+
+1. **Footprint kecil & deterministik.** Idle 15 MB (`RssAnon` 7 MB), image 23 MB,
+   start sampai `/healthz` 200 dalam **10 ms** — cocok untuk homelab, sidecar,
+   atau box RAM 1 GB.
+2. **Pipeline sesederhana tuntutan:** satu binary statis (6,6 MB), tanpa
+   dependency runtime, tanpa profile Lua. `osm.pbf -> map.graph` dalam ~1 menit
+   per pulau, jadi rebuild bulanan itu sepele.
+3. **Multi-region satu proses.** Java + Sumatra termuat bersama (357 MB RSS),
+   region dipilih dari snap terdekat, bukan dari bbox request.
+4. **Memori mengikuti beban, bukan ukuran data.** Graph 1,48 GB di-`mmap` dan
+   hanya halaman yang tersentuh yang masuk RSS; setelah 29 rute panjang 1,04 GB
+   (876 MB heap workspace A*, bisa dibatasi `-conc` dan `GOMEMLIMIT`).
+5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
+   dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
+   hanya 3,17% pada data uji.
+6. **Dua optimisasi yang terbukti, bukan klaim:** Hilbert ordering memangkas RSS
+   579 -> 104 MB dan latency 1,5-2x; weighted A* `eps=1.5` 2,4x lebih cepat
+   dengan rute identik.
+7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 67 RPS @7 km,
+   17 RPS @15 km, 11 RPS @42 km, saturasi di 4 query paralel.
+
+### Batasan (jangan diklaim lebih)
+
+- Tanpa hierarki (CH/MLD): >60 km melambat superlinear. 148 km = 4,2 s.
+- Snap ke **node**, bukan ke ruas: ujung rute bisa meleset beberapa ratus meter
+  di jalan yang way-nya jarang (E4 belum dikerjakan).
+- Satu region per rute: Jakarta -> Medan balas `422` (butuh ferry/konektor).
+- Profil hanya mobil; motor/gang belum ada. `restriction:conditional` dan
+  vehicle-class dihitung tapi belum diterapkan.
+- **Belum ada validasi akurasi terhadap referensi independen** (E2). Jarak sudah
+  dicek terhadap itineari yang dikenal, bukan uji statistik.
+- Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
 
 ## Arsitektur
 

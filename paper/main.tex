@@ -296,20 +296,25 @@ touched few pages.
 \subsection{Memory behaviour}
 \begin{table}[t]
 \small
-\begin{tabular}{@{}lr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
-state & RSS \\
+state & RSS & \texttt{RssAnon} & \texttt{RssFile} \\
 \midrule
-after start-up (two regions mapped) &  13\,MB \\
-after 4 concurrent 50\,km routes & 103\,MB \\
-after 8 concurrent 13\,km routes (Sumatra) & 177\,MB \\
-after 29 metropolitan pairs (Java) & 675\,MB \\
-after 20 long random cross-region pairs & 1\,120\,MB \\
+after start-up (two regions mapped) &  15\,MB &  7\,MB &  7\,MB \\
+after 20 routes of 15\,km         &  89\,MB &  73\,MB & 15\,MB \\
+after one 148\,km route           & 385\,MB & 281\,MB & 103\,MB \\
+after one 579\,km route           & 607\,MB & 442\,MB & 164\,MB \\
+after 29 routes of 148\,km        & 1{,}041\,MB & 876\,MB & 165\,MB \\
 \bottomrule
 \end{tabular}
-\caption{Resident set of the serving process. All mapped pages are file-backed and
-clean, so the high-water marks are reclaimable under memory pressure; the point is
-that start-up and short workloads do not pay for the whole graph.}
+\caption{Resident set of the serving process (Java + Sumatra, \texttt{-conc 4}),
+split into anonymous heap and file-backed mappings. The growth is \emph{heap}:
+the A* open-set workspace (16\,B per slot: keys, generation, g-score, parent)
+grows with the longest route served and is pooled per concurrency slot, so it is
+not returned to the OS. Only \texttt{RssFile} (touched graph pages) is clean and
+reclaimable. Memory is therefore budgeted from \emph{longest route} $\times$
+\texttt{-conc}, and \texttt{GOMEMLIMIT} trades a little latency for a hard
+ceiling (424\,MB instead of 558\,MB with a 300\,MiB limit).}
 \label{tab:rss}
 \end{table}
 
@@ -318,6 +323,38 @@ With Java and Sumatra loaded in one process, region selection by snapping routes
 Medan (13\,km) in 53\,ms, Palembang (10.9\,km) in 56\,ms, Bandar Lampung (3.6\,km)
 in 9\,ms and Jakarta (56.5\,km) in 103\,ms. Cross-strait queries (Merak--Bakauheni,
 Bali--Lombok) are rejected: the topology trades them for build feasibility.
+
+\subsection{Serving throughput and deployment cost}
+On a deliberately small box (Intel i3-6100T, 2 cores/4 threads, 7.8\,GB RAM,
+Ubuntu 24.04, container limited to 1.5\,GiB, \texttt{-conc 4}) the graph was
+built on the machine itself: Java peaked at 1{,}886\,MB with
+\texttt{GOMEMLIMIT=1800MiB} (57\,s), Sumatra at 1{,}683\,MB (23\,s), and the
+container image is 23\,MB. Measured throughput with keep-alive clients:
+
+\begin{table}[t]
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+route class & server p50 & clients & RPS & client p95 \\
+\midrule
+7\,km   &  46\,ms & 4 & 67.2 & 176\,ms \\
+15\,km  & 136\,ms & 4 & 17.1 & 272\,ms \\
+42\,km  & 191\,ms & 4 & 10.9 & 439\,ms \\
+42\,km  & 191\,ms & 8 & 11.8 & 744\,ms (queued) \\
+148\,km & 4.2\,s   & 4 &  0.59 & 6.9\,s \\
+\bottomrule
+\end{tabular}
+\caption{Throughput on the low-power deployment. Saturation is reached at four
+concurrent queries: at 42\,km, $10.9 \times 0.326\,\$s${} \approx 3.6$ core
+equivalents, i.e. both physical cores including SMT. Adding a second container on
+the same host therefore adds queueing, not throughput. Error rate was zero in all
+runs (1{,}000+ requests).}
+\label{tab:throughput}
+\end{table}
+
+With a 40\,km cap in the client (the design assumption), the safe operating point
+is 10--11\,RPS, i.e. roughly 600 route requests per minute: about 600 users at one
+route per minute, or 3{,}000 at one route per five minutes.
 
 \subsection{Turn-restriction compliance}
 The Java extract contains 4{,}653 \texttt{type=restriction} relations; 4{,}203
@@ -335,6 +372,28 @@ conservatively; the server then retries unrestricted and flags the response
 bucket and expansion counts by 0.1\,\%.
 
 \subsection{Reference points and honesty about baselines}
+\begin{table}[t]
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+ & routeid (Java) & OSRM MLD (Java) \\
+\midrule
+graph on disk            & 972\,MB (measured) & 1--2\,GB (documented) \\
+RSS after start-up       & 15\,MB (measured)   & 1--1.5\,GB (documented) \\
+preprocessing, 22.7\,M nodes & 58\,s (measured) & 15--40\,min (documented) \\
+latency 15\,km           & 136--155\,ms (measured) & 10--30\,ms (documented) \\
+latency 42\,km           & 191\,ms (measured)  & 10--30\,ms (documented) \\
+turn restrictions        & yes (3{,}795 bans)  & yes \\
+binary / image           & 6.6\,MB / 23\,MB   & engine + Lua profile \\
+\bottomrule
+\end{tabular}
+\caption{Positioning table. Only the routeid column is measured here; the OSRM
+column summarises documented/typical figures and is \emph{not} a controlled
+comparison. Rows must be replaced with measurements before this table is used to
+claim a speed advantage.}
+\label{tab:positioning}
+\end{table}
+
 We did not benchmark OSRM on this machine: the container runtime available to us
 was not usable, so published/typical figures (a few GB of graph, roughly
 1--1.5\,GB resident for a national extract, tens of minutes of preprocessing) are
@@ -342,6 +401,18 @@ quoted only as context, not as a controlled comparison. A controlled run is the
 first item in \texttt{paper/EXPERIMENTS.md}.
 
 \section{Discussion}
+\paragraph{Where the design wins, concretely.}
+(i)~Footprint: 15\,MB resident and a 10\,ms start-up mean the router can share a
+small box with other services and be restarted without a cold cache penalty of
+gigabytes. (ii)~Operational simplicity: one 6.6\,MB static binary, no Lua profile
+and no runtime dependency, so a monthly OSM rebuild is a one-minute job per island
+and the artefact is reproducible. (iii)~Auditability of compliance: turn
+restrictions are compiled into the graph and reported at \texttt{/healthz}
+(bans, permit-lists, skipped via-way), and the harness shows 0 violations after
+enforcement versus 95.8\,\% without it. (iv)~Predictable memory: growth is bounded
+by longest route $\times$ \texttt{-conc}, so deployment sizing is a division, not
+a guess.
+
 \paragraph{When is this the right tool?}
 If the product needs short routes, a car profile, no live traffic, and cannot pay
 per request, a purpose-built engine is a reasonable trade: 13\,MB of resident
