@@ -10,6 +10,14 @@ all: build
 build:
 	$(GO) build -o bin/ ./cmd/...
 
+# binary statis (CGO_ENABLED=0) untuk image alpine/distroless
+static:
+	mkdir -p bin/static
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/static/rid-server ./cmd/rid-server
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/static/rid-extract ./cmd/rid-extract
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/static/rid-route ./cmd/rid-route
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/static/rid-graphinfo ./cmd/rid-graphinfo
+
 test: vet
 	$(GO) test ./...
 

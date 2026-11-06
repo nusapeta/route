@@ -1,0 +1,14 @@
+# Runtime-only image: pakai bin/rid-server yang sudah dibangun di host.
+# Berguna kalau registry lambat / tak mau tarik image golang (~800 MB).
+#   cd deploy && ROUTEID_DOCKERFILE=deploy/Dockerfile.prebuilt docker compose up -d --build
+FROM alpine:3.22
+RUN adduser -D -H -u 65532 routeid && apk add --no-cache ca-certificates
+COPY bin/rid-server /usr/local/bin/rid-server
+USER 65532:65532
+EXPOSE 8080
+ENV GOMEMLIMIT=768MiB
+VOLUME ["/data"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1
+ENTRYPOINT ["/usr/local/bin/rid-server"]
+CMD ["-graph", "/data/java.graph", "-graph", "/data/sumatra.graph", "-addr", ":8080", "-conc", "1"]

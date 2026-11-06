@@ -18,6 +18,29 @@ ls -lh data/*.graph          # java ~972 MB, sumatra ~509 MB
 
 ## 1a. Docker Compose
 
+Dua pilihan image:
+
+| pilihan | cara | butuh |
+|---|---|---|
+| multi-stage | `docker compose up -d --build` | tarik image `golang:1.27-alpine` (~800 MB) |
+| prebuilt (hemat) | `ROUTEID_DOCKERFILE=deploy/Dockerfile.prebuilt docker compose up -d --build` | hanya `alpine:3.22` (~4 MB) |
+
+Untuk pilihan prebuilt, kirim binary statisnya dulu (jangan binary dinamis —
+lihat catatan di bawah):
+
+```bash
+make static
+rsync -a bin/static/ host:~/Projects/routeid/bin/
+```
+
+> **Jebakan yang sudah memakan waktu:** binary hasil `go build` biasa ter-link
+> dinamis ke glibc. Di image alpine (musl) hasilnya error
+> `exec /usr/local/bin/rid-server: no such file or directory` — pesan yang
+> menyesatkan, filenya ada. Selalu pakai `make static`
+> (`CGO_ENABLED=0`) untuk image, dan jangan rsync folder `bin/` mentah-mentah.
+
+
+
 ```bash
 sudo usermod -aG docker "$USER"   # sekali, lalu login ulang
 cd deploy

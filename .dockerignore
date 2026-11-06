@@ -1,4 +1,5 @@
-bin/
+bin/**
+!bin/rid-server
 data/
 .git/
 paper/results/

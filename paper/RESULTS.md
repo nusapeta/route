@@ -74,16 +74,51 @@ RSS setelah replay 29 pasangan metropolitan (Jabodetabek):
 
 ## 5. Memori proses server
 
-| state | RSS |
-|---|---|
-| start-up, 2 region | 13 MB |
-| 4 query 50 km paralel | 103 MB |
-| 8 query 13 km paralel (Sumatra) | 177 MB |
-| 29 pasangan metropolitan (Java) | 675 MB |
-| 20 pasangan acak lintas wilayah | 1,120 MB |
+Satu proses, dua region (java + sumatra), `-conc 4`. Diukur dari
+`/proc/<pid>/status` setelah beban tertentu (bukan estimasi):
 
-Semua halaman hasil `mmap` bersifat file-backed dan clean, jadi angka puncak
-adalah high-water mark yang bisa direklaim kernel di bawah tekanan memori.
+| state | RSS | RssAnon | RssFile |
+|---|---|---|---|
+| start-up | 15 MB | 7 MB | 7 MB |
+| 20x rute 15 km | 89 MB | 73 MB | 15 MB |
+| 1x rute 148 km | 385 MB | 281 MB | 103 MB |
+| 1x rute 578 km | 607 MB | 442 MB | 164 MB |
+| 29x rute 148 km | 1,041 MB | 876 MB | 165 MB |
+
+Puncak **bukan** halaman mmap. Yang tumbuh adalah heap Go (`RssAnon`): ruang
+kerja A* (open set open-addressing berisi `keys`, `gen`, `gs`, `came`, 16 B per
+slot) membesar mengikuti rute terpanjang yang pernah dilayani, lalu di-pool per
+slot konkurensi dan **tidak menyusut**. `RssFile` (halaman graph hasil `mmap`)
+tetap kecil karena hanya sebagian file yang tersentuh dan sifatnya clean —
+bagian itu saja yang bisa direklaim kernel.
+
+Konsekuensinya untuk deployment: anggaran memori ditentukan rute terpanjang ×
+`-conc`, bukan ukuran file graph. Knob yang terukur:
+
+| konfigurasi | puncak RSS |
+|---|---|
+| java saja, `-conc 4` | 312 MB |
+| java + sumatra, `-conc 4` | 558 MB |
+| java + sumatra, `-conc 1` | 524 MB |
+| java + sumatra, `-conc 4`, `GOMEMLIMIT=300MiB` | 424 MB |
+
+### 5b. Run di homelab (i3-6100T, 4 thread, 7.8 GB, Ubuntu 24.04)
+
+Deploy nyata: container 1 GB limit, `-conc 1`, `GOMEMLIMIT=768MiB`, graph
+dibangun di mesin itu sendiri (peak build 1,886 MB untuk Java dengan
+`GOMEMLIMIT=1800MiB`, 1,683 MB untuk Sumatra).
+
+| query | rute | latency |
+|---|---|---|
+| Yogyakarta | 14.7 km | 155 ms |
+| Jakarta -> Bandung | 148.5 km | 4.18 s |
+| Palembang | 7.3 km | 57 ms |
+| Medan -> Binjai | 22.7 km | 86 ms |
+| Banda Aceh -> Medan | 578.7 km | 2.25 s |
+
+Memori container setelah semua query di atas: **471 MiB** dari limit 1 GiB
+(`docker stats`), RAM host terpakai 3,812 MB dari 7,830 MB. Latency Jakarta ->
+Bandung 16% lebih lambat dari mesin uji (3.59 s), sesuai rasio clock.
 
 ## 6. Multi-region (Java + Sumatra, satu proses)
 

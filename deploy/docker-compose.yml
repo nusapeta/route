@@ -6,7 +6,9 @@ services:
   routeid:
     build:
       context: ..
-      dockerfile: Dockerfile
+      # Dockerfile lengkap (multi-stage, butuh tarik image golang) atau
+      # deploy/Dockerfile.prebuilt (pakai bin/rid-server yang sudah dibangun).
+      dockerfile: ${ROUTEID_DOCKERFILE:-Dockerfile}
     image: routeid:local
     container_name: routeid
     restart: unless-stopped
@@ -22,7 +24,7 @@ services:
       - -addr
       - :8080
       - -conc
-      - "2"
+      - "1"
     environment:
       GOMEMLIMIT: 768MiB
     # batas kasar: ~600 MB puncak untuk rute panjang (lihat paper/RESULTS.md §5)
