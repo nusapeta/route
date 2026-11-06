@@ -142,6 +142,17 @@ Biaya latensi (Java, ε=1.5, 60 pasang per bucket, strict vs longgar):
 Ekspansi A* praktis sama (±0,1%): pengecekan larangan hanya menambah satu
 binary search 13 langkah pada transisi yang benar-benar dibatasi.
 
+Biaya build (VmHWM, polling `/proc/<pid>/status` tiap 200 ms):
+
+| konfigurasi | peak RSS | wall |
+|---|---|---|
+| default (termasuk pass restriction) | 3.209 MB | 1 m 26 s |
+| `GOMEMLIMIT=2200MiB` | 2.160 MB | 58 s |
+| `GOMEMLIMIT=1800MiB` | 1.807 MB | 62 s |
+
+Catatan: angka 2.543 MB pada §1 diukur dengan sampling `ps` yang melewatkan
+puncak; VmHWM adalah angka yang benar.
+
 ```bash
 ./bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
 ./bin/rid-restcheck -graph data/java.graph -json paper/restrcheck-java.json
