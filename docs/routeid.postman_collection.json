@@ -1,12 +1,12 @@
 {
   "info": {
     "name": "routeid",
-    "description": "Router OSM Indonesia. Semua URL absolut: http://127.0.0.1:8080 (jalankan bin/rid-server -graph data/java.graph -addr :8080). Import di Hoppscotch: Collections > Import > Postman; di Postman: File > Import. Tidak ada variabel, jadi langsung bisa di-enter.",
+    "description": "Router OSM Indonesia. URL absolut http://127.0.0.1:8080, tanpa variabel. Jalankan: bin/rid-server -graph data/java.graph -addr :8080. Contoh rute: Warung Sembako Arum -> KiriminAja HQ (Yogyakarta).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
-      "name": "1. healthz (cek region)",
+      "name": "1. healthz",
       "request": {
         "method": "GET",
         "header": [],
@@ -14,23 +14,34 @@
       }
     },
     {
-      "name": "2. route GET polyline",
+      "name": "2. route points (aman, tanpa decode)",
       "request": {
         "method": "GET",
         "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.2297,106.8166&format=polyline"
+        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593",
+        "description": "Array [lat,lng]. Pakai ini kalau mau melihat koordinat."
       }
     },
     {
-      "name": "3. route GET points (tanpa decode)",
+      "name": "3. route geojson (tempel ke geojson.io)",
       "request": {
         "method": "GET",
         "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.2297,106.8166&simplify=15"
+        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=geojson",
+        "description": "Respons berisi field geojson: FeatureCollection. Copy isi field itu ke geojson.io. Tidak ada backslash, jadi aman dari decoder yang ngaco."
       }
     },
     {
-      "name": "4. route POST json",
+      "name": "4. route polyline (HATI-HATI saat copy)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline",
+        "description": "String ter-encode. Tampilan JSON menulis backslash sebagai dua karakter; copy-paste mentah ke decoder online akan memotong garis. Pakai format geojson untuk cek visual."
+      }
+    },
+    {
+      "name": "5. route POST objek",
       "request": {
         "method": "POST",
         "header": [
@@ -42,7 +53,7 @@
         "url": "http://127.0.0.1:8080/route",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"from\": { \"lat\": -6.2088, \"lng\": 106.8456 },\n  \"to\": { \"lat\": -6.2297, \"lng\": 106.8166 },\n  \"format\": \"polyline\"\n}",
+          "raw": "{\n  \"from\": { \"lat\": -7.8435723, \"lng\": 110.392939 },\n  \"to\": { \"lat\": -7.7393368, \"lng\": 110.3760593 },\n  \"format\": \"geojson\"\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -52,7 +63,7 @@
       }
     },
     {
-      "name": "5. route POST string coords",
+      "name": "6. route POST string",
       "request": {
         "method": "POST",
         "header": [
@@ -64,7 +75,7 @@
         "url": "http://127.0.0.1:8080/route",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"from\": \"-6.2088,106.8456\",\n  \"to\": \"-6.2297,106.8166\"\n}",
+          "raw": "{\n  \"from\": \"-7.8435723,110.392939\",\n  \"to\": \"-7.7393368,110.3760593\"\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -74,15 +85,15 @@
       }
     },
     {
-      "name": "6. tanpa restriction (pembanding)",
+      "name": "7. restrictions=0 (pembanding)",
       "request": {
         "method": "GET",
         "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.2297,106.8166&restrictions=0"
+        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&restrictions=0"
       }
     },
     {
-      "name": "7. error 422 beda region (Jakarta -> Lampung)",
+      "name": "8. error 422 beda region",
       "request": {
         "method": "GET",
         "header": [],

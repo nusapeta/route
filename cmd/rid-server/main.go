@@ -238,9 +238,27 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	body["bbox"] = []float64{minLat, minLon, maxLat, maxLon}
 	body["points_n"] = len(pts)
 
-	if p.format == "polyline" {
+	switch p.format {
+	case "polyline":
 		body["polyline"] = EncodePolyline(pts, 5)
-	} else {
+	case "geojson":
+		// GeoJSON is safe to copy-paste: no backslash escapes, so it drops
+		// straight into geojson.io without tripping a polyline decoder.
+		coords := make([][2]float64, len(pts))
+		for i, pt := range pts {
+			coords[i] = [2]float64{pt[1], pt[0]} // geojson is lng,lat
+		}
+		body["geojson"] = map[string]any{
+			"type": "FeatureCollection",
+			"features": []any{
+				map[string]any{
+					"type":       "Feature",
+					"properties": map[string]any{"kind": "route", "distance_m": res.DistanceM},
+					"geometry":   map[string]any{"type": "LineString", "coordinates": coords},
+				},
+			},
+		}
+	default:
 		body["points"] = pts
 	}
 	writeJSON(w, body)

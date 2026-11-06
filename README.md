@@ -160,6 +160,15 @@ scripts/route2geojson.py /tmp/r.json > /tmp/r.geojson
 Ringkasan (jumlah titik, bbox, ujung, jarak) dicetak ke stderr; tempel isi
 `/tmp/r.geojson` ke https://geojson.io untuk melihat garisnya di peta.
 
+**Cara tercepat kalau cuma mau lihat garisnya:** minta `format=geojson`, lalu
+copy isi field `geojson` dari respons ke https://geojson.io (panel JSON kiri)
+atau simpan sebagai file `.geojson`. Tidak ada backslash, jadi tidak ada
+decoder yang bisa salah.
+
+```bash
+curl -s "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=geojson"
+```
+
 Kalau file picker tidak menampilkan `/tmp`, tulis GeoJSON ke folder project
 (`scripts/route2geojson.py r.json > r.geojson`) lalu buka dari situ.
 
