@@ -64,6 +64,26 @@ tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
   dicek terhadap itineari yang dikenal, bukan uji statistik.
 - Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
 
+## Roadmap
+
+North star proyek ini: **alternatif OSRM / Google Routes yang paling ringan** —
+puluhan MB, bukan gigabyte, dan tetap <0,5 s untuk rute <=50 km di perangkat
+murah. Budget-nya mengikat, bukan slogan: RSS idle <= 20 MB, image <= 25 MB,
+p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
+
+| milestone | isi | selesai bila |
+|---|---|---|
+| M1 | metadata graph, build info, golden test | `/healthz` menyebut pbf asal; regresi rute ketahuan otomatis |
+| M2 | snap ke ruas (bukan node) | galat ujung p50 <= 20 m, p95 <= 60 m |
+| M3 | ALT / bidirectional, prealokasi workspace | 2x RPS, RSS beban <= 350 MB |
+| M4 | timeout, rate limit, `/metrics`, ETag | tak ada request menahan slot >10 s |
+| M5 | profil motor, semua pulau, ferry, artefak <= 800 MB | Jakarta -> Medan dapat rute |
+| M6 | E1 baseline OSRM, E2 ground truth | tabel komparasi terisi angka nyata |
+
+Rincian item, kriteria lulus, dan biaya: [`docs/ROADMAP.md`](docs/ROADMAP.md) dan
+[`docs/BACKLOG.md`](docs/BACKLOG.md). Non-goals yang sengaja ditolak (traffic
+real-time, cakupan dunia, CH/MLD penuh) juga tertulis di sana.
+
 ## Arsitektur
 
 ```
@@ -343,6 +363,8 @@ cmd/rid-extract      pbf -> .graph (offline, bulanan)
 cmd/rid-server       HTTP /route, /healthz (prod)
 cmd/rid-route        CLI satu rute (debug)
 cmd/rid-graphinfo    inspeksi header/grid + probe snap & scan lubang data
+docs/ROADMAP.md      north star, budget, milestone
+docs/BACKLOG.md      backlog teknis: masalah, rencana, kriteria lulus
 cmd/rid-bench        benchmark latency/akurasi + baseline -no-restrictions
 cmd/rid-restcheck    harness kepatuhan turn restriction
 cmd/rid-restats      audit data relasi restriction di pbf
@@ -414,16 +436,17 @@ Lihat doc comment `internal/graph/format.go`. Header 256 B + 14 section
 `Ban`/`Only` berisi pasangan edge terlarang/diizinkan). Versi format 2;
 file versi 1 tetap terbaca dengan restriction dimatikan.
 
-## Roadmap (urutan dampak)
+## Roadmap (ringkas)
 
-1. **Snap ke edge** (proyeksi ke ruas), bukan ke node terdekat.
-3. **Ferry** sudah ikut, tapi belum ada penalti waktu tunggu.
-4. **Build nasional**: 1.66 GB pbf, ~5 GB RAM dengan `GOMEMLIMIT` (streaming
-   extractor bisa menurunkannya ke <1 GB). Runtime tetap ringan karena mmap.
-5. **Hierarchy/CH** kalau butuh rute >60 km atau <20 ms.
-6. **Validation harness**: 300-500 pasang koordinat vs Google Routes API,
-   target jarak ±5-8% untuk 95% sampel.
-7. Profil **motor** (`motorcycle=yes`, gang, `highway=service`) — sekarang mobil.
+Rencana lengkap: [`docs/ROADMAP.md`](docs/ROADMAP.md) (budget + milestone) dan
+[`docs/BACKLOG.md`](docs/BACKLOG.md) (masalah, rencana, kriteria lulus).
+Ringkasnya: M1 metadata + golden test, M2 snap ke ruas, M3 ALT/bidirectional untuk
+2x densitas, M4 pengamanan produksi, M5 profil motor + semua pulau + ferry,
+M6 baseline OSRM dan ground truth.
+
+Sengaja ditolak: traffic real-time, cakupan dunia, CH/MLD penuh, turn-by-turn
+instruction. Satu graph nasional (1,66 GB pbf, ~5 GB RAM) tetap mungkin lewat
+streaming extractor, tapi bukan prioritas dibanding multi-region per pulau.
 
 ## Catatan data
 

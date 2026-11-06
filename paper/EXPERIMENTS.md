@@ -73,6 +73,8 @@ dan via-way yang dilarang konservatif (butuh state machine / edge splitting).
 
 ## E4. Snap ke edge, bukan node
 
+Rencana teknis + kriteria lulus: `docs/BACKLOG.md` item 4-5.
+
 Proyeksi titik ke segmen terdekat (grid edge index), lalu split logis di query
 time. Mengurangi error endpoint sampai ratusan meter tempat node jarang.
 
@@ -88,6 +90,8 @@ Yang dilaporkan: apakah graph nasional ≈ 2× Java (node/edge/disk) dan apakah
 p50/p95 latency tidak berubah (search terbatas radius, jadi seharusnya tidak).
 
 ## E6. Statistik & reproduksibilitas
+
+Metadata graph + golden test: `docs/BACKLOG.md` item 1-3 (milestone M1).
 
 - Ulangi benchmark 5×, laporkan median antar-run (bukan satu run).
 - Pin CPU (`taskset -c 0`) dan matikan turbo kalau memungkinkan.

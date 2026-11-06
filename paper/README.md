@@ -24,6 +24,9 @@ LaTeX belum terpasang di mesin ini (tidak ada `pdflatex`/`tectonic`). Dua opsi:
 
 ## Klaim yang sudah didukung data
 
+Rencana kerja dan budget performa ada di
+[`../docs/ROADMAP.md`](../docs/ROADMAP.md).
+
 Ledger lengkap (klaim, angka, bukti, status) ada di
 [`COMPARISON.md`](COMPARISON.md). Aturannya: hanya angka terukur yang boleh masuk
 kolom routeid; kolom pembanding menunggu E1.
