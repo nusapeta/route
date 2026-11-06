@@ -148,5 +148,9 @@ file versi 1 tetap terbaca dengan restriction dimatikan.
 
 ## Catatan data
 
-Data © OpenStreetMap contributors (ODbL). Wajib atribusi di app.
+## Lisensi
+
+Kode: MIT (lihat `LICENSE`). Data: © OpenStreetMap contributors, ODbL —
+wajib tampilkan atribusi "© OpenStreetMap contributors" di app, dan turunan
+database (file `.graph`) tetap ODbL.
 Update: ekstrak ulang bulanan lalu swap file + restart (74 s untuk Java).
