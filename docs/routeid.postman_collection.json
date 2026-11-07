@@ -1,130 +1,851 @@
 {
   "info": {
     "name": "routeid",
-    "description": "Router OSM Indonesia. URL absolut http://127.0.0.1:8080, tanpa variabel. Jalankan: bin/rid-server -graph data/java.graph -addr :8080. Contoh rute: Warung Sembako Arum -> KiriminAja HQ (Yogyakarta).",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "HTTP API routeid. Ganti environment untuk berpindah host: 'routeid - local' (http://127.0.0.1:8080) atau 'routeid - homelab' (http://192.168.1.219:8080). Tanpa environment, koleksi memakai collection variable baseUrl = http://127.0.0.1:8080.\n\nCatatan: homelab membatasi -rate 15/menit (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang kali; server lokal biasanya tanpa rate limit.\n\nRequest di folder 'Region lain' butuh graf region tsb; kalau environment hanya memuat Java hasilnya 422 dan test menerima itu."
   },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8080"
+    },
+    {
+      "key": "region",
+      "value": ""
+    },
+    {
+      "key": "etag",
+      "value": ""
+    }
+  ],
   "item": [
     {
-      "name": "1. healthz",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "http://127.0.0.1:8080/healthz",
-        "description": ""
-      },
-      "event": [
+      "name": "0. Meta",
+      "description": "Identitas server dan metrik; jalankan dulu untuk memastikan base URL benar.",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const r = pm.response.json().regions[0];",
-              "pm.test('provenance v3', () => pm.expect(r.format).to.be.at.least(3));"
-            ]
-          }
+          "name": "healthz",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/healthz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "healthz"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "pm.test('200', () => pm.response.to.have.status(200));\nconst j = pm.response.json();\npm.test('ok true', () => pm.expect(j.ok).to.be.true);\npm.test('minimal satu region', () => pm.expect(j.regions).to.be.an('array').that.is.not.empty);\nj.regions.forEach((r) => {\n  pm.test(r.name + ': node/edge/ban masuk akal', () => {\n    pm.expect(r.nodes).to.be.above(0);\n    pm.expect(r.edges).to.be.above(0);\n    pm.expect(r.bans).to.be.at.least(0);\n    pm.expect(r.only_rules).to.be.at.least(0);\n    pm.expect(r.format).to.be.at.least(3);\n  });\n});\npm.test('provenance lengkap (format 4)', () => {\n  const r = j.regions[0];\n  pm.expect(r.pbf_sha256).to.match(/^[0-9a-f]{64}$/);\n  pm.expect(r.profile_sha256).to.match(/^[0-9a-f]{64}$/);\n  pm.expect(r.built_at).to.be.a('string').and.not.empty;\n  pm.expect(r.extractor).to.be.a('string').and.not.empty;\n});\nconsole.log(j.version, '-', j.regions.map((r) => r.name + ':' + r.nodes).join(', '));\n"
+              }
+            }
+          ]
+        },
+        {
+          "name": "version",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/version",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "version"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "pm.test('200', () => pm.response.to.have.status(200));\nconst v = pm.response.json();\npm.test('commit + built_at terisi', () => {\n  pm.expect(v.commit).to.be.a('string').and.not.empty;\n  pm.expect(v.built_at).to.be.a('string').and.not.empty;\n});\npm.test('goos linux', () => pm.expect(v.goos).to.eql('linux'));\nconsole.log(v.commit, v.built_at, v.go_version);\n"
+              }
+            }
+          ]
+        },
+        {
+          "name": "metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "pm.test('200', () => pm.response.to.have.status(200));\nconst body = pm.response.text();\npm.test('metrik routeid ada', () => {\n  pm.expect(body).to.include('routeid_build_info');\n  pm.expect(body).to.include('route_requests_total');\n});\nconsole.log(body.split('\\n').filter((l) => l.startsWith('route_requests_total')).join(' | ') || 'belum ada request');\n"
+              }
+            }
+          ]
         }
       ]
     },
     {
-      "name": "2. route points (aman, tanpa decode)",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593",
-        "description": "Array [lat,lng]. Paling aman untuk dilihat manusia."
-      }
-    },
-    {
-      "name": "3. route geojson (tempel ke geojson.io)",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=geojson",
-        "description": "Field geojson berisi FeatureCollection. Copy isi field itu ke geojson.io. Nol backslash."
-      }
-    },
-    {
-      "name": "4. route polyline",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline",
-        "description": "Format Google (kompatibel semua decoder). Respons juga memuat polyline_b64 = base64 dari string yang sama; pakai yang b64 kalau mau copy-paste, karena charset polyline memuat '\\' yang tampil dobel di JSON."
-      }
-    },
-    {
-      "name": "5. route polyline base64 (aman copy)",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline&polyline_enc=b64",
-        "description": "polyline_b64 = base64 dari string polyline. Tanpa backslash, jadi tidak bisa rusak saat copy-paste."
-      }
-    },
-    {
-      "name": "5. route POST objek",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "url": "http://127.0.0.1:8080/route",
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"from\": { \"lat\": -7.8435723, \"lng\": 110.392939 },\n  \"to\": { \"lat\": -7.7393368, \"lng\": 110.3760593 },\n  \"format\": \"geojson\"\n}",
-          "options": {
-            "raw": {
-              "language": "json"
+      "name": "1. Route inti (Java)",
+      "description": "Format respons, POST, perbandingan restrictions, dan cache ETag. Pasangan Yogyakarta 15 km (aman untuk 40 km).",
+      "item": [
+        {
+          "name": "points (JSON default)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-7.8435723,110.392939"
+                },
+                {
+                  "key": "to",
+                  "value": "-7.7393368,110.3760593"
+                }
+              ]
             }
-          }
-        },
-        "description": ""
-      }
-    },
-    {
-      "name": "6. route POST string",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "url": "http://127.0.0.1:8080/route",
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"from\": \"-7.8435723,110.392939\",\n  \"to\": \"-7.7393368,110.3760593\"\n}",
-          "options": {
-            "raw": {
-              "language": "json"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "pm.test('200', () => pm.response.to.have.status(200));\nconst j = pm.response.json();\npm.test('region + jarak + durasi', () => {\n  pm.expect(j.region).to.be.a('string');\n  pm.expect(j.distance_m).to.be.above(0);\n  pm.expect(j.duration_s).to.be.above(0);\n});\npm.test('points_n cocok dengan points', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\npm.test('snap terisi', () => {\n  pm.expect(j.snap_from_m).to.be.a('number');\n  pm.expect(j.snap_to_m).to.be.a('number');\n});\npm.test('header X-Route-Ms ada', () => pm.expect(pm.response.headers.get('X-Route-Ms')).to.match(/^\\d+$/));\nconst ms = +pm.response.headers.get('X-Route-Ms');\nconsole.log(j.region, j.distance_m + 'm', j.duration_s + 's', j.points_n + ' titik', ms + 'ms');\npm.collectionVariables.set('region', j.region);\npm.collectionVariables.set('etag', pm.response.headers.get('ETag') || '');\n"
+              }
             }
-          }
+          ]
         },
-        "description": ""
-      }
+        {
+          "name": "geojson (tempel ke geojson.io)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=geojson",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-7.8435723,110.392939"
+                },
+                {
+                  "key": "to",
+                  "value": "-7.7393368,110.3760593"
+                },
+                {
+                  "key": "format",
+                  "value": "geojson"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const g = j.geojson.features[0].geometry;",
+                  "pm.test('LineString', () => pm.expect(g.type).to.eql('LineString'));",
+                  "pm.test('koordinat = points_n', () => pm.expect(g.coordinates).to.have.lengthOf(j.points_n));",
+                  "pm.test('koordinat [lng,lat]', () => pm.expect(g.coordinates[0]).to.have.lengthOf(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "polyline + polyline_b64",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-7.8435723,110.392939"
+                },
+                {
+                  "key": "to",
+                  "value": "-7.7393368,110.3760593"
+                },
+                {
+                  "key": "format",
+                  "value": "polyline"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('dua bentuk ada', () => {",
+                  "  pm.expect(j.polyline).to.be.a('string').and.not.empty;",
+                  "  pm.expect(j.polyline_b64).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.test('b64 = base64(polyline)', () => pm.expect(atob(j.polyline_b64)).to.eql(j.polyline));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST objek + geojson + simplify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": {\n    \"lat\": -7.8435723,\n    \"lng\": 110.392939\n  },\n  \"to\": {\n    \"lat\": -7.7393368,\n    \"lng\": 110.3760593\n  },\n  \"format\": \"geojson\",\n  \"simplify\": 8\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/route",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('geojson FeatureCollection', () => pm.expect(j.geojson.type).to.eql('FeatureCollection'));",
+                  "pm.test('jarak > 0 dan titik > 1', () => {",
+                  "  pm.expect(j.distance_m).to.be.above(0);",
+                  "  pm.expect(j.points_n).to.be.above(1);",
+                  "});",
+                  "console.log('simplify 8 m:', j.points_n, 'titik,', j.distance_m + 'm');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST string coords + simplify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"-7.8435723,110.392939\",\n  \"to\": \"-7.7393368,110.3760593\",\n  \"simplify\": 8\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/route",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('respons normal', () => {",
+                  "  pm.expect(j.points_n).to.be.above(1);",
+                  "  pm.expect(j.points).to.have.lengthOf(j.points_n);",
+                  "});",
+                  "console.log(j.points_n, 'titik,', j.distance_m + 'm,', j.duration_s + 's');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "restrictions=0 (pembanding)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&restrictions=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-7.8435723,110.392939"
+                },
+                {
+                  "key": "to",
+                  "value": "-7.7393368,110.3760593"
+                },
+                {
+                  "key": "restrictions",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "description": "Ban belok dilepas. Bandingkan distance_m/duration_s dengan request 'points (JSON default)'; region harus sama.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('region sama dengan baseline', () => {",
+                  "  const ref = pm.collectionVariables.get('region');",
+                  "  if (ref) pm.expect(j.region).to.eql(ref);",
+                  "});",
+                  "console.log(j.region, j.distance_m + 'm', j.duration_s + 's');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "cache: simpan ETag",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-7.8435723,110.392939"
+                },
+                {
+                  "key": "to",
+                  "value": "-7.7393368,110.3760593"
+                }
+              ]
+            }
+          },
+          "description": "Mengisi collection variable etag untuk request berikutnya.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const tag = pm.response.headers.get('ETag');",
+                  "pm.test('ETag ada', () => pm.expect(tag).to.match(/^\"?[0-9a-f]{8}-[0-9a-f]{16}\"?$/));",
+                  "pm.collectionVariables.set('etag', tag || '');",
+                  "pm.test('Cache-Control max-age', () => pm.expect(pm.response.headers.get('Cache-Control')).to.include('max-age='));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "cache: If-None-Match -> 304",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "If-None-Match",
+                "value": "{{etag}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-7.8435723,110.392939"
+                },
+                {
+                  "key": "to",
+                  "value": "-7.7393368,110.3760593"
+                }
+              ]
+            }
+          },
+          "description": "Jalankan setelah 'simpan ETag'; tanpa ETag server membalas 200.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('304 atau 200 (kalau etag kosong)', () => pm.expect([304, 200]).to.include(pm.response.code));",
+                  "pm.test('body kosong saat 304', () => { if (pm.response.code === 304) pm.expect(pm.response.text()).to.be.empty; });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "7. restrictions=0 (pembanding)",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&restrictions=0",
-        "description": ""
-      }
+      "name": "2. Kelas jarak (Java)",
+      "description": "Rute contoh per kelas; 42 km adalah batas desain aplikasi.",
+      "item": [
+        {
+          "name": "Jakarta - Cikarang 42 km (batas aplikasi)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-6.2088,106.8456&to=-6.2561,107.1450",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-6.2088,106.8456"
+                },
+                {
+                  "key": "to",
+                  "value": "-6.2561,107.1450"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "pm.test('200', () => pm.response.to.have.status(200));\nconst j = pm.response.json();\npm.test('region + jarak + durasi', () => {\n  pm.expect(j.region).to.be.a('string');\n  pm.expect(j.distance_m).to.be.above(0);\n  pm.expect(j.duration_s).to.be.above(0);\n});\npm.test('points_n cocok dengan points', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\npm.test('snap terisi', () => {\n  pm.expect(j.snap_from_m).to.be.a('number');\n  pm.expect(j.snap_to_m).to.be.a('number');\n});\npm.test('header X-Route-Ms ada', () => pm.expect(pm.response.headers.get('X-Route-Ms')).to.match(/^\\d+$/));\nconst ms = +pm.response.headers.get('X-Route-Ms');\nconsole.log(j.region, j.distance_m + 'm', j.duration_s + 's', j.points_n + ' titik', ms + 'ms');\npm.collectionVariables.set('region', j.region);\npm.collectionVariables.set('etag', pm.response.headers.get('ETag') || '');\n"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Jakarta - Bandung 148 km (di atas batas)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-6.2088,106.8456&to=-6.9175,107.6191",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-6.2088,106.8456"
+                },
+                {
+                  "key": "to",
+                  "value": "-6.9175,107.6191"
+                }
+              ]
+            }
+          },
+          "description": "Di atas batas 40 km: untuk uji kapasitas/tail, jangan dipakai app.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "pm.test('200', () => pm.response.to.have.status(200));\nconst j = pm.response.json();\npm.test('region + jarak + durasi', () => {\n  pm.expect(j.region).to.be.a('string');\n  pm.expect(j.distance_m).to.be.above(0);\n  pm.expect(j.duration_s).to.be.above(0);\n});\npm.test('points_n cocok dengan points', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\npm.test('snap terisi', () => {\n  pm.expect(j.snap_from_m).to.be.a('number');\n  pm.expect(j.snap_to_m).to.be.a('number');\n});\npm.test('header X-Route-Ms ada', () => pm.expect(pm.response.headers.get('X-Route-Ms')).to.match(/^\\d+$/));\nconst ms = +pm.response.headers.get('X-Route-Ms');\nconsole.log(j.region, j.distance_m + 'm', j.duration_s + 's', j.points_n + ' titik', ms + 'ms');\npm.collectionVariables.set('region', j.region);\npm.collectionVariables.set('etag', pm.response.headers.get('ETag') || '');\n"
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "8. error 422 beda region",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-5.4292,105.2611",
-        "description": ""
-      }
+      "name": "3. Region lain (butuh graf region tsb)",
+      "description": "Hanya 200 kalau server memuat graf region; environment 'local' biasanya hanya Java.",
+      "item": [
+        {
+          "name": "Palembang 7 km (sumatra)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-2.9900,104.7600&to=-3.0000,104.8000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-2.9900,104.7600"
+                },
+                {
+                  "key": "to",
+                  "value": "-3.0000,104.8000"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "const code = pm.response.code;\npm.test('200, atau 422 kalau environment ini tidak memuat graf region tsb', () => pm.expect([200, 422]).to.include(code));\nif (code === 200) {\n  const j = pm.response.json();\n  pm.test('region + jarak + durasi', () => {\n    pm.expect(j.region).to.be.a('string');\n    pm.expect(j.distance_m).to.be.above(0);\n    pm.expect(j.duration_s).to.be.above(0);\n  });\n  pm.test('points_n cocok', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\n  console.log(j.region, j.distance_m + 'm', j.points_n + ' titik');\n} else {\n  pm.test('pesan error jelas', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);\n  console.log('422:', pm.response.json().error, '- jalankan dengan environment Homelab');\n}\n"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Medan - Binjai 23 km (sumatra)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=3.5952,98.6722&to=3.6001,98.4852",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "3.5952,98.6722"
+                },
+                {
+                  "key": "to",
+                  "value": "3.6001,98.4852"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "const code = pm.response.code;\npm.test('200, atau 422 kalau environment ini tidak memuat graf region tsb', () => pm.expect([200, 422]).to.include(code));\nif (code === 200) {\n  const j = pm.response.json();\n  pm.test('region + jarak + durasi', () => {\n    pm.expect(j.region).to.be.a('string');\n    pm.expect(j.distance_m).to.be.above(0);\n    pm.expect(j.duration_s).to.be.above(0);\n  });\n  pm.test('points_n cocok', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\n  console.log(j.region, j.distance_m + 'm', j.points_n + ' titik');\n} else {\n  pm.test('pesan error jelas', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);\n  console.log('422:', pm.response.json().error, '- jalankan dengan environment Homelab');\n}\n"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Banda Aceh - Medan 579 km (sumatra, ferry/tail)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=5.5480,95.3230&to=3.5952,98.6722",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "5.5480,95.3230"
+                },
+                {
+                  "key": "to",
+                  "value": "3.5952,98.6722"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "const code = pm.response.code;\npm.test('200, atau 422 kalau environment ini tidak memuat graf region tsb', () => pm.expect([200, 422]).to.include(code));\nif (code === 200) {\n  const j = pm.response.json();\n  pm.test('region + jarak + durasi', () => {\n    pm.expect(j.region).to.be.a('string');\n    pm.expect(j.distance_m).to.be.above(0);\n    pm.expect(j.duration_s).to.be.above(0);\n  });\n  pm.test('points_n cocok', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\n  console.log(j.region, j.distance_m + 'm', j.points_n + ' titik');\n} else {\n  pm.test('pesan error jelas', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);\n  console.log('422:', pm.response.json().error, '- jalankan dengan environment Homelab');\n}\n"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Denpasar - Singaraja 82 km (nusa-tenggara)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-8.6705,115.2126&to=-8.1121,115.0882",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-8.6705,115.2126"
+                },
+                {
+                  "key": "to",
+                  "value": "-8.1121,115.0882"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "const code = pm.response.code;\npm.test('200, atau 422 kalau environment ini tidak memuat graf region tsb', () => pm.expect([200, 422]).to.include(code));\nif (code === 200) {\n  const j = pm.response.json();\n  pm.test('region + jarak + durasi', () => {\n    pm.expect(j.region).to.be.a('string');\n    pm.expect(j.distance_m).to.be.above(0);\n    pm.expect(j.duration_s).to.be.above(0);\n  });\n  pm.test('points_n cocok', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\n  console.log(j.region, j.distance_m + 'm', j.points_n + ' titik');\n} else {\n  pm.test('pesan error jelas', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);\n  console.log('422:', pm.response.json().error, '- jalankan dengan environment Homelab');\n}\n"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Kasus error",
+      "description": "Respons error yang harus tetap terbaca klien.",
+      "item": [
+        {
+          "name": "422 lintas region",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-6.2088,106.8456&to=3.5952,98.6722",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-6.2088,106.8456"
+                },
+                {
+                  "key": "to",
+                  "value": "3.5952,98.6722"
+                }
+              ]
+            }
+          },
+          "description": "Harus 422 cross-region bila kedua region termuat; server satu region menjawab 422 snap.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "const e = pm.response.json().error;",
+                  "pm.test('ada pesan error', () => pm.expect(e).to.be.a('string').and.not.empty);",
+                  "console.log(e);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "422 tidak ada jalan dalam radius snap",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-8.0,110.0&to=-7.9,110.1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-8.0,110.0"
+                },
+                {
+                  "key": "to",
+                  "value": "-7.9,110.1"
+                }
+              ]
+            }
+          },
+          "description": "Titik di laut selatan Jawa.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "pm.test('pesan snap', () => pm.expect(pm.response.json().error).to.include('snap'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 koordinat rusak",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-7.8435723,110.392939"
+                },
+                {
+                  "key": "to",
+                  "value": "-7.7393368"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 di luar Indonesia",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=48.8566,2.3522&to=51.5074,-0.1278",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "48.8566,2.3522"
+                },
+                {
+                  "key": "to",
+                  "value": "51.5074,-0.1278"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));",
+                  "pm.test('pesan Indonesia', () => pm.expect(pm.response.json().error).to.include('Indonesia'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

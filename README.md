@@ -291,22 +291,28 @@ Catatan lapangan:
 
 ### Coba tanpa app (Hoppscotch / Postman / curl)
 
-Dua collection tersedia:
+Satu collection dengan collection variable `baseUrl`, plus dua environment
+untuk berpindah host:
 
-| file | host | isi |
-|---|---|---|
-| `docs/routeid-homelab.postman_collection.json` | `http://192.168.1.219:8080` | 14 request: tiap kelas rute (7/15/42/148/579 km), POST, dan 3 kasus error. Ada test script Postman (cek `points_n`, `polyline_b64`, status 422/400). |
-| `docs/routeid.postman_collection.json` | `http://127.0.0.1:8080` | versi lokal, 8 request |
+| file | isi |
+|---|---|
+| `docs/routeid.postman_collection.json` | 21 request: Meta (`healthz`/`version`/`metrics`), Route inti (points, geojson, polyline + `polyline_b64`, POST objek/string, `restrictions=0`, ETag → 304), kelas jarak (42 km dan 148 km), region lain (Sumatra, Bali), 4 kasus error. Tiap request punya test script Postman. |
+| `docs/routeid.postman_environment-local.json` | `baseUrl = http://127.0.0.1:8080` |
+| `docs/routeid.postman_environment-homelab.json` | `baseUrl = http://192.168.1.219:8080` |
 
-Import `docs/routeid.postman_collection.json` di Hoppscotch
-(Collections → Import → Postman) atau Postman (File → Import). Isinya 7 request
-siap tekan, **tanpa variabel** (URL absolut `http://127.0.0.1:8080`) supaya
-tidak gagal `Invalid URL` gara-gara environment tidak ikut ter-import:
-`healthz`, GET polyline, GET `points`, POST objek, POST string, perbandingan
-`restrictions=0`, dan satu kasus 422.
+Import collection lalu environment (Postman: File → Import; Hoppscotch:
+Collections → Import → Postman), pilih environment di kanan atas. Tanpa
+environment tetap jalan: default collection variable `http://127.0.0.1:8080`,
+jadi tidak muncul `Invalid URL`.
+
+Request di folder "Region lain" butuh graf region tsb: server lokal yang hanya
+memuat `data/java.graph` menjawab 422 dan test menerima itu; homelab memuat
+`java`, `sumatra`, `nusa-tenggara`. Homelab memakai `-rate 15` per menit
+(burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang-ulang —
+request identik dengan `If-None-Match` dibalas 304 dan tidak memakan kuota.
 
 Kalau dijalankan di emulator/HP, ganti `127.0.0.1` jadi `10.0.2.2` (emulator
-Android) atau IP LAN mesin (`hostname -I`).
+Android) atau IP LAN mesin (`hostname -I`) lewat environment variable.
 
 Atau manual di Hoppscotch:
 
