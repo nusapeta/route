@@ -30,19 +30,34 @@ butuh argumen eksplisit dan milestone sendiri.
 |---|---|---|---|
 | RSS idle (3 region termuat, v4) | **14,9 MB** | <= 20 MB | 32 MB |
 | Binary statis | 6,6 MB | <= 8 MB | 12 MB |
-| Image container | 23 MB | <= 25 MB | 40 MB |
+| Image container | 24 MB (prebuilt alpine) | <= 25 MB | 40 MB |
 | Start sampai `/healthz` 200 | 10 ms | <= 25 ms | 100 ms |
-| Preprocess per pulau | 58 s | <= 90 s | 5 menit |
+| Preprocess per pulau | 58 s (v3, 1 worker) / **3m53s** (v4 Java, 4 worker, box berbeban) | <= 90 s di mesin sepi | 5 menit |
 | RSS @ beban 42 km, `-conc 4` | 558 MB | <= 350 MB | 700 MB |
-| Throughput 42 km (i3-6100T) | 10,9 RPS | >= 20 RPS | - |
+| Throughput 42 km (i3-6100T) | 10,9 (v3) -> **13,8-16,0 RPS** (v4) | >= 20 RPS | - |
 | Densitas | 19,5 RPS/GB (v3) -> **~240 RPS/GB** (v4: 15 RPS / 64 MB) | >= 45 RPS/GB | - |
 | Artefak graph per pulau | **693 MB** (Java, v4; -32 %) | <= 800 MB | 1 GB |
-| p95 klien 42 km, `-conc 4` | 439 ms | <= 400 ms | 800 ms |
+| p95 klien 42 km, `-conc 4` | 330 ms (v4, homelab berbeban) | <= 400 ms ✅ | 800 ms |
 | Galat ujung rute (snap) | **p50 16 m, p95 36 m** (offset uji <=40 m) | p50 <= 20 m, p95 <= 60 m | p95 150 m |
 | Pelanggaran turn restriction | 0 (3,17% fallback) | 0 (fallback <= 1%) | 0 |
 
 "Densitas" = RPS / RSS, metrik utama proyek ini: satu GB RAM harus menampung
 sebanyak mungkin rute per detik.
+
+## Status ringkas (2026-11-07)
+
+| milestone | status | hasil inti |
+|---|---|---|
+| M1 metadata + golden test | ✅ | format v3/v4 provenance, `/version`, regresi otomatis |
+| M2 snap ke ruas | ✅ | galat ujung 67,3 -> 16,1 m p50 |
+| M3 biaya per ekspansi | ✅ | latensi ~2x, memori -25 % |
+| M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,4 ms), `/metrics` |
+| M5 cakupan | ✅ | v4 (Java 693 MB), ferry, motor, 7 pulau, tangga ε |
+| M6 bukti (paper) | ⬜ | resep + skrip siap, jalan di mesin lain (`docs/M6.md`) |
+
+Yang belum ada nombornya: head-to-head OSRM (E1) dan ground truth (E2). Sampai
+keduanya jalan, README/paper hanya boleh mengklaim biaya per rute (memori,
+artefak, latency), bukan "tercepat" atau "paling akurat".
 
 ## Milestone
 
@@ -78,7 +93,7 @@ kecepatan di test menggagalkan 3 pasangan (harness tidak vakum).
 45 → 4 m; jarak rute terkoreksi 58 m; geometri mulai/berakhir di jalan.
 **Sisa:** kasus spur (rute keluar arah lain) masih garis lurus sepanjang `Along`.
 
-### M3 — Naikkan densitas 2x (3-5 hari)
+### M3 — Naikkan densitas 2x — SELESAI
 
 Tujuan: satu box kecil menampung ~1.200 user (1 rute/menit), bukan 600.
 
@@ -128,7 +143,7 @@ opsinya ada di BACKLOG 6/7 (ALT atau reverse CSR sebagai sidecar, keduanya
 menambah, bukan mengurangi) — atau turunkan `maxSlots` dan terima `ErrTooFar`
 untuk koridor >150 km.
 
-### M4 — Siap dipakai app (2-3 hari)
+### M4 — Siap dipakai app — SELESAI
 
 - [x] Timeout per request + `context` yang membatalkan A* di tengah jalan:
       dicek tiap 256 ekspansi, `504 {"error":"deadline exceeded"}`, workspace
