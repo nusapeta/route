@@ -110,9 +110,18 @@ menaikkan RPS tanpa core tambahan hanya mengurangi ekspansi.
    — **terlalu besar**; alternatif: 8 landmark uint32 = 72 MB, atau simpan
    `uint24`, atau landmark hanya untuk node di jalan kelas >= tertiary).
 
+**Status M3: ditunda, dengan angka.** Setelah M3 menurunkan biaya per ekspansi
+1,9-2,0x (lihat RESULTS §10), ALT harus dinilai ulang: keuntungannya sekarang
+hanya mengurangi ekspansi, bukan lagi menghilangkan 39% CPU trigonometri. Biaya
+terukur: `d(l,·)` sebagai `uint16` (skala 1/8 detik, saturasi admissible karena
+`min(d,cap)` tetap batas bawah) = 4 landmark x 2 B x 22,7 jt = **182 MB Java**,
+2 landmark = 91 MB. Rencana sidecar: file `map.alt` terpisah (magic, jumlah
+landmark, id landmark, array uint16), dibuka hanya kalau flag `-alt map.alt`
+diberikan, sehingga budget "ringan" tetap berlaku untuk deploy default.
+
 **Catatan penting.** Karena biaya memorinya besar, ALT harus diuji terhadap
-budget: kalau +72 MB menaikkan RPS 2x, densitas tetap naik (19,5 -> ~50 RPS/GB),
-jadi masih layak; kalau hanya 1,2x, tolak dan pilih bidirectional.
+budget: kalau +91 MB menaikkan RPS 2x, densitas tetap naik, jadi masih layak;
+kalau hanya 1,2x, tolak dan pilih opsi lain.
 
 **Lulus bila.** >= 20 RPS @42 km di i3-6100T, RSS beban <= 350 MB, jarak rute
 identik (golden).
@@ -121,9 +130,16 @@ identik (golden).
 
 **Masalah.** Frontier satu arah besar; tiap node yang di-pop menambah kerja.
 
-**Rencana.** CSR balik (`Roff`/`Rto`, ~11 MB Java), hentikan saat kedua frontier
-bertemu, heuristik tetap admissible (`(d(v,t)-d(s,v))/2`). Cocok dipadukan
-dengan eps yang ada.
+**Rencana.** CSR balik (`Roff`/`Rto`), hentikan saat kedua frontier bertemu,
+heuristik tetap admissible (`(d(v,t)-d(s,v))/2`).
+
+**Status M3: ditunda, biaya memori lebih besar dari perkiraan awal.** CSR balik
+butuh `Rto` uint32 per edge (24 jt x 4 B = 96 MB Sumatra, 187 MB Java) plus
+`Roff` per node (11,9 jt x 4 B = 48 MB Sumatra, 91 MB Java) — total **144 MB
+Sumatra / 278 MB Java**, di atas batas RSS beban 350 MB sebelum workspace.
+Dua arah juga menggandakan frontier, jadi penghematan workspace hanya ~25%.
+Opsi berikutnya kalau tetap dikerjakan: reverse CSR sebagai sidecar opt-in
+sama seperti ALT, dibangun `rid-extract -reverse` setelah graph utama.
 
 **Lulus bila.** Ekspansi turun >= 30% untuk rute 15-42 km tanpa perubahan jarak.
 
@@ -132,12 +148,16 @@ dengan eps yang ada.
 **Masalah.** Puncak heap 876 MB setelah 29 rute panjang karena array tumbuh
 (grow menyalin). Ini juga sumber GC spike.
 
-**Rencana.** Perkiraan ukuran dari jarak heuristik awal (`haversine/avgEdgeLen`),
-dialokasikan sekali dengan faktor 1,3; kalau meleset, fallback ke map hash
-(seperti sekarang) sehingga perilaku untuk rute ekstrem tak berubah.
+**Status M3: selesai sebagian, tanpa prealokasi.** Yang dikerjakan: kunci dan
+generasi workspace berbagi satu `uint32` sehingga 16 B/slot -> **12 B/slot
+(−25%)** dan satu array lebih sedikit untuk di-probe; load factor tabel dinaikkan
+0,7 -> 0,8 sehingga tabel tumbuh lebih lambat. Prealokasi dari perkiraan jarak
+tidak dikerjakan karena grow yang ada hanya terjadi sekali per slot pool lalu
+berhenti; yang lebih menentukan puncak adalah ukuran tabel, bukan penyalinan.
 
 **Lulus bila.** Rute 148 km memakai <= 60% heap sekarang; tidak ada regresi
-latency > 5%.
+latency > 5%. (Butuh pengukuran ulang puncak heap dengan graph 148 km; angka
+876 MB berasal dari graph sebelum v3.)
 
 ---
 

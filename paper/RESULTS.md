@@ -306,3 +306,68 @@ Biaya latensi dari snapping ruas tidak terukur (20 request per konfigurasi, keep
 Respons memuat `snap_from`/`snap_to` (koordinat proyeksi) dan header
 `X-Route-Trim`, sehingga app bisa menaruh pin di posisi mentah dan polyline di
 jalan tanpa garis spur yang menyeberang bangunan.
+
+## 10. Biaya per ekspansi: heuristik + workspace + heap (M3)
+
+Profil CPU rute 30–50 km (Java, ε=1,5, `rid-bench -cpuprofile`) sebelum M3:
+
+| fungsi | flat |
+|---|---|
+| `workspace.probe` (hash slot) | 28,1% |
+| `math.sin` + `math.cos` + `math.xatan` (via `Haversine`) | 27,0% |
+| `heapPop` | 12,2% |
+| `sort.Search` (cek turn restriction per tetangga) | 4,4% |
+
+Yang diubah, semuanya di jalur panas tanpa menyentuh format graph:
+
+1. **Heuristik tanpa trigonometri.** `hctx` menyimpan koordinat tujuan sekali per
+   query; estimasi per relaksasi jadi satu lookup tabel kosinus (resolusi 1/20°,
+   dibulatkan ke bawah) + satu `sqrt`, memakai skala meter teraman
+   (`110540` m/° lintang, `111320·cos(max|lat|)` m/° bujur) dan margin 0,99.
+   Selisih flat-earth vs great-circle orde dua (≈0,15% pada 10°, 1,4% pada 30°),
+   jadi heuristik tetap batas bawah—dibuktikan `TestHeuristicAdmissible`.
+2. **Workspace 12 B/slot.** Kunci dan cap generasi berbagi satu `uint32`
+   (`gen<<nodeBits | edge+1`), nodeBits dari jumlah edge (Java 25 bit → 7 bit
+   generasi, tabel dibersihkan tiap 128 query, biaya ~0,05 ms/query). Sebelumnya
+   kunci dan generasi adalah dua array terpisah (16 B/slot).
+3. **Turn restriction sekali per ekspansi.** `Graph.Span(e)` mengembalikan rentang
+   `ban`/`only` lewat dua `sort.Search`, lalu pengecekan tetangga linear—bukan
+   empat pencarian biner per ekspansi seperti sebelumnya.
+4. **Heap 4-ary** dan load factor tabel 0,7 → 0,8.
+
+Hasil, dua binary dijalankan bergantian pada 91 pasang yang sama (30–50 km),
+`-eps 1.5`, tiga ronde:
+
+| ronde | p50 lama | p50 baru | rasio per-pasangan (median) |
+|---|---|---|---|
+| 1 | 406 ms | 206 ms | 1,9x |
+| 2 | 523 ms | 254 ms | 1,95x |
+| 3 | 401 ms | 242 ms | 1,76x |
+
+Throughput lewat `rid-server -conc 2`, satu rute 41,7 km, `scripts/loadtest.py
+-c 2 -n 12` (dua ronde, angka ronde 2):
+
+| | lama | baru | rasio |
+|---|---|---|---|
+| RPS | 23,5 | **41,5** | 1,76x |
+| p50 server | 79 ms | **45 ms** | 1,76x |
+| p95 server | 88 ms | 52 ms | 1,69x |
+
+Catatan metodologi: box uji ini (2 core/4 thread) mengalami throttling saat uji
+panjang—p50 lama bisa bergeser 400→800 ms antar-runs, jadi yang bermakna adalah
+rasio yang diukur bergantian, bukan angka absolut.
+
+**Ekspansi hampir tidak berubah** (rata-rata 815.579 → 817.551, +0,2% karena
+heuristik sedikit lebih longgar). Artinya kemenangan 1,9–2,0x datang murni dari
+biaya per ekspansi, bukan dari pencarian yang lebih pintar—persis yang tidak
+bisa dicapai ALT tanpa tambahan memori (lihat ROADMAP M3).
+
+**Kualitas rute**: pada 601 pasang Java, waktu tempuh **537/537 sama** (hanya
+pasangan yang berhasil dibandingkan, 64 gagal di kedua versi); 1 pasang memilih
+geometri lain dengan waktu tempuh identik. Golden test kota sintetis di-rebaseline:
+10 entri berubah jarak/waktu <=8% pada rute 250 m–3,4 km, 8 di antaranya jadi
+lebih pendek (ε=1,5 memang tidak menjamin optimal; kedua versi sama-sama
+suboptimal).
+
+Puncak memori workspace ikut turun: tabel maksimum 2^25 slot, 12 B/slot =
+**403 MB/query** (sebelumnya 537 MB/query).

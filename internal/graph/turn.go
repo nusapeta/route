@@ -58,6 +58,51 @@ func (g *Graph) OnlyBlocked(e, f uint32) bool {
 	return true
 }
 
+// RestrictionSpan is the set of banned and only_* successors of one edge,
+// fetched once per expansion so the neighbour loop does no binary search.
+type RestrictionSpan struct {
+	ban, only []uint64
+}
+
+// Span returns the restriction entries that apply to outgoing edge e.
+func (g *Graph) Span(e uint32) RestrictionSpan {
+	var sp RestrictionSpan
+	lo := PackTurn(e, 0)
+	hi := PackTurn(e+1, 0)
+	if len(g.Ban) > 0 {
+		a := sort.Search(len(g.Ban), func(i int) bool { return g.Ban[i] >= lo })
+		b := sort.Search(len(g.Ban), func(i int) bool { return g.Ban[i] >= hi })
+		sp.ban = g.Ban[a:b]
+	}
+	if len(g.Only) > 0 {
+		a := sort.Search(len(g.Only), func(i int) bool { return g.Only[i] >= lo })
+		b := sort.Search(len(g.Only), func(i int) bool { return g.Only[i] >= hi })
+		sp.only = g.Only[a:b]
+	}
+	return sp
+}
+
+// Forbidden reports whether the transition e -> f is blocked by this span.
+func (sp RestrictionSpan) Forbidden(f uint32) bool {
+	for _, k := range sp.ban {
+		if uint32(k) == f {
+			return true
+		}
+	}
+	if len(sp.only) == 0 {
+		return false
+	}
+	for _, k := range sp.only {
+		if uint32(k) == f {
+			return false // explicitly allowed
+		}
+	}
+	return true
+}
+
+// Empty reports whether the span carries no restrictions, the common case.
+func (sp RestrictionSpan) Empty() bool { return len(sp.ban) == 0 && len(sp.only) == 0 }
+
 // Forbidden is the router-facing check: true when the transition e -> f must
 // not be taken.
 func (g *Graph) Forbidden(e, f uint32) bool {

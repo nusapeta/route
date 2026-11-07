@@ -19,8 +19,8 @@ Angka routeid di bawah **semua terukur di repo ini** (perintahnya ada di
 | RSS 1x rute 148 km | **385 MB** (bertambah per workspace) | tetap ~1-1.5 GB | dokumentasi |
 | Preprocess 22,7 jt node | **58 s** (1,9 GB dgn `GOMEMLIMIT`) | ~15-40 menit | dokumentasi |
 | Latency 15 km | 136-155 ms | ~10-30 ms | dokumentasi |
-| Latency 42 km | 191 ms (1 query) | ~10-30 ms | dokumentasi |
-| Throughput 42 km | 10,9 RPS @4 core-thread | belum diukur | - |
+| Latency 42 km | 191 ms (1 query, sebelum M3) | ~10-30 ms | dokumentasi |
+| Throughput 42 km | 10,9 RPS @4 core-thread (sebelum M3); 1,76x setelah M3 di box uji | belum diukur | - |
 | Turn restriction | ya (edge-based A*), 3.795 ban / 155 only_rules | ya | dokumentasi |
 | Traffic / ETA real-time | tidak | tidak | - |
 | Binary / image | 6,6 MB statis / image 23 MB | image + profile Lua | dokumentasi |
@@ -75,7 +75,7 @@ p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
 |---|---|---|
 | M1 | metadata graph, build info, golden test | `/healthz` menyebut pbf asal; regresi rute ketahuan otomatis |
 | M2 | snap ke ruas (bukan node) | galat ujung p50 <= 20 m, p95 <= 60 m |
-| M3 | ALT / bidirectional, prealokasi workspace | 2x RPS, RSS beban <= 350 MB |
+| M3 | biaya per ekspansi (heuristik, workspace 12 B/slot, heap 4-ary); ALT ditunda karena memori | latensi 1,9-2,0x, dalam box uji; RPS i3 menyusul deploy |
 | M4 | timeout, rate limit, `/metrics`, ETag | tak ada request menahan slot >10 s |
 | M5 | profil motor, semua pulau, ferry, artefak <= 800 MB | Jakarta -> Medan dapat rute |
 | M6 | E1 baseline OSRM, E2 ground truth | tabel komparasi terisi angka nyata |

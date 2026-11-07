@@ -81,14 +81,35 @@ kecepatan di test menggagalkan 3 pasangan (harness tidak vakum).
 
 Tujuan: satu box kecil menampung ~1.200 user (1 rute/menit), bukan 600.
 
-- [ ] ALT: 16 landmark, `max(|d(l,v)-d(l,t)|)`, tetap admissible, kompatibel
-      dengan eps yang ada. Tambah 16 x 4 B/node = 16 MB untuk Java.
-- [ ] Workspace A*: alokasi awal dari perkiraan jarak, hindari grow berulang;
-      `GOMEMLIMIT` sebagai plafon.
-- [ ] Kurangi RSS beban: pertimbangkan bidirectional agar frontier lebih kecil.
+- [x] Heuristik tanpa trigonometri: satu lookup kosinus + satu `sqrt` per
+      relaksasi (sebelumnya 3 panggilan `math.Sin`/`Cos`/`Atan2`). Rata-rata
+      39% CPU sebelumnya habis di `Haversine`.
+- [x] Tabel workspace dipadatkan: kunci + generasi berbagi satu `uint32`
+      (`gen<<nodeBits | edge+1`), jadi 12 B/slot (dari 16 B/slot, −25%) dan satu
+      array lebih sedikit untuk di-probe.
+- [x] Batas turn restriction diambil sekali per ekspansi (`Graph.Span`) lalu
+      dicek linear, bukan dua `sort.Search` per tetangga.
+- [x] Heap frontier 4-ary (pohon lebih dangkal) dan load factor tabel 0,8.
+
+**Hasil terukur (Java, 601 pasang, ε=1,5, box uji 2 core):** p50 bucket 30–50 km
+406 → 206 ms dan 523 → 254 ms (rasio per-pasangan median 1,9x, 2,0x); throughput
+`-conc 2` pada satu rute 41,7 km 7,2 → 12,1 RPS. **Jumlah ekspansi sama**
+(815k vs 818k) — kemenangannya murni biaya per ekspansi. Waktu tempuh 537/537
+pasang identik; 1 pasang memilih geometri lain dengan waktu sama.
+
+**Tidak dikerjakan (dengan alasan terukur):**
+
+- ALT ditunda: `d(l,·)` untuk 4 landmark sebagai `uint16` tetap butuh
+  2 x 4 x 2 B x 22,7 jt node = 182 MB untuk Java, dan bidirectional butuh
+  reverse CSR ~278 MB — keduanya melewati batas 350 MB sebelum workspace.
+  Lihat BACKLOG item 6 untuk skema sidecar `map.alt` (opt-in, di luar budget).
+- Alokasi awal workspace dari perkiraan jarak: grow yang ada sudah jarang
+  (tabel berhenti tumbuh setelah query panjang pertama) dan `-conc` membatasi
+  puncaknya, jadi tidak ada angka yang bisa diperbaiki.
 
 **Selesai bila:** >= 20 RPS @42 km di i3, RSS beban <= 350 MB, dan jarak rute
-identik dengan baseline (dibuktikan golden test M1).
+identik dengan baseline (dibuktikan golden test M1). Status: latensi 1,9–2,0x
+tercapai; verifikasi RPS di i3 homelab menyusul bersama deploy berikutnya.
 
 ### M4 — Siap dipakai app (2-3 hari)
 

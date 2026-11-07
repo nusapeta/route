@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,7 +33,19 @@ func main() {
 	pairsIn := flag.String("pairs", "", "route fixed pairs from CSV (from_lat,from_lon,to_lat,to_lon)")
 	pairsOut := flag.String("emit-pairs", "", "write the sampled coordinate pairs and exit")
 	noStrict := flag.Bool("no-restrictions", false, "ignore turn restrictions (baseline)")
+	cpuProf := flag.String("cpuprofile", "", "write CPU profile")
 	flag.Parse()
+
+	if *cpuProf != "" {
+		f, err := os.Create(*cpuProf)
+		if err != nil {
+			panic(err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			panic(err)
+		}
+		defer func() { pprof.StopCPUProfile(); f.Close() }()
+	}
 
 	g, err := graph.Open(*graphPath)
 	if err != nil {
@@ -186,7 +199,7 @@ func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
 			panic(err)
 		}
 		defer csv.Close()
-		fmt.Fprintln(csv, "bucket,route_km,ms,expansions,failed")
+		fmt.Fprintln(csv, "bucket,route_km,ms,expansions,failed,from_lat,from_lon,to_lat,to_lon,time_ds")
 	}
 	type acc struct {
 		ms, exp []float64
@@ -225,7 +238,7 @@ func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
 		if err != nil {
 			a.fail++
 			if csv != nil {
-				fmt.Fprintf(csv, "%s,,%.3f,0,1\n", bucket, el)
+				fmt.Fprintf(csv, "%s,,%.3f,0,1,%.6f,%.6f,%.6f,%.6f,0\n", bucket, el, fla, flo, tla, tlo)
 			}
 			continue
 		}
@@ -234,7 +247,8 @@ func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
 		a.km += float64(res.DistanceM) / 1000
 		a.n++
 		if csv != nil {
-			fmt.Fprintf(csv, "%s,%.2f,%.3f,%d,0\n", bucket, float64(res.DistanceM)/1000, el, res.Expansions)
+			fmt.Fprintf(csv, "%s,%.2f,%.3f,%d,0,%.6f,%.6f,%.6f,%.6f,%d\n", bucket,
+				float64(res.DistanceM)/1000, el, res.Expansions, fla, flo, tla, tlo, res.TimeDs)
 		}
 	}
 	fmt.Printf("%-9s %5s %8s %8s %9s %9s %10s %10s\n", "bucket", "n", "route_km", "p50_ms", "p95_ms", "p99_ms", "mean_exp", "fail")

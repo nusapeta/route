@@ -49,7 +49,7 @@ func NewRouter(g *Graph, concurrency int) *Router {
 	}
 	r := &Router{g: g, pool: make(chan *workspace, concurrency), eps: 1.5, strict: true}
 	for i := 0; i < concurrency; i++ {
-		r.pool <- newWorkspace(slots)
+		r.pool <- newWorkspace(slots, g.EdgeCount)
 	}
 	return r
 }
@@ -70,33 +70,59 @@ func (r *Router) SetEpsilon(eps float32) {
 	}
 }
 
+// workspace is the per-query open-addressing table. Keys and generation stamps
+// share one word (gen<<nodeBits | node+1) so a probe touches one array instead of
+// two and the table costs 12 B/slot instead of 16 B/slot.
 type workspace struct {
-	keys []uint32 // node+1
-	gen  []uint32 // generation stamp per slot
-	gs   []float32
-	came []uint32
-	mask uint32
-	used int
-	cur  uint32
-	heap itemHeap
+	keys     []uint32
+	gs       []float32
+	came     []uint32
+	mask     uint32
+	nodeMask uint32 // low bits holding node+1
+	nodeBits uint
+	genBits  uint
+	maxGen   uint32
+	used     int
+	cur      uint32
+	heap     itemHeap
 }
 
-func newWorkspace(slots uint32) *workspace {
+// workspaceBits picks how many bits the search state needs, leaving the rest for
+// the generation stamp. The state is an edge index, so edge count sets the budget.
+func workspaceBits(entries uint32) (bits uint) {
+	bits = 1
+	for (uint32(1) << bits) <= entries {
+		bits++
+	}
+	return bits
+}
+
+func newWorkspace(slots, entries uint32) *workspace {
+	bits := workspaceBits(entries)
+	if bits > 28 {
+		// Keep at least 4 generation bits; beyond 2^28 edges the packed table
+		// would wrap too often and is not worth the 25% saving.
+		panic("graph: edge count exceeds the packed workspace limit")
+	}
+	genBits := 32 - bits
 	return &workspace{
-		keys: make([]uint32, slots),
-		gen:  make([]uint32, slots),
-		gs:   make([]float32, slots),
-		came: make([]uint32, slots),
-		mask: slots - 1,
-		cur:  1,
+		keys:     make([]uint32, slots),
+		gs:       make([]float32, slots),
+		came:     make([]uint32, slots),
+		mask:     slots - 1,
+		nodeBits: bits,
+		genBits:  genBits,
+		nodeMask: (uint32(1) << bits) - 1,
+		maxGen:   (uint32(1) << genBits) - 1,
+		cur:      1,
 	}
 }
 
 func (w *workspace) reset() {
 	w.cur++
-	if w.cur == 0 {
-		for i := range w.gen {
-			w.gen[i] = 0
+	if w.cur > w.maxGen {
+		for i := range w.keys {
+			w.keys[i] = 0
 		}
 		w.cur = 1
 	}
@@ -106,11 +132,13 @@ func (w *workspace) reset() {
 
 func (w *workspace) probe(n uint32) (uint32, bool) {
 	i := (n * 2654435761) & w.mask
+	want := n + 1
 	for {
-		if w.gen[i] != w.cur {
+		k := w.keys[i]
+		if k>>w.nodeBits != w.cur {
 			return i, false
 		}
-		if w.keys[i] == n+1 {
+		if k&w.nodeMask == want {
 			return i, true
 		}
 		i = (i + 1) & w.mask
@@ -129,7 +157,7 @@ func (w *workspace) get(n uint32) (float32, uint32, bool) {
 func (w *workspace) set(n uint32, g float32, came uint32) bool {
 	i, ok := w.probe(n)
 	if !ok {
-		if (w.used+1)*10 >= len(w.keys)*7 {
+		if (w.used+1)*10 >= len(w.keys)*8 {
 			if !w.grow() {
 				return false
 			}
@@ -137,8 +165,7 @@ func (w *workspace) set(n uint32, g float32, came uint32) bool {
 		}
 		w.used++
 	}
-	w.keys[i] = n + 1
-	w.gen[i] = w.cur
+	w.keys[i] = w.cur<<w.nodeBits | (n + 1)
 	w.gs[i] = g
 	w.came[i] = came
 	return true
@@ -148,19 +175,19 @@ func (w *workspace) grow() bool {
 	if uint32(len(w.keys)) >= maxSlots {
 		return false
 	}
-	oldK, oldG, oldC, oldGen := w.keys, w.gs, w.came, w.gen
+	oldK, oldG, oldC := w.keys, w.gs, w.came
 	n := len(oldK) * 2
 	w.keys = make([]uint32, n)
-	w.gen = make([]uint32, n)
 	w.gs = make([]float32, n)
 	w.came = make([]uint32, n)
 	w.mask = uint32(n - 1)
 	w.used = 0
 	for i := range oldK {
-		if oldGen[i] != w.cur {
+		k := oldK[i]
+		if k>>w.nodeBits != w.cur {
 			continue
 		}
-		_ = w.set(oldK[i]-1, oldG[i], oldC[i])
+		_ = w.set(k&w.nodeMask-1, oldG[i], oldC[i])
 	}
 	return true
 }
@@ -211,6 +238,7 @@ func (r *Router) search(src, dst uint32, restrict bool) (Route, error) {
 	w := <-r.pool
 	defer func() { r.pool <- w }()
 	w.reset()
+	h := r.newHctx(dst)
 
 	for e := g.Off[src]; e < g.Off[src+1]; e++ {
 		ee := uint32(e)
@@ -218,7 +246,7 @@ func (r *Router) search(src, dst uint32, restrict bool) (Route, error) {
 		if !w.set(ee, g0, invalidEdge) {
 			return Route{}, ErrTooFar
 		}
-		heapPush(&w.heap, item{ee, g0 + r.heurEdge(ee, dst)})
+		heapPush(&w.heap, item{ee, g0 + h.estEdge(g, ee)})
 	}
 
 	var expanded int
@@ -233,7 +261,7 @@ func (r *Router) search(src, dst uint32, restrict bool) (Route, error) {
 			res.Expansions = expanded
 			return res, err
 		}
-		if cur.f > gCur+r.heurEdge(cur.node, dst)+0.5 {
+		if cur.f > gCur+h.estEdge(g, cur.node)+0.5 {
 			continue // stale entry
 		}
 		expanded++
@@ -242,9 +270,13 @@ func (r *Router) search(src, dst uint32, restrict bool) (Route, error) {
 		}
 		head := g.Off[g.To[cur.node]]
 		headEnd := g.Off[g.To[cur.node]+1]
+		var span RestrictionSpan
+		if restrict {
+			span = g.Span(cur.node)
+		}
 		for e := head; e < headEnd; e++ {
 			ee := uint32(e)
-			if restrict && g.Forbidden(cur.node, ee) {
+			if restrict && !span.Empty() && span.Forbidden(ee) {
 				continue
 			}
 			ng := gCur + float32(g.Time[ee])
@@ -254,22 +286,75 @@ func (r *Router) search(src, dst uint32, restrict bool) (Route, error) {
 			if !w.set(ee, ng, cur.node) {
 				return Route{}, ErrTooFar
 			}
-			heapPush(&w.heap, item{ee, ng + r.heurEdge(ee, dst)})
+			heapPush(&w.heap, item{ee, ng + h.estEdge(g, ee)})
 		}
 	}
 	return Route{}, ErrNoRoute
 }
 
-// heurEdge estimates the remaining cost from the head of edge e to b.
-func (r *Router) heurEdge(e, b uint32) float32 {
-	return r.heur(r.g.To[e], b)
+// hctx holds the parts of the heuristic that do not change during a query, so
+// the hot loop costs one table lookup and one square root instead of three
+// trigonometry calls per relaxation.
+type hctx struct {
+	lat, lon float64 // destination, degrees
+	scale    float32 // eps * 10 / maxSpeedMps, i.e. metres to weighted deciseconds
 }
 
-func (r *Router) heur(a, b uint32) float32 {
-	lat1, lon1 := r.g.Coords(a)
-	lat2, lon2 := r.g.Coords(b)
-	d := Haversine(lat1, lon1, lat2, lon2)
-	return r.eps * float32(d/maxSpeedMps*10) // deciseconds
+// Per-degree scale factors: the smallest value each direction can take, so the
+// planar estimate never exceeds the true great-circle distance.
+const (
+	metersPerDegLat = 110540.0
+	metersPerDegLon = 111320.0
+	cosStep         = 20 // cosine table resolution: 1/20 degree
+)
+
+// cosTab[i] = cos(i/cosStep degrees). Rows are rounded down (see cosFloor).
+var cosTab = func() []float64 {
+	t := make([]float64, 90*cosStep+3)
+	for i := range t {
+		t[i] = math.Cos(float64(i) / cosStep * math.Pi / 180)
+	}
+	return t
+}()
+
+// cosFloor returns a cosine no larger than the true one at either latitude, so
+// the east-west term is always an underestimate.
+func cosFloor(a, b float64) float64 {
+	m := math.Abs(a)
+	if x := math.Abs(b); x > m {
+		m = x
+	}
+	i := int(m*cosStep) + 1 // next bin up means higher latitude, smaller cosine
+	if i >= len(cosTab) {
+		i = len(cosTab) - 1
+	}
+	return cosTab[i] * (1 - 1e-9)
+}
+
+func (r *Router) newHctx(dst uint32) hctx {
+	lat, lon := r.g.Coords(dst)
+	return hctx{lat: lat, lon: lon, scale: r.eps * 10 / float32(maxSpeedMps)}
+}
+
+// heuristicMargin keeps the flat-earth estimate below the great-circle distance.
+// The flat-earth error is second order in the angular separation
+// (~(dLambda*cos(lat))^2/24, i.e. 0.15% for 10 degrees, 1.4% for 30 degrees), so
+// 1% covers every route this router is used for (< 2000 km) and the estimate stays
+// a lower bound on the true travel time.
+const heuristicMargin = 0.99
+
+// est estimates the remaining cost from a coordinate to the destination in
+// weighted deciseconds.
+func (h *hctx) est(lat, lon float64) float32 {
+	dlat := (lat - h.lat) * metersPerDegLat
+	dlon := (lon - h.lon) * metersPerDegLon * cosFloor(lat, h.lat)
+	return h.scale * heuristicMargin * float32(math.Sqrt(dlat*dlat+dlon*dlon))
+}
+
+// estEdge estimates the remaining cost from the head of edge e.
+func (h *hctx) estEdge(g *Graph, e uint32) float32 {
+	lat, lon := g.Coords(g.To[e])
+	return h.est(lat, lon)
 }
 
 // reconstruct walks the came-from chain of edges and turns it into a node
@@ -311,11 +396,15 @@ func Haversine(lat1, lon1, lat2, lon2 float64) float64 {
 	return 2 * earthR * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
 
+// heapArity is the branching factor of the frontier heap. Four children give a
+// shallower tree than binary and touch fewer cache lines per sift.
+const heapArity = 4
+
 func heapPush(h *itemHeap, it item) {
 	*h = append(*h, it)
 	i := len(*h) - 1
 	for i > 0 {
-		p := (i - 1) / 2
+		p := (i - 1) / heapArity
 		if (*h)[p].f <= (*h)[i].f {
 			break
 		}
@@ -333,13 +422,19 @@ func heapPop(h *itemHeap) item {
 	*h = old[:last]
 	i := 0
 	for {
-		l, rr := 2*i+1, 2*i+2
-		small := i
-		if l < last && (*h)[l].f < (*h)[small].f {
-			small = l
+		first := heapArity*i + 1
+		if first >= last {
+			break
 		}
-		if rr < last && (*h)[rr].f < (*h)[small].f {
-			small = rr
+		small := i
+		end := first + heapArity
+		if end > last {
+			end = last
+		}
+		for c := first; c < end; c++ {
+			if (*h)[c].f < (*h)[small].f {
+				small = c
+			}
 		}
 		if small == i {
 			break
