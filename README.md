@@ -289,14 +289,28 @@ Catatan lapangan:
 - Field `fallback: true` berarti larangan belok dilepas agar rute ketemu —
   berguna untuk telemetri, bukan untuk user.
 
-### Coba tanpa app (Hoppscotch / Postman / curl)
+### Coba tanpa app (Bruno / Hoppscotch / Postman / curl)
 
-Satu collection dengan collection variable `baseUrl`, plus dua environment
-untuk berpindah host:
+**Bruno** (native, environment ikut ter-import): buka folder
+`docs/bruno/routeid/` (Open Collection), lalu pilih environment `Local` atau
+`Homelab` di kanan atas. Isinya 21 request dengan test JavaScript Bruno
+(58 assertion): Meta (`healthz`/`version`/`metrics`), Route inti (points,
+geojson, polyline + `polyline_b64`, POST objek/string, `restrictions=0`,
+ETag → 304), kelas jarak (42 km, 148 km), region lain (Sumatra, Bali), dan 4
+kasus error. Versi CLI:
+
+```bash
+cd docs/bruno/routeid
+npx @usebruno/cli run -r --env Local
+npx @usebruno/cli run -r --env Homelab --delay 4300   # rate limit 15/menit
+```
+
+**Postman / Hoppscotch**: collection + environment JSON (Bruno tidak bisa
+impor file environment Postman, jadi pakai folder `docs/bruno/` di atas):
 
 | file | isi |
 |---|---|
-| `docs/routeid.postman_collection.json` | 21 request: Meta (`healthz`/`version`/`metrics`), Route inti (points, geojson, polyline + `polyline_b64`, POST objek/string, `restrictions=0`, ETag → 304), kelas jarak (42 km dan 148 km), region lain (Sumatra, Bali), 4 kasus error. Tiap request punya test script Postman. |
+| `docs/routeid.postman_collection.json` | 21 request, isi sama dengan koleksi Bruno; tiap request punya test script Postman. |
 | `docs/routeid.postman_environment-local.json` | `baseUrl = http://127.0.0.1:8080` |
 | `docs/routeid.postman_environment-homelab.json` | `baseUrl = http://192.168.1.219:8080` |
 

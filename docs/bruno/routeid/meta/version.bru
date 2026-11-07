@@ -1,0 +1,26 @@
+meta {
+  name: version
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/version
+  body: none
+  auth: none
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const v = res.getBody();
+  test("commit + built_at terisi", function () {
+    expect(v.commit).to.be.a("string").and.not.empty;
+    expect(v.built_at).to.be.a("string").and.not.empty;
+  });
+  test("goos linux", function () {
+    expect(v.goos).to.equal("linux");
+  });
+  console.log(v.commit, v.built_at, v.go_version);
+}

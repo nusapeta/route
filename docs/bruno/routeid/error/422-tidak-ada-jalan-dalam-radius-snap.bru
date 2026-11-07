@@ -1,0 +1,24 @@
+meta {
+  name: 422 tidak ada jalan dalam radius snap
+  type: http
+  seq: 19
+}
+
+get {
+  url: {{baseUrl}}/route?from=-8.0,110.0&to=-7.9,110.1
+  body: none
+  auth: none
+}
+
+docs {
+  Titik di laut selatan Jawa.
+}
+
+tests {
+  test("422", function () {
+    expect(res.getStatus()).to.equal(422);
+  });
+  test("pesan snap", function () {
+    expect(res.getBody().error).to.include("snap");
+  });
+}

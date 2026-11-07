@@ -1,0 +1,14 @@
+meta {
+  name: routeid
+}
+
+docs {
+  HTTP API routeid. Pilih environment "Local" (http://127.0.0.1:8080) atau
+  "Homelab" (http://192.168.1.219:8080) di kanan atas Bruno.
+
+  Homelab memakai -rate 15 per menit (burst 5) per IP: jalankan koleksi dengan
+  `bru run docs/bruno/routeid -r --env Homelab --delay 4300` supaya tidak 429.
+
+  Request di folder "region-lain" butuh graf region tsb; server lokal yang
+  hanya memuat data/java.graph menjawab 422 dan test menerima itu.
+}

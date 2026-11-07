@@ -1,0 +1,31 @@
+meta {
+  name: POST string coords + simplify
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/route
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "from": "-7.8435723,110.392939",
+    "to": "-7.7393368,110.3760593",
+    "simplify": 8
+  }
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+  test("respons normal", function () {
+    expect(j.points_n).to.be.above(1);
+    expect(j.points).to.have.lengthOf(j.points_n);
+  });
+  console.log(j.points_n, "titik,", j.distance_m + "m,", j.duration_s + "s");
+}

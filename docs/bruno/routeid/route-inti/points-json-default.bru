@@ -1,0 +1,36 @@
+meta {
+  name: points (JSON default)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593
+  body: none
+  auth: none
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+  test("region + jarak + durasi", function () {
+    expect(j.region).to.be.a("string");
+    expect(j.distance_m).to.be.above(0);
+    expect(j.duration_s).to.be.above(0);
+  });
+  test("points_n cocok dengan points", function () {
+    expect(j.points).to.have.lengthOf(j.points_n);
+  });
+  test("snap terisi", function () {
+    expect(j.snap_from_m).to.be.a("number");
+    expect(j.snap_to_m).to.be.a("number");
+  });
+  test("header X-Route-Ms ada", function () {
+    expect(res.getHeader("X-Route-Ms")).to.match(/^\d+$/);
+  });
+  console.log(j.region, j.distance_m + "m", j.duration_s + "s", j.points_n + " titik", res.getHeader("X-Route-Ms") + "ms");
+  bru.setVar("region", j.region);
+  bru.setVar("etag", res.getHeader("ETag") || "");
+}

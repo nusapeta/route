@@ -1,0 +1,41 @@
+meta {
+  name: POST objek + geojson + simplify
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/route
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "from": {
+      "lat": -7.8435723,
+      "lng": 110.392939
+    },
+    "to": {
+      "lat": -7.7393368,
+      "lng": 110.3760593
+    },
+    "format": "geojson",
+    "simplify": 8
+  }
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+  test("geojson FeatureCollection", function () {
+    expect(j.geojson.type).to.equal("FeatureCollection");
+  });
+  test("jarak > 0 dan titik > 1", function () {
+    expect(j.distance_m).to.be.above(0);
+    expect(j.points_n).to.be.above(1);
+  });
+  console.log("simplify 8 m:", j.points_n, "titik,", j.distance_m + "m");
+}

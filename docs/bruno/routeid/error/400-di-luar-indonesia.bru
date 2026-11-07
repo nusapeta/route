@@ -1,0 +1,20 @@
+meta {
+  name: 400 di luar Indonesia
+  type: http
+  seq: 21
+}
+
+get {
+  url: {{baseUrl}}/route?from=48.8566,2.3522&to=51.5074,-0.1278
+  body: none
+  auth: none
+}
+
+tests {
+  test("400", function () {
+    expect(res.getStatus()).to.equal(400);
+  });
+  test("pesan Indonesia", function () {
+    expect(res.getBody().error).to.include("Indonesia");
+  });
+}

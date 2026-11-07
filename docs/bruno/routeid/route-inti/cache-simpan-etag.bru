@@ -1,0 +1,29 @@
+meta {
+  name: cache: simpan ETag
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593
+  body: none
+  auth: none
+}
+
+docs {
+  Mengisi collection variable etag untuk request berikutnya.
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const tag = res.getHeader("ETag");
+  test("ETag ada", function () {
+    expect(tag).to.match(/^"?[0-9a-f]{8}-[0-9a-f]{16}"?$/);
+  });
+  bru.setVar("etag", tag || "");
+  test("Cache-Control max-age", function () {
+    expect(res.getHeader("Cache-Control")).to.include("max-age=");
+  });
+}

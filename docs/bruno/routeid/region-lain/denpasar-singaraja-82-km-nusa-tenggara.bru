@@ -1,0 +1,35 @@
+meta {
+  name: Denpasar - Singaraja 82 km (nusa-tenggara)
+  type: http
+  seq: 17
+}
+
+get {
+  url: {{baseUrl}}/route?from=-8.6705,115.2126&to=-8.1121,115.0882
+  body: none
+  auth: none
+}
+
+tests {
+  const code = res.getStatus();
+  test("200, atau 422 kalau environment ini tidak memuat graf region tsb", function () {
+    expect([200, 422]).to.include(code);
+  });
+  if (code === 200) {
+    const j = res.getBody();
+    test("region + jarak + durasi", function () {
+      expect(j.region).to.be.a("string");
+      expect(j.distance_m).to.be.above(0);
+      expect(j.duration_s).to.be.above(0);
+    });
+    test("points_n cocok", function () {
+      expect(j.points).to.have.lengthOf(j.points_n);
+    });
+    console.log(j.region, j.distance_m + "m", j.points_n + " titik");
+  } else {
+    test("pesan error jelas", function () {
+      expect(res.getBody().error).to.be.a("string").and.not.empty;
+    });
+    console.log("422:", res.getBody().error, "- jalankan dengan environment Homelab");
+  }
+}

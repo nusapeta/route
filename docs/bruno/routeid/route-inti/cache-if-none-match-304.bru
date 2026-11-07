@@ -1,0 +1,25 @@
+meta {
+  name: cache: If-None-Match -> 304
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593
+  body: none
+  auth: none
+}
+
+headers {
+  If-None-Match: {{etag}}
+}
+
+docs {
+  Jalankan setelah 'simpan ETag'; tanpa ETag server membalas 200.
+}
+
+tests {
+  test("304 atau 200 (kalau etag kosong)", function () {
+    expect([304, 200]).to.include(res.getStatus());
+  });
+}

@@ -1,0 +1,27 @@
+meta {
+  name: restrictions=0 (pembanding)
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&restrictions=0
+  body: none
+  auth: none
+}
+
+docs {
+  Ban belok dilepas. Bandingkan distance_m/duration_s dengan request 'points (JSON default)'; region harus sama.
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+  test("region sama dengan baseline", function () {
+    const ref = bru.getVar("region");
+    if (ref) expect(j.region).to.equal(ref);
+  });
+  console.log(j.region, j.distance_m + "m", j.duration_s + "s");
+}

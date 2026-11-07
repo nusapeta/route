@@ -1,0 +1,25 @@
+meta {
+  name: polyline + polyline_b64
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline
+  body: none
+  auth: none
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+  test("dua bentuk ada", function () {
+    expect(j.polyline).to.be.a("string").and.not.empty;
+    expect(j.polyline_b64).to.be.a("string").and.not.empty;
+  });
+  test("b64 = base64(polyline)", function () {
+    expect(atob(j.polyline_b64)).to.equal(j.polyline);
+  });
+}

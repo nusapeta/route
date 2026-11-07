@@ -1,0 +1,41 @@
+meta {
+  name: healthz
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/healthz
+  body: none
+  auth: none
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+  test("ok true", function () {
+    expect(j.ok).to.equal(true);
+  });
+  test("minimal satu region", function () {
+    expect(j.regions).to.be.an("array").that.is.not.empty;
+  });
+  j.regions.forEach(function (r) {
+    test(r.name + ": node/edge/ban masuk akal", function () {
+      expect(r.nodes).to.be.above(0);
+      expect(r.edges).to.be.above(0);
+      expect(r.bans).to.be.at.least(0);
+      expect(r.only_rules).to.be.at.least(0);
+      expect(r.format).to.be.at.least(3);
+    });
+  });
+  test("provenance lengkap (format 4)", function () {
+    const r = j.regions[0];
+    expect(r.pbf_sha256).to.match(/^[0-9a-f]{64}$/);
+    expect(r.profile_sha256).to.match(/^[0-9a-f]{64}$/);
+    expect(r.built_at).to.be.a("string").and.not.empty;
+    expect(r.extractor).to.be.a("string").and.not.empty;
+  });
+  console.log(j.version, "-", j.regions.map(function (r) { return r.name + ":" + r.nodes; }).join(", "));
+}

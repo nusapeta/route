@@ -1,0 +1,28 @@
+meta {
+  name: geojson (tempel ke geojson.io)
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=geojson
+  body: none
+  auth: none
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+  const g = j.geojson.features[0].geometry;
+  test("LineString", function () {
+    expect(g.type).to.equal("LineString");
+  });
+  test("koordinat = points_n", function () {
+    expect(g.coordinates).to.have.lengthOf(j.points_n);
+  });
+  test("koordinat [lng,lat]", function () {
+    expect(g.coordinates[0]).to.have.lengthOf(2);
+  });
+}
