@@ -129,6 +129,17 @@ Polyline: precision **5** (~1.1 m), decode di Dart standar.
 
 Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`.
 
+### Endpoint
+
+| endpoint | guna |
+|---|---|
+| `GET /route?from=lat,lng&to=lat,lng[&format=&simplify=&restrictions=]` | rute |
+| `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan **provenance** (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile_sha256`) |
+| `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
+
+`/healthz` dan `/version` dipakai untuk menjawab "graph dan binary mana yang
+sedang jalan", jadi pertanyaan pasang-ulang tidak perlu masuk ke container.
+
 ## Integrasi Flutter
 
 Server: `GET /route` (query string) atau `POST /route` (JSON) — dua-duanya
@@ -443,8 +454,7 @@ Lihat doc comment `internal/graph/format.go`. Header 256 B + 14 section
 `Ban`/`Only` berisi pasangan edge terlarang/diizinkan). Versi format 3:
 menambah provenance di header (SHA-256 pbf, waktu build) plus blob
 `key=value` di akhir file (sumber, hash profil, versi extractor, order, grid).
-File v1/v2 tetap terbaca, hanya tanpa provenance;
-file versi 1 tetap terbaca dengan restriction dimatikan.
+File v1/v2 tetap terbaca: v2 tanpa provenance, v1 juga tanpa restriction.
 
 ## Catatan data
 
