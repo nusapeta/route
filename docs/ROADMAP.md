@@ -37,7 +37,7 @@ butuh argumen eksplisit dan milestone sendiri.
 | Throughput 42 km (i3-6100T) | 10,9 RPS | >= 20 RPS | - |
 | Densitas | 19,5 RPS/GB | >= 45 RPS/GB | - |
 | p95 klien 42 km, `-conc 4` | 439 ms | <= 400 ms | 800 ms |
-| Galat ujung rute (snap) | belum diukur | p50 <= 20 m, p95 <= 60 m | p95 150 m |
+| Galat ujung rute (snap) | **p50 16 m, p95 36 m** (offset uji <=40 m) | p50 <= 20 m, p95 <= 60 m | p95 150 m |
 | Pelanggaran turn restriction | 0 (3,17% fallback) | 0 (fallback <= 1%) | 0 |
 
 "Densitas" = RPS / RSS, metrik utama proyek ini: satu GB RAM harus menampung
@@ -64,16 +64,18 @@ performa tidak bisa dibandingkan antar build.
 **Terbukti:** `format: v3`, `pbf_sha256: dcbc563f…` di `/healthz`; mengubah satu
 kecepatan di test menggagalkan 3 pasangan (harness tidak vakum).
 
-### M2 — Akurasi ujung rute (2-3 hari)
+### M2 — Akurasi ujung rute — SELESAI
 
-Tujuan: pin user jatuh di jalan, bukan di node terdekat yang mungkin 300 m jauhnya.
+- [x] `SnapEdge` (proyeksi ke ruas) + `RouteSnap` (trim bila rute keluar lewat
+      ruas itu, spur bila tidak). Tanpa perubahan format, tanpa pseudo-node.
+- [x] `/route` dan `rid-route` memakai jalur ruas; respons memuat `snap_from`,
+      `snap_to`, `trimmed`, header `X-Route-Trim`; `&pin=1` = perilaku lama.
+- [x] `rid-snapcheck`: node vs ruas vs oracle, bucket panjang ruas, opsi `-bbox`.
+- [x] Angka di `RESULTS.md` §9, golden test memuat 48 pasangan snap.
 
-- [ ] Snap ke ruas (proyeksi tegak lurus ke segmen), pseudo-node di ujung.
-- [ ] Harness `rid-snapcheck`: 200 pasangan, laporkan p50/p95 galat ujung (meter).
-- [ ] Simpan hasilnya sebagai bagian E2 (validasi akurasi).
-
-**Selesai bila:** p50 <= 20 m dan p95 <= 60 m pada data uji, dan hasil rute
-tidak berubah untuk pasangan yang sudah tepat di node.
+**Hasil:** ruas >150 m: 67,3 → 16,1 m p50 (p95 114,0 → 34,9 m). Offset pin Medan
+45 → 4 m; jarak rute terkoreksi 58 m; geometri mulai/berakhir di jalan.
+**Sisa:** kasus spur (rute keluar arah lain) masih garis lurus sepanjang `Along`.
 
 ### M3 — Naikkan densitas 2x (3-5 hari)
 

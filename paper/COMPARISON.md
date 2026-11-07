@@ -25,13 +25,20 @@ boleh diisi setelah E1 dijalankan di mesin yang sama.
 | Hilbert vs id OSM | RSS 579 → 104 MB, latency 1,5-2x | `rid-bench -order osm` | terukur |
 | eps=1.5 vs 1.0 | 2,4x lebih cepat, rute identik | `rid-bench -eps` | terukur |
 | Image container | 23 MB | `docker image inspect` | terukur |
+| Galat snap ruas >150 m | p50 16,1 m / p95 34,9 m (node: 67,3 / 114,0) | `rid-snapcheck -bbox ... -offset 40` | terukur |
+| SnapEdge vs oracle | mean −1,25 m, 0% sampel >1 m lebih buruk | idem | terukur |
+| Koreksi ujung rute | Medan–Binjai: offset 45→4 m, jarak −58 m, `trimmed=both` | `GET /route` + `X-Route-Trim` | terukur |
+
+Catatan M2: galat snapping sudah terukur (ledger di atas), tetapi itu galat
+menempelkan titik ke jalan — bukan bukti bahwa jarak rute benar. Klaim akurasi rute
+tetap menunggu E2.
 
 ## 2. Yang **tidak** boleh diklaim sekarang
 
 | klaim | kenapa |
 |---|---|
 | "lebih cepat dari OSRM" | tidak ada run head-to-head (E1) |
-| "lebih akurat" | tidak ada ground truth (E2) |
+| "lebih akurat" | tidak ada ground truth (E2); yang terukur baru galat *attachment*, bukan galat jarak rute |
 | "RSS lebih kecil dari OSRM" | angka OSRM di paper masih dari dokumentasi |
 | "siap untuk seluruh Indonesia" | baru 2 pulau, rute lintas-region ditolak |
 | "hemat memori" tanpa kualifikasi | heap tumbuh mengikuti rute terpanjang x `-conc` |

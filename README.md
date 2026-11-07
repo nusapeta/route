@@ -93,9 +93,11 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
 - **Node = setiap node OSM** → geometri jalan persis, tanpa shape point terpisah.
 - **CSR** adjacency (Off/To/Len/Time), koordinat fixed point 1e-7.
 - **Hilbert curve ordering**: node diurutkan geografis → A* tetap page-local
-  (RSS turun dari 579 MB ke 104 MB, latency ~1.5-2× lebih cepat).
-- **Weighted A*** (ε=1.5 default): rute sama dengan ε=1.0 tapi 2.4× lebih cepat.
-- **Grid snapping** 0.02° (~2.2 km/cell) dengan pencarian per-ring.
+  (RSS metropolitan 1.225 → 675 MB, p50 7-20% lebih cepat).
+- **Weighted A*** (ε=1.5 default): 28% lebih cepat dari ε=1.0, panjang rute identik.
+- **Snap ke ruas**, bukan ke node: titik diproyeksikan tegak lurus ke segmen,
+  lalu jarak/geometri dikoreksi (trim kalau rute keluar lewat ruas itu, spur kalau
+  tidak). Grid 0.02° (~2,2 km/cell) dengan pencarian per-ring.
 - Bobot = waktu tempuh (detik desimal) dari `maxspeed` atau default per kelas
   jalan yang disetel untuk Indonesia (residential 25 km/h, service 15 km/h, dll).
 
@@ -122,30 +124,49 @@ GOMEMLIMIT=2GiB bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.gra
 
 Response:
 ```json
-{"distance_m":56451,"duration_s":2538.8,"polyline":"...","snap_from_m":311,"snap_to_m":61}
+{"distance_m":56451,"duration_s":2538.8,"polyline":"...",
+ "snap_from_m":4,"snap_to_m":24,
+ "snap_from":[3.595201,98.672160],"snap_to":[3.600212,98.485017],
+ "trimmed":{"from":true,"to":true}}
 ```
 `format=json` (default) mengembalikan `points: [[lat,lon],...]`.
 Polyline: precision **5** (~1.1 m), decode di Dart standar.
 
-Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`.
+**Geometri mulai dan berakhir di jalan** (titik proyeksi `snap_from`/`snap_to`),
+bukan di pin mentah — tidak ada garis spur menyeberang bangunan. Pin user tetap
+digambar dari koordinat yang dikirim klien. Kalau butuh perilaku lama (garis
+menyambung pin ke jalan), tambahkan `&pin=1`.
+
+Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`,
+`pin=0|1`, `restrictions=0|1`. Header respons: `X-Route-Ms`, `X-Route-Expansions`,
+`X-Route-Region`, `X-Route-Trim` (`none|from|to|both`).
 
 ### Endpoint
 
 | endpoint | guna |
 |---|---|
-| `GET /route?from=lat,lng&to=lat,lng[&format=&simplify=&restrictions=]` | rute |
+| `GET /route?from=lat,lng&to=lat,lng` | rute. Opsional: `format=json\|points\|geojson\|polyline`, `simplify=<m>`, `pin=1`, `restrictions=0` |
 | `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan **provenance** (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile_sha256`) |
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
 
-`/healthz` dan `/version` dipakai untuk menjawab "graph dan binary mana yang
-sedang jalan", jadi pertanyaan pasang-ulang tidak perlu masuk ke container.
+`/healthz` dan `/version` menjawab "graph dan binary mana yang sedang jalan",
+jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
+`snap_from`/`snap_to` (titik proyeksi di jalan), `snap_from_m`/`snap_to_m`
+(offset meter), `trimmed`, `bbox`, `points_n`; header `X-Route-Ms`,
+`X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`.
 
 ## Integrasi Flutter
 
 Server: `GET /route` (query string) atau `POST /route` (JSON) — dua-duanya
 menerima `"lat,lng"` maupun `{"lat":..,"lng":..}`. Respons berisi
 `distance_m`, `duration_s`, `polyline` (precision 5), `bbox` (siap dipakai
-`CameraUpdate.newLatLngBounds`) dan `points_n`.
+`CameraUpdate.newLatLngBounds`), `points_n`, dan `snap_from`/`snap_to`.
+
+Polyline sudah menyusur jalan sampai ujungnya: titik pertama/terakhir adalah
+proyeksi ke ruas (`snap_from`/`snap_to`), bukan pin mentah. Gambar marker dari
+koordinat asli yang lo kirim, garis dari `points` — hasilnya pin di lokasi user,
+rute mulai di jalan. Kalau butuh garis menyambung pin (perilaku lama), kirim
+`'pin': true`.
 
 ```dart
 final res = await http.post(
@@ -160,6 +181,7 @@ final res = await http.post(
 final j = jsonDecode(res.body) as Map<String, dynamic>;
 final pts = decodePolyline(j['polyline'] as String);
 final km = (j['distance_m'] as num) / 1000;
+final snapFrom = (j['snap_from'] as List).cast<num>(); // [lat, lng] di jalan
 
 GoogleMap(
   polylines: {Polyline(polylineId: const PolylineId('r'), points: pts, width: 5)},
@@ -395,7 +417,8 @@ go test ./internal/graph -run TestGoldenRoutes -update  # terima perubahan rute 
 
 Unit test mencakup round-trip format (termasuk Ban/Only), semantik
 `only_*`, pembuktian router memilih jalan memutar 2 hop saat belokan terlarang,
-round-trip provenance v3, dan **golden test 48 pasangan**: kota sintetis 30x30
+round-trip provenance v3, snapping ruas (proyeksi, trim, spur), dan **golden test
+48 pasangan node + 48 pasangan snap**: kota sintetis 30x30
 ditulis ke disk, di-snap, dirutekan, lalu dibandingkan per pasangan
 (`dist_m`, `time_ds`, jumlah node, hash FNV urutan node). Perubahan tak sengaja
 pada profil, snapping, atau A* langsung tampak sebagai diff — sudah diverifikasi

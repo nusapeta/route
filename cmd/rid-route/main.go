@@ -34,16 +34,19 @@ func main() {
 	fla, flo := pt(*from)
 	tla, tlo := pt(*to)
 	t0 := time.Now()
-	src, ds, ok1 := g.Nearest(fla, flo, 3000)
-	dst, dt, ok2 := g.Nearest(tla, tlo, 3000)
-	fmt.Printf("snap: src=%d (%.0fm) dst=%d (%.0fm) ok=%v/%v\n", src, ds, dst, dt, ok1, ok2)
+	sa, ok1 := g.SnapEdge(fla, flo, 3000)
+	sb, ok2 := g.SnapEdge(tla, tlo, 3000)
+	fmt.Printf("snap: from node %d edge %d->%d t=%.3f off=%.0fm | to node %d edge %d->%d t=%.3f off=%.0fm ok=%v/%v\n",
+		sa.Node, sa.From, sa.To, sa.T, sa.Dist, sb.Node, sb.From, sb.To, sb.T, sb.Dist, ok1, ok2)
 	if !ok1 || !ok2 {
 		return
 	}
-	sla, slo := g.Coords(src)
-	dla, dlo := g.Coords(dst)
-	fmt.Printf("snapped: src=%.6f,%.6f dst=%.6f,%.6f\n", sla, slo, dla, dlo)
-	res, err := r.Route(src, dst)
+	fmt.Printf("snapped: from=%.6f,%.6f to=%.6f,%.6f\n", sa.Lat, sa.Lon, sb.Lat, sb.Lon)
+	res, err := r.RouteSnap(sa, sb, true)
+	if err == nil {
+		fmt.Printf("trim: from=%v to=%v head=%.6f,%.6f tail=%.6f,%.6f\n",
+			res.TrimStart, res.TrimEnd, res.Head[0], res.Head[1], res.Tail[0], res.Tail[1])
+	}
 	fmt.Printf("route: err=%v nodes=%d dist=%dm time=%.1fs expansions=%d wall=%s\n",
 		err, len(res.Nodes), res.DistanceM, float64(res.TimeDs)/10, res.Expansions, time.Since(t0))
 	if err == nil && len(res.Nodes) > 0 {

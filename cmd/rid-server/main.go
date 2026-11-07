@@ -151,25 +151,25 @@ func expand(in []string) []string {
 	return out
 }
 
-// pickSnap returns the region whose graph has the closest node to the point.
-// Bounding boxes overlap between island extracts, so snapping decides.
-func (s *server) pickSnap(lat, lon float64) (*region, uint32, float64, bool) {
+// pickSnap returns the region whose graph has the closest road segment to the
+// point. Bounding boxes overlap between island extracts, so snapping decides.
+func (s *server) pickSnap(lat, lon float64) (*region, graph.Snap, bool) {
 	var bestRg *region
-	var bestNode uint32
+	var best graph.Snap
 	bestD := s.maxSnapM
 	for _, rg := range s.regions {
 		if !rg.contains(lat, lon) {
 			continue
 		}
-		n, d, ok := rg.g.Nearest(lat, lon, bestD)
-		if ok && d <= bestD {
-			bestRg, bestNode, bestD = rg, n, d
+		sn, ok := rg.g.SnapEdge(lat, lon, bestD)
+		if ok && sn.Dist <= bestD {
+			bestRg, best, bestD = rg, sn, sn.Dist
 		}
 	}
 	if bestRg == nil {
-		return nil, 0, 0, false
+		return nil, graph.Snap{}, false
 	}
-	return bestRg, bestNode, bestD, true
+	return bestRg, best, true
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -230,7 +230,22 @@ type routeParams struct {
 	format                 string
 	simplify               float64
 	restrictions           bool
+	pin                    bool // include the raw pin as first/last geometry point
 }
+
+func trimLabel(from, to bool) string {
+	switch {
+	case from && to:
+		return "both"
+	case from:
+		return "from"
+	case to:
+		return "to"
+	}
+	return "none"
+}
+
+func round6(v float64) float64 { return math.Round(v*1e6) / 1e6 }
 
 func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	p, err := readRouteParams(req)
@@ -245,8 +260,8 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	}
 
 	start := time.Now()
-	rgF, src, d1, ok1 := s.pickSnap(fLat, fLon)
-	rgT, dst, d2, ok2 := s.pickSnap(tLat, tLon)
+	rgF, snapF, ok1 := s.pickSnap(fLat, fLon)
+	rgT, snapT, ok2 := s.pickSnap(tLat, tLon)
 	if !ok1 || !ok2 {
 		httpErr(w, 422, "no road within snap distance (region not loaded?)")
 		return
@@ -256,19 +271,27 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	rg := rgF
-	res, err := rg.r.RouteStrict(src, dst, p.restrictions)
+	res, err := rg.r.RouteSnap(snapF, snapT, p.restrictions)
 	if err != nil {
 		httpErr(w, 422, err.Error())
 		return
 	}
 
+	// Geometry follows the road: it starts and ends at the projected points.
+	// The raw pin can still be requested with &pin=1 (straight spur included).
 	pts := make([][2]float64, 0, len(res.Nodes)+2)
-	pts = append(pts, [2]float64{fLat, fLon})
+	if p.pin {
+		pts = append(pts, [2]float64{fLat, fLon})
+	}
+	pts = append(pts, res.Head)
 	for _, n := range res.Nodes {
 		lat, lon := rg.g.Coords(n)
 		pts = append(pts, [2]float64{lat, lon})
 	}
-	pts = append(pts, [2]float64{tLat, tLon})
+	pts = append(pts, res.Tail)
+	if p.pin {
+		pts = append(pts, [2]float64{tLat, tLon})
+	}
 	if p.simplify > 0 {
 		pts = Simplify(pts, p.simplify)
 	}
@@ -276,6 +299,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Route-Ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
 	w.Header().Set("X-Route-Region", rg.name)
 	w.Header().Set("X-Route-Expansions", strconv.Itoa(res.Expansions))
+	w.Header().Set("X-Route-Trim", trimLabel(res.TrimStart, res.TrimEnd))
 	body := map[string]any{
 		// echo of what the server actually parsed, so clients can prove the
 		// round trip (wrong lat/lng order shows up here immediately)
@@ -284,11 +308,17 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		"distance_m":  res.DistanceM,
 		"duration_s":  float64(res.TimeDs) / 10,
 		"region":      rg.name,
-		"snap_from_m": math.Round(d1),
-		"snap_to_m":   math.Round(d2),
+		"snap_from_m": math.Round(snapF.Dist),
+		"snap_to_m":   math.Round(snapT.Dist),
+		// projected points (on the road) as [lat, lng], for a pin layer
+		"snap_from": []float64{round6(snapF.Lat), round6(snapF.Lon)},
+		"snap_to":   []float64{round6(snapT.Lat), round6(snapT.Lon)},
 	}
 	if res.Fallback {
 		body["fallback"] = true
+	}
+	if res.TrimStart || res.TrimEnd {
+		body["trimmed"] = map[string]bool{"from": res.TrimStart, "to": res.TrimEnd}
 	}
 	// bbox lets the app fit the camera without decoding the polyline
 	minLat, minLon, maxLat, maxLon := pts[0][0], pts[0][1], pts[0][0], pts[0][1]
@@ -337,6 +367,7 @@ func readRouteParams(req *http.Request) (routeParams, error) {
 	out := routeParams{
 		format:       q.Get("format"),
 		restrictions: q.Get("restrictions") != "0",
+		pin:          q.Get("pin") == "1" || q.Get("pin") == "true",
 	}
 	fromRaw, toRaw := q.Get("from"), q.Get("to")
 	out.simplify, _ = strconv.ParseFloat(q.Get("simplify"), 64)
@@ -348,6 +379,7 @@ func readRouteParams(req *http.Request) (routeParams, error) {
 			Format       string          `json:"format"`
 			Simplify     float64         `json:"simplify"`
 			Restrictions *bool           `json:"restrictions"`
+			Pin          *bool           `json:"pin"`
 		}
 		dec := json.NewDecoder(io.LimitReader(req.Body, 8<<10))
 		if err := dec.Decode(&body); err != nil {
@@ -367,6 +399,9 @@ func readRouteParams(req *http.Request) (routeParams, error) {
 		}
 		if body.Restrictions != nil {
 			out.restrictions = *body.Restrictions
+		}
+		if body.Pin != nil {
+			out.pin = *body.Pin
 		}
 	}
 
@@ -448,7 +483,7 @@ func cors(h http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Expose-Headers", "X-Route-Ms, X-Route-Region, X-Route-Expansions")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Route-Ms, X-Route-Region, X-Route-Expansions, X-Route-Trim")
 		// Chrome asks for this before an HTTPS page may reach a LAN/localhost
 		// service (Private Network Access), e.g. hoppscotch.io -> localhost.
 		if r.Header.Get("Access-Control-Request-Private-Network") == "true" {

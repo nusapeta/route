@@ -144,8 +144,23 @@ func TestGoldenRoutes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("route %d->%d: %v", src, dst, err)
 		}
-		got = append(got, fmt.Sprintf("%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%s",
+		got = append(got, fmt.Sprintf("node,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%s",
 			p.fLat, p.fLon, p.tLat, p.tLon, rt.DistanceM, rt.TimeDs, len(rt.Nodes), seqHash(rt.Nodes)))
+
+		// same pair through the edge snapper: pins the projection, the trim/spur
+		// correction, and the resulting geometry.
+		sa, okA := g.SnapEdge(p.fLat, p.fLon, 3000)
+		sb, okB := g.SnapEdge(p.tLat, p.tLon, 3000)
+		if !okA || !okB {
+			t.Fatalf("edge snap failed for %+v", p)
+		}
+		sr, err := r.RouteSnap(sa, sb, true)
+		if err != nil {
+			t.Fatalf("snap route %d->%d: %v", sa.Node, sb.Node, err)
+		}
+		got = append(got, fmt.Sprintf("snap,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%s,%t,%t,%.1f,%.1f",
+			p.fLat, p.fLon, p.tLat, p.tLon, sr.DistanceM, sr.TimeDs, len(sr.Nodes), seqHash(sr.Nodes),
+			sr.TrimStart, sr.TrimEnd, sa.Dist, sb.Dist))
 	}
 
 	goldenPath := filepath.Join("testdata", "golden.txt")
@@ -154,7 +169,9 @@ func TestGoldenRoutes(t *testing.T) {
 		if err != nil && !*updateGolden {
 			t.Fatalf("read golden: %v (run with -update to create)", err)
 		}
-		body := "# routeid golden routes: from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash\n" +
+		body := "# routeid golden routes\n" +
+			"#   node,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash\n" +
+			"#   snap,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash,trim_start,trim_end,snap_from_m,snap_to_m\n" +
 			strings.Join(got, "\n") + "\n"
 		if err := os.WriteFile(goldenPath, []byte(body), 0o644); err != nil {
 			t.Fatalf("write golden: %v", err)

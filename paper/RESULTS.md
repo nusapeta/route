@@ -261,3 +261,48 @@ pasangan di-snap dan dirutekan; hasilnya dipin per pasangan (`dist_m`, `time_ds`
 jumlah node, hash FNV). Eksperimen kontrol: mengubah satu kecepatan dari 8,0 ke
 8,5 m/s menggagalkan 3 dari 48 pasangan, jadi test ini benar-benar menjaga
 perilaku, bukan sekadar lulus.
+
+## 9. Akurasi snapping: node vs ruas (M2)
+
+`rid-snapcheck -graph data/sumatra.graph -bbox -0.6,100.0,0.4,101.0 -n 5000 -offset 40`
+— 5.000 titik simulasi digeser tegak lurus 0–40 m dari sebuah ruas (Sumatra barat,
+1.020.007 edge dalam bbox):
+
+| panjang ruas | n | node p50 | node p95 | ruas p50 | ruas p95 |
+|---|---|---|---|---|---|
+| ≤20 m | 3.382 | 17,2 m | 36,8 m | 15,8 m | 36,1 m |
+| 20–50 m | 1.094 | 20,8 m | 38,7 m | 15,7 m | 37,0 m |
+| 50–150 m | 477 | 31,9 m | 53,2 m | 18,6 m | 36,7 m |
+| >150 m | 47 | 67,3 m | 114,0 m | **16,1 m** | **34,9 m** |
+
+Bacaan yang benar: galat "ruas" kira-kira sama dengan offset injeksi (0–40 m),
+artinya titik benar-benar jatuh di jalan; galat node menambahkan setengah panjang
+ruas di atasnya. Median panjang ruas di Sumatra hanya 11 m (graf padat karena
+setiap node OSM menjadi node graf), jadi keuntungan terbesar muncul di jalan cepat
+yang ruasnya panjang: **67,3 → 16,1 m (4,2×)** di bucket >150 m.
+
+Verifikasi implementasi: `SnapEdge` dibanding oracle brute-force (jarak titik ke
+semua ruas di sekitar) memberi **mean −1,25 m** dan **0,00% sampel** lebih buruk
+>1 m; p99 oracle 68,0 m vs 39,3 m pada implementasi (oracle memakai grid kasar).
+
+Efek pada rute nyata (Medan–Binjai, 22,7 km):
+
+| | node snap (sebelum) | ruas snap (sesudah) |
+|---|---|---|
+| offset titik awal | 45 m | **4 m** |
+| offset titik akhir | 27 m | 24 m |
+| jarak rute | 22.679 m | 22.621 m |
+| geometri ujung | pin mentah → jalan (garis lurus) | mulai/berakhir di jalan |
+| `trimmed` | – | `both` (41 m + 17 m terpotong) |
+| titik polyline | 567 | 565 (+2 dengan `&pin=1`) |
+
+Biaya latensi dari snapping ruas tidak terukur (20 request per konfigurasi, keep-alive):
+
+| rute | node snap p50 | ruas snap p50 |
+|---|---|---|
+| Palembang 7 km | 27 ms | 27 ms |
+| Medan–Binjai 23 km | 59 ms | 60 ms |
+
+Respons memuat `snap_from`/`snap_to` (koordinat proyeksi) dan header
+`X-Route-Trim`, sehingga app bisa menaruh pin di posisi mentah dan polyline di
+jalan tanpa garis spur yang menyeberang bangunan.

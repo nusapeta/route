@@ -54,7 +54,7 @@ diff per pasangan.
 
 ## M2. Akurasi ujung rute
 
-### 4. Snap ke ruas (M)
+### 4. Snap ke ruas — SELESAI (M)
 
 **Masalah.** `internal/graph/snap.go` memilih node terdekat. Di jalan yang
 way-nya jarang titik, titik user jatuh ke node 100-300 m jauhnya -> awal/akhir
@@ -70,15 +70,25 @@ rute terlihat "mundur".
    layer respons.
 4. Batas: hanya edge yang boleh dilalui profil kendaraan.
 
-**Lulus bila.** `rid-snapcheck` (200 pasangan) melaporkan p50 <= 20 m, p95 <= 60 m;
-rute lama tidak berubah bila titik sudah persis di node (golden test).
+**Hasil.** `SnapEdge` + `RouteSnap` di `internal/graph/snap.go` dan
+`route_snap.go`, dipakai `/route` dan `rid-route`. Golden test sekarang memuat 48
+pasangan node **dan** 48 pasangan snap (trim/spur + offset ikut dipin).
 
-### 5. Ukur galat snap, bukan hanya klaim (S)
+Terukur (`RESULTS.md` §9): bucket ruas >150 m, galat 67,3 → 16,1 m (p95 114,0 →
+34,9 m). Implementasi dibanding oracle: mean −1,25 m, 0% sampel lebih buruk >1 m.
+Tidak ada perubahan format file.
+
+**Sisa keterbatasan.** Kalau rute tidak keluar lewat ruas yang di-snap (mis. jalan
+satu arah), offset ditambahkan sebagai spur lurus — masih garis menyeberang
+bangunan sepanjang `Along`. Menghilangkan ini butuh pseudo-node (opsi 2).
+
+### 5. Ukur galat snap, bukan hanya klaim — SELESAI (S)
 
 **Masalah.** Belum ada angka galat ujung sama sekali.
 
-**Rencana.** `rid-snapcheck` mencetak histogram jarak input->titik pertama rute,
-dipisah perkotaan/pinggiran. Simpan ke `paper/RESULTS.md` sebagai bagian E2.
+**Hasil.** `rid-snapcheck` sekarang melaporkan node vs ruas vs oracle, dengan
+bucket panjang ruas, dan `-bbox` supaya bisa mengukur satu kota tanpa memuat
+seluruh graf ke memori. Angkanya di `paper/RESULTS.md` §9.
 
 ---
 

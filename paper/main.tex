@@ -174,11 +174,23 @@ from a pool, bounding peak memory. A query is abandoned after $6\cdot10^6$
 expansions, which bounds tail latency at the cost of very long routes.
 
 \subsection{Snapping and output}
-Queries are snapped to the nearest node by expanding rings over the uniform grid
-(cell $0.02^{\circ}$, about 2.2\,km), with a configurable cap. The polyline is
-emitted as precision-5 encoded polyline (about 1.1\,m), optionally simplified with
-Douglas--Peucker; the two user coordinates are appended verbatim so the drawn line
-starts and ends exactly where the user tapped.
+Queries are snapped to the nearest \emph{segment}: the grid (cell
+$0.02^{\circ}$, about 2.2\,km) is expanded ring by ring, and for every node found
+the outgoing segments are projected onto the local tangent plane
+(equirectangular, sub-metre at city scale). The projection splits the result into
+an anchor node (the closer end of the segment) and an along-distance. After
+routing between anchors the geometry is corrected without mutating the graph: if
+the path leaves the anchor \emph{along} the snapped segment the covered part is
+subtracted from distance and time and the anchor is dropped from the geometry
+(\emph{trim}); otherwise the offset is added as a spur. The ring expansion stops
+once no segment can beat the best projection, with 500\,m of slack for segments
+longer than their node-to-node distance.
+
+This keeps the invariant that the drawn line follows the road. Output is a
+precision-5 encoded polyline (about 1.1\,m), optionally Douglas--Peucker
+simplified; the projected points are also returned as \texttt{snap\_from} and
+\texttt{snap\_to}, and \texttt{pin=1} restores the older behaviour that appended
+the raw tap coordinates so the line reached the pin directly.
 
 \subsection{Deployment topologies}
 The same engine supports two topologies. \textbf{T1}: one national graph, built
@@ -371,6 +383,34 @@ conservatively; the server then retries unrestricted and flags the response
 (\texttt{fallback}). Median latency changes by less than a millisecond per
 bucket and expansion counts by 0.1\,\%.
 
+\subsection{Snapping accuracy}
+\begin{table}[t]
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+segment length & n & node p50 & node p95 & segment p50 / p95 \\
+\midrule
+$\le$20\,m      & 3{,}382 & 17.2\,m & 36.8\,m & 15.8 / 36.1\,m \\
+20--50\,m        & 1{,}094 & 20.8\,m & 38.7\,m & 15.7 / 37.0\,m \\
+50--150\,m       &   477   & 31.9\,m & 53.2\,m & 18.6 / 36.7\,m \\
+$>$150\,m        &    47   & 67.3\,m & 114.0\,m & \textbf{16.1 / 34.9}\,m \\
+\bottomrule
+\end{tabular}
+\caption{Attachment error for 5\,000 synthetic taps pushed 0--40\,m perpendicular
+off a segment (western Sumatra, 1.02\,M segments in scope). Because the injected
+offset is itself 0--40\,m, the segment column measures how close the attachment is
+to the road, while the node column adds half a segment on top. The median segment
+in this extract is only 11\,m long (every OSM node is a graph node), so the gain
+concentrates where it matters: long inter-urban segments. Implementation check
+against a brute-force oracle: mean $-1.25$\,m, and no sample worse by more than
+1\,m.}
+\label{tab:snap}
+\end{table}
+
+For a real 22.7\,km Medan--Binjai route the tap offset drops from 45\,m to 4\,m,
+both ends are trimmed, the reported distance falls by 58\,m (the trimmed length)
+and the geometry now starts and ends on the carriageway.
+
 \subsection{Reference points and honesty about baselines}
 \begin{table}[t]
 \small
@@ -420,12 +460,16 @@ memory after start-up, sub-second worst case up to 50\,km, and a monthly rebuild
 measured in a minute per island. If the product needs accurate ETAs in congestion,
 or worldwide coverage, hosted APIs remain better value.
 
-\paragraph{What dominates accuracy now.}
-Snapping. Points are attached to the nearest node, so the first and last few
-hundred metres can be off where way nodes are sparse; projecting onto segments is
-the next fix and is cheap relative to the graph work. Time-dependent
-(\texttt{restriction:conditional}) and vehicle-class restrictions are counted but
-not applied, and via-way restrictions are enforced conservatively.
+\paragraph{What dominated accuracy, and what replaced it.}
+Node snapping was the first-order error: attaching to the nearest node can move the
+endpoint by half a segment. Segment snapping removes it in the common case --- on
+segments longer than 150\,m the median attachment error falls from 67.3\,m to
+16.1\,m, and the residual is the user's own off-road offset (Table~\ref{tab:snap}).
+What remains, in order: (i) the spur case, where the path leaves the anchor away
+from the snapped segment and the offset becomes a straight line; (ii) no
+time-dependent data --- \texttt{restriction:conditional} and vehicle-class
+restrictions are counted but not applied, and via-way restrictions are enforced
+conservatively; (iii) static speeds, so durations ignore congestion.
 
 \paragraph{Long routes.}
 Without a hierarchy the search degrades super-linearly: at 100\,km road distance
@@ -441,7 +485,8 @@ evaluation: distances were sanity-checked against known itineraries, not compare
 statistically against a reference provider; the validation harness is described
 in \texttt{paper/EXPERIMENTS.md} but not yet run. (iii) The latency benchmark has
 526 successful queries; p99 estimates are therefore weak. (iv) Snap failures
-(coastline, forest) are excluded from percentiles and reported separately. (v) The
+(coastline, forest) are excluded from percentiles and reported separately, and the
+snapping study uses injected offsets rather than recorded user taps. (v) The
 national topology is estimated, not measured, from per-island scaling.
 
 \section{Conclusion and future work}

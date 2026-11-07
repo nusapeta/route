@@ -20,6 +20,7 @@ func main() {
 	n := flag.Int("n", 20000, "edges to sample")
 	cell := flag.Float64("cell", 0.002, "spatial hash cell for segment lookup (deg)")
 	offset := flag.Float64("offset", 15, "perpendicular offset in metres used to simulate a tap off the road")
+	bbox := flag.String("bbox", "", "optional minLat,minLon,maxLat,maxLon: restrict sampling (keeps memory sane on island graphs)")
 	flag.Parse()
 	if *path == "" || *n <= 0 {
 		fmt.Fprintln(os.Stderr, "usage: rid-snapcheck -graph data/java.graph")
@@ -32,6 +33,27 @@ func main() {
 	}
 	defer g.Close()
 
+	// optional bbox filter: on an island graph the bucket map for every edge does
+	// not fit comfortably in RAM, so sample one city at a time.
+	var hasBox bool
+	var bMinLat, bMinLon, bMaxLat, bMaxLon float64
+	if *bbox != "" {
+		var f [4]float64
+		if _, err := fmt.Sscanf(*bbox, "%g,%g,%g,%g", &f[0], &f[1], &f[2], &f[3]); err != nil {
+			fmt.Fprintf(os.Stderr, "-bbox must be minLat,minLon,maxLat,maxLon: %v\n", err)
+			os.Exit(2)
+		}
+		bMinLat, bMinLon, bMaxLat, bMaxLon = f[0], f[1], f[2], f[3]
+		hasBox = true
+	}
+	inBox := func(lat, lon float64) bool {
+		if !hasBox {
+			return true
+		}
+		return lat >= bMinLat && lat <= bMaxLat && lon >= bMinLon && lon <= bMaxLon
+	}
+	var sample []uint32
+
 	// spatial hash of segments so we can answer "true nearest segment".
 	type key struct{ r, c int }
 	step := *cell
@@ -39,8 +61,12 @@ func main() {
 	tail := make([]uint32, g.EdgeCount)
 	for u := uint32(0); u < g.NodeCount; u++ {
 		la, lo := g.Coords(u)
+		if !inBox(la, lo) {
+			continue
+		}
 		for e := g.Off[u]; e < g.Off[u+1]; e++ {
 			tail[e] = u
+			sample = append(sample, uint32(e))
 			v := g.To[e]
 			lb, lob := g.Coords(v)
 			r0, c0 := int(math.Floor(min(la, lb)/step)), int(math.Floor(min(lo, lob)/step))
@@ -99,11 +125,17 @@ func main() {
 		return best, bestE
 	}
 
+	if len(sample) == 0 {
+		fmt.Fprintln(os.Stderr, "no edges in the requested bbox")
+		os.Exit(1)
+	}
+	fmt.Printf("edges in scope   %d\n", len(sample))
+
 	rnd := rand.New(rand.NewSource(7))
-	var nodeErr, edgeErr, segLen []float64
+	var nodeErr, edgeErr, segLen, implErr []float64
 	tried := 0
 	for tried < *n {
-		e := uint32(rnd.Intn(int(g.EdgeCount)))
+		e := sample[rnd.Intn(len(sample))]
 		u, v := tail[e], g.To[e]
 		la, lo := g.Coords(u)
 		lb, lob := g.Coords(v)
@@ -139,6 +171,11 @@ func main() {
 		nodeErr = append(nodeErr, d)
 		de, _ := nearestEdge(mlat, mlon)
 		edgeErr = append(edgeErr, de)
+		if sn, ok := g.SnapEdge(mlat, mlon, 3000); ok {
+			implErr = append(implErr, sn.Dist)
+		} else {
+			implErr = append(implErr, math.Inf(1))
+		}
 	}
 
 	p := func(v []float64, q float64) float64 {
@@ -156,6 +193,22 @@ func main() {
 		p(segLen, 0.5), p(segLen, 0.95), p(segLen, 0.99), p(segLen, 1))
 	fmt.Printf("node snap error  p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m\n",
 		p(nodeErr, 0.5), p(nodeErr, 0.95), p(nodeErr, 0.99), p(nodeErr, 1))
+	fmt.Printf("segment oracle   p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m  (ground truth)\n",
+		p(edgeErr, 0.5), p(edgeErr, 0.95), p(edgeErr, 0.99), p(edgeErr, 1))
+	fmt.Printf("router SnapEdge  p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m\n",
+		p(implErr, 0.5), p(implErr, 0.95), p(implErr, 0.99), p(implErr, 1))
+	if len(implErr) == len(edgeErr) {
+		var worse, sum float64
+		for i := range implErr {
+			d := implErr[i] - edgeErr[i]
+			if d > 1 {
+				worse++
+			}
+			sum += d
+		}
+		fmt.Printf("vs oracle        mean %+.2f m, worse than 1 m on %.2f%% of samples\n",
+			sum/float64(len(implErr)), 100*worse/float64(len(implErr)))
+	}
 	fmt.Printf("edge snap error  p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m\n",
 		p(edgeErr, 0.5), p(edgeErr, 0.95), p(edgeErr, 0.99), p(edgeErr, 1))
 	var over100 int
@@ -165,4 +218,38 @@ func main() {
 		}
 	}
 	fmt.Printf("node snap >100 m %.1f%%\n", float64(over100)*100/float64(len(nodeErr)))
+
+	// Node snapping error is bounded by half a segment, so the gain only shows up
+	// where segments are long. Report both snappers per segment-length bucket.
+	type bucket struct {
+		label     string
+		min, max  float64
+		node, imp []float64
+	}
+	lenBuckets := []*bucket{
+		{"seg <= 20 m", 0, 20, nil, nil},
+		{"seg 20-50 m", 20, 50, nil, nil},
+		{"seg 50-150 m", 50, 150, nil, nil},
+		{"seg > 150 m", 150, math.Inf(1), nil, nil},
+	}
+	for i, L := range segLen {
+		if i >= len(nodeErr) || i >= len(implErr) {
+			break
+		}
+		for _, b := range lenBuckets {
+			if L > b.min && L <= b.max {
+				b.node = append(b.node, nodeErr[i])
+				b.imp = append(b.imp, implErr[i])
+				break
+			}
+		}
+	}
+	fmt.Printf("\nbucket            n     node p50  node p95   edge p50  edge p95\n")
+	for _, b := range lenBuckets {
+		if len(b.node) == 0 {
+			continue
+		}
+		fmt.Printf("%-15s %5d  %8.1f  %8.1f   %8.1f  %8.1f\n", b.label, len(b.node),
+			p(b.node, 0.5), p(b.node, 0.95), p(b.imp, 0.5), p(b.imp, 0.95))
+	}
 }
