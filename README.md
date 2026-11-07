@@ -22,9 +22,9 @@ Angka latency lama (i5-7360U) tetap ada di §1-§12 dan tidak dicampur ke tabel 
 | Preprocess (22,7 jt node) | **28 s** (`GOMEMLIMIT=2GiB`) | 250 s (151+83+16 s; peak 6,25 GB) |
 | p50 0-5 / 5-15 / 15-30 / 30-50 / 50-80 km | **3,6 / 19,7 / 54,7 / 139,0 / 397,3 ms** | 0,7 / 1,1 / 1,7 / 2,2 / 3,2 ms |
 | p95 bucket yang sama | **14,0 / 68,7 / 226,7 / 478,4 / 1.060,9 ms** | 1,1 / 1,7 / 2,3 / 3,0 / 4,5 ms |
-| Selisih jarak rute (332 pasang) | median **−0,005%**, p95 **21,05%**, max 48,30% | referensi; gerbang p95 <12% **gagal** |
+| Selisih jarak rute (332 pasang) | median **−0,005%**, p95 **21,05%**, max 48,30% | referensi; gerbang p95 <12% **gagal**, bukan gerbang akurasi |
 | Cakupan 600 pasangan | 332 cocok, 81 `422`, 187 keluar filter snap | 0 error; pada 81 itu snap tujuan p50 14,7 km |
-| Turn restriction | 3.787 ban / 596 di-skip saat build | `car.lua` |
+| Turn restriction | 3.790 ban / 593 di-skip saat build | `car.lua` |
 | Traffic / ETA real-time | tidak | tidak |
 
 Kolom OSRM CH belum dijalankan. Binary/image routeid (6,6 MB statis, image
@@ -74,13 +74,16 @@ dan preprocess, bukan latency.
 - Satu region per rute. Lintas selat dilayani hanya kalau kedua ujung jatuh di
   satu graph (mis. ferry Ketapang-Gilimanuk di `java.graph`); rute antar-file
   (Merak -> Bakauheni dengan `java.graph` + `sumatra.graph`) masih `422`.
-- `restriction:conditional` dan vehicle-class dihitung tapi belum diterapkan.
+- Restriction per kelas kendaraan diterapkan (`restriction:motorcar`/`motor_vehicle` untuk car, `motorcycle`/`motor_vehicle` untuk motor); 167 `restriction:conditional` (jam sekolah/pasar) tetap di-skip karena graf statis.
 - **E1 sudah dijalankan; E2 belum.** E1 membandingkan OSRM MLD di mesin yang
   sama: median selisih jarak −0,005% (lulus gerbang <5%) tetapi p95 21,05%
-  (gerbang <12% gagal), dan OSRM ~25x lebih cepat p50. Jadi README ini tidak
-  mengklaim "tercepat" maupun "paling akurat"; yang terukur baru biaya per rute
-  dan perbandingan antar-engine. Ground truth independen (E2) masih terbuka;
-  resepnya di `docs/M6.md`.
+  (gerbang <12% gagal), dan OSRM ~25x lebih cepat p50. Audit (`paper/RESULTS.md`
+  §14) menunjukkan p95 jarak **bukan** akibat restriction yang di-skip,
+  melainkan perbedaan fungsi biaya: routeid meminimalkan waktu murni (termasuk
+  `track`), OSRM meminimalkan `weight` (durasi + penalti belok + preferensi
+  kelas jalan). Jadi README ini tidak mengklaim "tercepat" maupun "paling
+  akurat"; yang terukur baru biaya per rute dan perbandingan antar-engine.
+  Ground truth independen (E2) masih terbuka; resepnya di `docs/M6.md`.
 - Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
 
 ## Roadmap

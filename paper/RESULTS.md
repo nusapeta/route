@@ -598,7 +598,7 @@ diunduh 2026-11-07), dan dijalankan bersamaan di mesin ini:
 | | routeid `a18cd70` | OSRM v5.26.0 (`osrm/osrm-backend:latest`, digest `af5d4a83...`) |
 |---|---|---|
 | perintah | `rid-server -conc 1 -rate 0 -timeout 60s` | `osrm-routed --algorithm mld` (thread default) |
-| graph | format 4, 22.712.775 node / 46.676.434 edge, 3.787 ban, 596 restriction di-skip | MLD, profil `car.lua` |
+| graph | format 4, 22.712.775 node / 46.676.434 edge, 3.790 ban, 593 restriction di-skip | MLD, profil `car.lua` |
 
 ### 13a. Preprocess dan artefak
 
@@ -648,9 +648,10 @@ Total 332 pasang: latency p50 **35,1 ms vs 1,4 ms** (~25x), p95 **522 ms vs
 38/332 (11,4%) >10% dan 10/332 >25%.
 
 Gerbang yang ditetapkan di `COMPARISON.md` (median <5%, p95 <12%) **lulus di
-median, gagal di p95**. Selisih besar terkonsentrasi di minoritas pasangan;
-penyebabnya belum dibuktikan. Kandidat yang sudah diketahui: 596 restriction
-di-skip saat build (via-way, BACKLOG item 16) dan perbedaan profil akses.
+median, gagal di p95**. Selisih besar terkonsentrasi di minoritas pasangan.
+Audit §14 menunjukkan penyebabnya **perbedaan fungsi biaya**, bukan
+restriction: routeid meminimalkan waktu murni (termasuk `track`), OSRM
+meminimalkan `weight` (durasi + penalti belok + preferensi kelas jalan).
 Tidak ada klaim akurasi sampai E2.
 
 Durasi tidak sebanding (routeid memakai tabel kecepatan kelas jalan, OSRM
@@ -698,3 +699,67 @@ CSV memuat snap mentah kedua engine (`ride_snap_*`, `osrm_snap_*`,
 `snap_gap_*`) supaya filter bisa diaudit ulang. Latency antar-run bergeser
 ~5% (contoh p50 0-5 km: 3,6-3,9 ms); angka di tabel berasal dari run terakhir
 yang menghasilkan CSV di repo.
+## 14. Audit p95 jarak E1: restriction bukan penyebabnya
+§13c menyisakan dua kandidat penyebab p95 jarak 21,05%: 596 restriction yang
+di-skip saat build dan perbedaan profil akses. Bagian ini menguji keduanya.
+### 14a. Komposisi 596 restriction yang di-skip
+Instrumentasi sementara (`RID_AUDIT_RESTRICTIONS=1`, sudah dihapus) mencetak
+setiap relation yang gagal dipetakan ke pasangan edge terlarang, lalu
+diklasifikasikan terhadap tag dan membernya:
+| sebab | jumlah | isi | status |
+|---|---|---|---|
+| `not_car` | 236 | from/to way di luar graf profil (footway, akses terlarang) | benar di-skip |
+| `bad_type` | 184 | 165 hanya `restriction:conditional`; 19 khusus kelas (`motorcar` 7, `hgv` 8, `bus`/`bicycle`/`psv`/`truck` 4) | 165 = batasan model; **7 `restriction:motorcar` = bug** |
+| `missing` | 62 | relation `type=restriction` tanpa member via | data rusak, benar di-skip |
+| `unresolved` | 67 | `no_out` 38, `no_in` 11, `not_on_way` 4, `no_node` 1 | mayoritas maneuver mustahil (via hanya bisa dimasuki/dilewati satu arah) |
+| `chain` | 29 | via-way: `only_*` sengaja di-skip + rantai via-way gagal diurutkan | batasan representasi |
+| `except` | 16 | `except=motorcar`/`motor_vehicle`/`vehicle` | benar untuk profil car |
+| `conditional` | 2 | `restriction` + `restriction:conditional` | time-dependent, belum dimodelkan |
+Tidak ada satu pun dari 596 yang, setelah diperiksa geometrinya, merupakan
+larangan mobil yang dilanggar routeid. `no_out`/`no_in` muncul karena `to`
+atau `from` way berarah menuju/menjauhi via: maneuver yang dilarang memang
+tidak mungkin dilakukan.
+Bug `restriction:motorcar` diperbaiki: pemilihan tag kini mengikuti profil
+(car: `restriction:motorcar` -> `restriction:motor_vehicle` ->
+`restriction`; motor: `restriction:motorcycle` -> `restriction:motor_vehicle`
+-> `restriction`), dan `except` dievaluasi per profil. Hasil rebuild:
+`usable` 4.198 -> 4.202, `ban` 3.904 -> 3.907, `only` 154 tetap, `skipped`
+596 -> **593** (`not_class` 14, `conditional` 167, `bad_type` 1), healthz
+3.787 -> **3.790 ban / 593 skipped**. Sisa `bad_type` 1 = relation tanpa tag
+`restriction` apa pun. Rebuild ini tidak mengubah satu pun hasil E1: 600/600
+jarak dan durasi identik dengan CSV run sebelumnya.
+### 14b. Metode audit rute
+Untuk 38 pasangan dengan |Δjarak| > 10%:
+1. Geometri rute routeid di-`/match` ke OSRM (`radiuses=50`, `gaps=ignore`)
+   untuk mengukur bagian geometri yang berada di jaringan mobil OSRM.
+2. Rute OSRM dipecah tiap ~2 km, lalu tiap segmen ditanyakan ke routeid;
+   jumlah durasinya = biaya path OSRM menurut model routeid.
+3. Kasus terburuk diperiksa manual di PBF (`/nearest` OSRM + way di sekitar
+   titik divergensi).
+### 14c. Temuan
+| temuan | angka |
+|---|---|
+| coverage `/match` 38 outlier | median **0,954**; 10 < 0,90; 5 < 0,80 |
+| kasus terburuk −48,30% | routeid 20,6 km vs OSRM 39,9 km; divergensi di way `644225981` `highway=track` `surface=unpaved`; `/nearest` OSRM berjarak 1.512 m; `car.lua` hanya memuat motorway..service (tanpa `track`) |
+| kasus −45,17% | tidak ada restriction dalam radius 400 m; path routeid seluruhnya residential/living_street/tertiary; `/match` path routeid 1,6 km / 189-203 s vs rute OSRM 229 s |
+| biaya path OSRM di model routeid (3 outlier positif terbesar) | 3.582 s vs rute routeid 3.537 s; 2.456 s vs 2.378 s; 4.730 s vs 4.648 s |
+| artinya | rute routeid 1-3% lebih cepat **di modelnya sendiri**, dengan jarak 15-30% lebih panjang |
+| `-eps 1.0` pada kasus terburuk | jarak identik 68.727 m -> bukan suboptimalitas heuristik |
+Kesimpulan: p95 jarak tidak disebabkan restriction maupun bug pencarian.
+Routeid meminimalkan **waktu tempuh murni** (tanpa biaya belok, tanpa
+preferensi kelas jalan, `track` ikut); OSRM meminimalkan `weight` =
+durasi + penalti belok + preferensi kelas jalan. Jarak adalah besaran ketiga
+yang tidak dioptimalkan oleh keduanya, sehingga selisih jarak mengukur
+perbedaan fungsi biaya, bukan akurasi.
+### 14d. Implikasi
+- Gerbang "p95 selisih jarak < 12%" di `COMPARISON.md` **tidak sah sebagai
+  gerbang akurasi**; ia hanya mengukur kemiripan rute. Statusnya tetap gagal,
+  tetapi tidak boleh dipakai untuk menyimpulkan routeid salah.
+- Klaim akurasi tetap menunggu E2 (Google) — hanya referensi independen yang
+  bisa memutuskan rute mana yang lebih baik.
+- Untuk menurunkan selisih jarak: tambahkan penalti belok dan/atau preferensi
+  kelas jalan (mengubah perilaku routing, harus diikuti E1 ulang), atau ubah
+  metrik primer E1 menjadi durasi. Keduanya keputusan produk, belum
+  diimplementasikan.
+- 167 `restriction:conditional` tetap batasan model (butuh evaluasi waktu),
+  dicatat di `BACKLOG.md`.

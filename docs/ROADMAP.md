@@ -56,7 +56,9 @@ sebanyak mungkin rute per detik.
 | M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 belum |
 
 Yang belum ada nombornya: ground truth (E2). E1 sudah terukur: median jarak
-−0,005% tetapi p95 21,05% (gerbang 12% gagal), jadi README/paper tetap tidak
+−0,005% tetapi p95 21,05% (gerbang 12% gagal); audit `RESULTS.md` §14
+menunjukkan p95 itu perbedaan fungsi biaya, bukan restriction yang di-skip, jadi
+README/paper tetap tidak
 boleh mengklaim "tercepat" maupun "paling akurat" — hanya biaya per rute
 (memori, artefak, latency) dan perbandingan antar-engine.
 
@@ -277,6 +279,9 @@ pasang setelah filter snap): median −0,005%, p95 21,05%, max 48,30%; 81/600
 routeid `422` (72 karena snap >3 km) dan pada pasangan itu OSRM menempel ke
 target p50 14,7 km. Gerbang p95 <12% tidak lulus → tidak ada klaim akurasi.
 
+- [x] Audit p95: 593 restriction di-skip + 38 outlier (`paper/RESULTS.md` §14);
+      hasilnya perbedaan fungsi biaya, bukan restriction; 7 `restriction:motorcar`
+      diperbaiki.
 - [x] E1 baseline OSRM MLD di mesin sama (`docs/M6.md`).
 - [ ] E2 ground truth 60-200 pasangan (butuh API key Google/Mapbox/HERE, atau 60
       pasang manual; OSRM bukan ground truth).

@@ -286,6 +286,32 @@ profil (dua file graph, dua container, atau buka dua region dengan nama
 `java-motor`). Kalau perlu satu proses dua profil, `region` harus menyimpan
 pasangan graph dan `pickSnap` memilih berdasarkan param `profile`.
 
+### 16a. Restriction per kelas kendaraan — selesai (E1 audit)
+**Hasil.** Pemilihan tag kini mengikuti profil: car `restriction:motorcar` ->
+`restriction:motor_vehicle` -> `restriction`; motor `restriction:motorcycle` ->
+`restriction:motor_vehicle` -> `restriction`; `except` dievaluasi per profil.
+Rebuild Java: usable 4.198 -> 4.202, ban 3.904 -> 3.907, skipped 596 -> 593;
+600/600 jarak & durasi E1 identik.
+### 16b. Restriction conditional (M)
+**Masalah.** 167 relation hanya punya `restriction:conditional` (jam sekolah,
+jam pasar); graf statis tidak bisa mengevaluasi waktu. Saat ini di-skip dan
+dihitung sebagai `conditional`.
+**Pilihan.** (a) dokumentasikan sebagai batasan (status sekarang), (b) simpan
+jendela waktu per ban di format v5 + evaluasi jam lokal request, (c) terapkan
+larangan tanpa syarat (konservatif, bisa menutup jalan di luar jam).
+**Lulus bila.** Pilihan eksplisit + angka dampak pada 30 pasangan yang
+melintasi jalan dengan conditional.
+### 16c. Penalti belok / preferensi kelas jalan (M)
+**Masalah.** routeid meminimalkan waktu murni; OSRM meminimalkan `weight`
+(durasi + penalti belok + preferensi kelas). Akibatnya p95 selisih jarak E1
+21,05% walau rute routeid 1-3% lebih cepat di modelnya sendiri
+(`RESULTS.md` §14). Detour 15-30% lebih panjang untuk keuntungan waktu kecil
+adalah pengalaman pengguna yang buruk.
+**Rencana.** Tambah biaya per belok (ms) dan faktor kelas jalan (atau penalti
+jarak/track); ekspos sebagai flag profil agar bisa diukur. Wajib E1 ulang +
+golden test M1.
+**Lulus bila.** p95 selisih jarak turun tanpa menaikkan durasi median > 2%,
+atau keputusan produk menolak perubahan ini secara eksplisit.
 ### 16. Restriction via-way (M)
 
 **Rencana.** Tabel kecepatan kedua (motor 30-50 km/h di kelas kecil), akses:

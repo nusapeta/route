@@ -438,7 +438,7 @@ preprocessing, 22.7\,M nodes & 28\,s (measured) & 250\,s (measured; peak 6.25\,G
 p50, 0--5/5--15/15--30/30--50/50--80\,km & 3.6/19.7/54.7/139/397\,ms & 0.7/1.1/1.7/2.2/3.2\,ms \\
 p95, same buckets        & 14.0/68.7/226.7/478.4/1060.9\,ms & 1.1/1.7/2.3/3.0/4.5\,ms \\
 distance delta (332 pairs) & median $-0.005\%$, p95 $21.05\%$ & reference \\
-turn restrictions        & 3{,}787 bans (596 skipped) & \texttt{car.lua} profile \\
+turn restrictions        & 3{,}790 bans (593 skipped) & \texttt{car.lua} profile \\
 \bottomrule
 \end{tabular}
 \caption{Controlled comparison on one machine (Ryzen 5 5600G, 16\,GB). Same
@@ -515,7 +515,12 @@ distance statistics after snapping both endpoints within 250\,m and requiring th
 engines' snapped points to agree within 50\,m): the median route-distance
 deviation is $-0.005\%$ but p95 is $21.05\%$ and the maximum is $48.3\%$, so the
 planned accuracy gate (median ${<}5\%$, p95 ${<}12\%$) fails at p95 and this paper
-makes no accuracy claim. The protocol, failure breakdown and reproduction
+makes no accuracy claim. That spread is not a restriction defect: an audit of all
+593 skipped restriction relations and of the 38 largest deviations
+(\texttt{paper/RESULTS.md}\,\S14) shows it comes from differing cost functions
+--- routeid minimises drive time without turn penalties and keeps \texttt{track}
+edges, OSRM minimises \texttt{weight} --- so distance is a third quantity that
+neither engine optimises. The protocol, failure breakdown and reproduction
 commands are in \texttt{paper/RESULTS.md}\,\S13; the independent-reference
 harness (E2) is described in \texttt{paper/EXPERIMENTS.md} but not yet run. (iii) The latency benchmark has
 526 successful queries; p99 estimates are therefore weak. (iv) Snap failures

@@ -14,7 +14,9 @@ Hasil lengkap: `RESULTS.md` §13; worksheet: `COMPARISON.md` §3.
 Ringkas: preprocess 28 s vs 250 s; artefak 693 MB vs 5,08 GB; RSS sebelum query
 17 MB vs 2,36 GiB; p50 35,1 ms vs 1,4 ms; p95 522 ms vs 3,4 ms. Jarak rute
 (332 pasang setelah filter snap): median −0,005% (lulus gerbang <5%), p95
-**21,05%** (gerbang <12% **gagal**), max 48,30%. 81/600 routeid `422`
+**21,05%** (gerbang <12% **gagal**), max 48,30%; audit §14 membuktikan p95 ini
+bukan akibat restriction yang di-skip melainkan perbedaan fungsi biaya
+(penalti belok/kelas jalan, `track`). 81/600 routeid `422`
 (72 snap >3 km); OSRM tidak gagal tetapi snap tujuannya p50 14,7 km pada pasangan
 itu. **E1 tidak boleh dipakai untuk klaim akurasi**; itu tugas E2.
 
