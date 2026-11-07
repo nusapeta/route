@@ -19,7 +19,8 @@ type RestrictionStats struct {
 	ViaWay      uint32 // resolved through one or more via ways
 	Only        uint32 // only_* rules stored in the allow list
 	Ban         uint32 // no_* pairs stored in the ban list
-	NotCar      uint32 // from or to way filtered out by the car profile
+	NotCar      uint32 // relation type or from/to way not usable by this profile
+	NotClass    uint32 // only restriction:<other vehicle class> tags present
 	Missing     uint32 // relation lacks from/to members
 	Conditional uint32 // restriction:conditional (time dependent, not modelled)
 	Except      uint32 // except=motorcar/motor_vehicle/vehicle
@@ -41,6 +42,7 @@ func (s *RestrictionStats) String() string {
 		" via_way=" + itoa(s.ViaWay) +
 		" ban=" + itoa(s.Ban) + " only=" + itoa(s.Only) +
 		" skipped{not_car=" + itoa(s.NotCar) +
+		" not_class=" + itoa(s.NotClass) +
 		" missing=" + itoa(s.Missing) +
 		" conditional=" + itoa(s.Conditional) +
 		" except=" + itoa(s.Except) +
@@ -85,12 +87,13 @@ type restView struct {
 type restResult struct {
 	ban, only []uint64
 	stats     RestrictionStats
+	prof      Profile
 }
 
 // buildRestrictions reads every type=restriction relation and converts it to
 // forbidden (fromEdge,toEdge) transitions over the already built CSR.
-func buildRestrictions(ctx context.Context, f *os.File, workers int, progress func(string, int64), v *restView) (restResult, error) {
-	var res restResult
+func buildRestrictions(ctx context.Context, f *os.File, workers int, progress func(string, int64), v *restView, prof Profile) (restResult, error) {
+	res := restResult{prof: prof}
 
 	if _, err := f.Seek(0, 0); err != nil {
 		return res, err
@@ -189,27 +192,72 @@ func indexOf(seq []int64, rank int64) int {
 	return -1
 }
 
+// restrictionTag returns the restriction value that applies to prof. The plain
+// `restriction` tag applies to every vehicle and is the fallback; a vehicle
+// class tag overrides it.
+func restrictionTag(t osm.Tags, p Profile) string {
+	keys := []string{"restriction:motorcar", "restriction:motor_vehicle", "restriction"}
+	if p == ProfileMotor {
+		keys = []string{"restriction:motorcycle", "restriction:motor_vehicle", "restriction"}
+	}
+	for _, k := range keys {
+		if v := t.Find(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// otherClassTag reports whether the relation only carries restriction:<class>
+// values for vehicles outside this profile.
+func otherClassTag(t osm.Tags) bool {
+	for _, kv := range t {
+		if strings.HasPrefix(kv.Key, "restriction:") && kv.Key != "restriction:conditional" {
+			return true
+		}
+	}
+	return false
+}
+
+// exceptApplies reports whether an except token exempts this profile.
+func exceptApplies(tok string, p Profile) bool {
+	switch strings.TrimSpace(tok) {
+	case "vehicle":
+		return true
+	case "motor_vehicle":
+		return true
+	case "motorcar":
+		return p != ProfileMotor
+	case "motorcycle":
+		return p == ProfileMotor
+	}
+	return false
+}
+
 func (res *restResult) addRelation(v *restView, r *osm.Relation) {
 	s := &res.stats
 
 	if string(r.Tags.Find("type")) != "restriction" {
-		// restriction:hgv and friends: not the car profile.
+		// type=restriction:hgv and friends: not this profile.
 		s.NotCar++
-		return
-	}
-	kind := string(r.Tags.Find("restriction"))
-	if kind == "" {
-		s.BadType++
 		return
 	}
 	if c := string(r.Tags.Find("restriction:conditional")); c != "" {
 		s.Conditional++
 		return
 	}
+	kind := restrictionTag(r.Tags, res.prof)
+	if kind == "" {
+		if otherClassTag(r.Tags) {
+			s.NotClass++
+		} else {
+			s.BadType++
+		}
+		return
+	}
 	if ex := string(r.Tags.Find("except")); ex != "" {
 		for _, tok := range strings.Split(ex, ";") {
-			switch strings.TrimSpace(tok) {
-			case "motorcar", "motor_vehicle", "vehicle":
+			if exceptApplies(tok, res.prof) {
 				s.Except++
 				return
 			}
@@ -401,5 +449,5 @@ func buildWayIndex(wayIDs []int64) map[int64]int32 {
 
 // Skipped is the number of restrictions that could not be represented.
 func (s *RestrictionStats) Skipped() uint32 {
-	return s.NotCar + s.Missing + s.Conditional + s.Except + s.BadType + s.Unresolved + s.ChainFail
+	return s.NotCar + s.NotClass + s.Missing + s.Conditional + s.Except + s.BadType + s.Unresolved + s.ChainFail
 }

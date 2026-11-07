@@ -413,7 +413,7 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 			ids:      ids,
 			perm:     perm,
 		}
-		rs, err := buildRestrictions(ctx, f, opt.Workers, progress, rv)
+		rs, err := buildRestrictions(ctx, f, opt.Workers, progress, rv, prof)
 		if err != nil {
 			return err
 		}
