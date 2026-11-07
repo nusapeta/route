@@ -113,7 +113,7 @@ func main() {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/version", handleVersion)
 	mux.HandleFunc("/metrics", s.m.handleMetrics)
-	mux.Handle("/route", s.m.wrap(s.rl.wrap(s.handleRoute, s.m)))
+	mux.Handle("/route", s.m.wrap(s.handleRoute))
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -287,6 +287,12 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
+	}
+
+	// Cached answers are free (no workspace), so they are not rate limited;
+	// everything past this point competes for a routing slot.
+	if !s.rl.allowRequest(w, req, s.m) {
+		return
 	}
 
 	rgF, snapF, ok1 := s.pickSnap(fLat, fLon)

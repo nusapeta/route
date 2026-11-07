@@ -119,25 +119,26 @@ func trimHost(s string) string {
 	return s
 }
 
-// wrap applies the limiter to a handler, answering 429 with Retry-After.
-func (l *limiter) wrap(next http.HandlerFunc, m *metrics) http.HandlerFunc {
+// allowRequest spends a token and answers 429 with Retry-After when the caller
+// is over the limit. It is called after the ETag check on purpose: a revalidated
+// route never touches a workspace, so it should not eat the routing budget of a
+// client that is being a good citizen with its cache.
+func (l *limiter) allowRequest(w http.ResponseWriter, req *http.Request, m *metrics) bool {
 	if l == nil {
-		return next
+		return true
 	}
-	return func(w http.ResponseWriter, req *http.Request) {
-		ok, wait := l.allow(clientKey(req, l.trustProxy))
-		if !ok {
-			secs := int(math.Ceil(wait.Seconds()))
-			if secs < 1 {
-				secs = 1
-			}
-			w.Header().Set("Retry-After", strconv.Itoa(secs))
-			if m != nil {
-				m.rateLimited.Add(1)
-			}
-			httpErr(w, 429, "rate limit exceeded ("+strconv.Itoa(int(l.rate*60))+"/min per IP)")
-			return
-		}
-		next(w, req)
+	ok, wait := l.allow(clientKey(req, l.trustProxy))
+	if ok {
+		return true
 	}
+	secs := int(math.Ceil(wait.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	if m != nil {
+		m.rateLimited.Add(1)
+	}
+	httpErr(w, 429, "rate limit exceeded ("+strconv.Itoa(int(l.rate*60))+"/min per IP)")
+	return false
 }

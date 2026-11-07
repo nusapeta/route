@@ -75,19 +75,17 @@ func TestLimiterWrap(t *testing.T) {
 	l := newLimiter(60, 1, true)
 	l.now = func() time.Time { return now }
 	m := &metrics{}
-	h := l.wrap(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }, m)
 
 	req := httptest.NewRequest("GET", "/route", nil)
 	req.RemoteAddr = "10.0.0.1:5555"
 	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.1")
-	if rec := httptest.NewRecorder(); func() bool {
-		h(rec, req)
-		return rec.Code == 200
-	}() != true {
+	if rec := httptest.NewRecorder(); !l.allowRequest(rec, req, m) {
 		t.Fatalf("first request should pass, got %d", rec.Code)
 	}
 	rec := httptest.NewRecorder()
-	h(rec, req)
+	if l.allowRequest(rec, req, m) {
+		t.Fatal("second request should be refused")
+	}
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("second request: code %d, want 429", rec.Code)
 	}
@@ -101,10 +99,8 @@ func TestLimiterWrap(t *testing.T) {
 	req2 := httptest.NewRequest("GET", "/route", nil)
 	req2.RemoteAddr = "10.0.0.1:5555"
 	req2.Header.Set("X-Forwarded-For", "198.51.100.7")
-	rec2 := httptest.NewRecorder()
-	h(rec2, req2)
-	if rec2.Code != 200 {
-		t.Fatalf("independent IP: code %d, want 200", rec2.Code)
+	if rec2 := httptest.NewRecorder(); !l.allowRequest(rec2, req2, m) {
+		t.Fatalf("independent IP: code %d, want a pass", rec2.Code)
 	}
 }
 

@@ -465,3 +465,37 @@ satu pop ~200 ns, jadi biayanya di bawah 0,05% dan pembatalan terjadi dalam
 hitungan milidetik. `TestRouteCanceled` membatalkan setelah 3 pengecekan dan
 memastikan `ErrCanceled` (bukan `ErrTooFar`) serta workspace tetap bisa dipakai
 query berikutnya.
+
+### 11b. Konfirmasi di homelab
+
+Deploy `a3be2f9` ke homelab (`routeid:local`, image lama disimpan
+`routeid:pre-m4`), flag `-timeout 10s -rate 15 -burst 5 -maxage 3600`.
+
+| uji | hasil |
+|---|---|
+| `200` lalu `304` (`If-None-Match` dari tag yang sama) | 200 lalu 3x 304, p50 **0,39 ms** |
+| `Cache-Control` | `public, max-age=3600` |
+| `/metrics` | 48 baris, `route_expansions_total` terisi (414.567) |
+| 9 rute penuh cepat dari satu IP | `429` + `Retry-After: 4` setelah burst habis |
+| `X-Forwarded-For` | tidak dipercaya (tanpa `-trust-proxy`) |
+
+Dibanding rute 41,7 km yang butuh ~97 ms di box ini, revalidasi 304 sekitar
+**250x** lebih murah dan tidak menyentuh workspace.
+
+**Urutan middleware yang benar (ditentukan oleh uji ini).** Percobaan pertama
+memasang rate limiter sebelum pengecekan `ETag`, hasilnya 304 ikut memakai token.
+Setelah limiter dipindah ke belakang pengecekan `ETag`:
+
+| pola request (burst 3) | kode |
+|---|---|
+| 1 rute penuh lalu 7 revalidasi | `200 304 304 304 304 304 304 304` |
+| 6 rute penuh (`If-None-Match` basi) | `200 200 200 429 429 429` |
+
+Jadi klien yang memakai cache-nya dengan benar tidak pernah kena limit — dan
+justru itu yang diinginkan: revalidasi tidak menyentuh workspace, jadi tidak
+perlu "dibayar" dengan token.
+
+Catatan operasional: dengan `-rate 15/60` sebuah app yang menghitung ulang rute
+sambil menggeser peta akan kena `429` setelah burst. Naikkan `-rate`/`-burst` di
+compose kalau app butuh lebih, atau kirim `If-None-Match` supaya query yang sama
+tidak dihitung.
