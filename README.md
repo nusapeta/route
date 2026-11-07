@@ -62,7 +62,9 @@ dan preprocess, bukan latency.
    `eps=1.5` 28% lebih cepat dari `eps=1.0` dengan 526/526 panjang rute identik.
 7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 67 RPS @7 km,
    17 RPS @15 km, dan 42 km **13,8-16,0 RPS** pada pengukuran v4 terakhir
-   (sebelumnya 11 RPS), saturasi di 4 query paralel. Ini kapasitas routeid
+   (sebelumnya 11 RPS), saturasi di 4 query paralel. Untuk campuran pasangan
+   <= 40 km (batas desain aplikasi): p50 24,3 ms `-conc 1` dan plafon
+   **23,5-24,9 RPS** (`paper/RESULTS.md` §16). Ini kapasitas routeid
    sendiri; E1 menunjukkan OSRM ~25x lebih cepat p50 untuk satu query.
 
 ### Batasan (jangan diklaim lebih)
@@ -408,6 +410,24 @@ query turun **1,6-2x**, jadi RPS naik 1,4-1,5x dan p50 turun ~30 % (rasio A/B
 bergantian: v3 9,97-10,58 RPS / p50 361-376 ms vs v4 13,79-16,02 RPS / p50
 223-283 ms pada rute 42 km, `-conc 4`, `paper/RESULTS.md` §12b). Artifak graph
 mengecil 32 % (Java 693 MB) dan RSS diam 64 MiB.
+
+Dengan build terbaru (penalti belok 0,25x, tiga region termuat) diukur langsung
+himpunan pasangan <= 40 km, bukan satu rute contoh: 298 dari 600 pasang
+`pairs-java.csv` (jarak p50 12,6 km, p95 36,4 km), instance `-rate 0`,
+`GOMEMLIMIT=768MiB`, i3-6100T:
+
+| concurrency | RPS | p50 | p95 |
+|---|---|---|---|
+| 1 | — | **24,3 ms** | **246,2 ms** |
+| 2 | 24,7 | 32,9 ms | 336,6 ms |
+| 4 | 23,5 | 73,6 ms | 705,4 ms |
+| 8 | 24,9 | 192,7 ms | 1.205,0 ms |
+
+Plafon ~24-25 RPS di 2 core fisik; `-conc 2` memberi p50 sepertiga `-conc 4`
+pada RPS yang sama, jadi untuk batas 40 km `-conc 2` cukup. RSS 805 MB
+(puncak 859 MB). Untuk segmen ini akurasi E1 juga lulus: p95 selisih jarak
+7,44% (median 0,03%) pada 324 pasang OSRM <= 40 km. Rincian:
+`paper/RESULTS.md` §16.
 
 Sebelum M3, saturasi ada di ~11-12 RPS: pada `-conc 4` CPU terpakai ~3,5
 core-ekuivalen (10,9 query x 0,33 s), jadi menambah container tidak menambah RPS

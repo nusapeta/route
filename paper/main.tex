@@ -382,9 +382,15 @@ runs (1{,}000+ requests).}
 \label{tab:throughput}
 \end{table}
 
-With a 40\,km cap in the client (the design assumption), the safe operating point
-is 10--11\,RPS, i.e. roughly 600 route requests per minute: about 600 users at one
-route per minute, or 3{,}000 at one route per five minutes.
+With a 40\,km cap in the client (the design assumption) the operating point
+depends on the route mix: a single 42\,km class supports 10--11\,RPS, whereas a
+distribution of real pairs capped at 40\,km (median 12.6\,km, 298 pairs) sustains
+23.5--24.9\,RPS on the same box at \texttt{-conc 4}, with p50 73.6\,ms and RSS
+805\,MB for three regions (\texttt{paper/RESULTS.md}\,\S16). Concurrency above two
+buys no throughput on two physical cores, and at \texttt{-conc 2} the client p50
+is a third of the \texttt{-conc 4} run at the same RPS. That is roughly 600 route
+requests per minute for the 42\,km worst case, or 1{,}400 per minute for the
+capped mix.
 
 \subsection{Turn-restriction compliance}
 The Java extract contains 4{,}653 \texttt{type=restriction} relations; 4{,}203

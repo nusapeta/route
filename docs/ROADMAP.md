@@ -291,6 +291,10 @@ target p50 14,7 km. Gerbang p95 <12% tidak lulus → tidak ada klaim akurasi.
 - [ ] E2 ground truth 60-200 pasangan (butuh API key Google/Mapbox/HERE, atau 60
       pasang manual; OSRM bukan ground truth).
 - [x] Tabel positioning diisi angka nyata, bukan "documented".
+- [x] Deploy build penalti belok ke homelab (graf Java/Sumatra dibangun ulang,
+      Bali-Nusra dari PBF baru) + kapasitas pada batas desain 40 km
+      (`paper/RESULTS.md` §16: p50 24,3 ms / p95 246,2 ms `-conc 1`, plafon
+      24-25 RPS, p95 jarak 7,44%).
 
 **Selesai bila:** `paper/COMPARISON.md` tidak lagi punya baris berstatus
 "belum diukur" untuk metrik inti, dan setiap klaim di README punya angka

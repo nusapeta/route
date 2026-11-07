@@ -827,3 +827,52 @@ Bacaan:
 - Golden test M1 diregenerasi: waktu rute sintetis naik ~1% (0,25x), jarak
   mayoritas identik; beberapa pasangan snap berubah node/total karena rute
   memilih edge snap yang berbeda.
+
+## 16. Kapasitas pada batas desain 40 km (i3-6100T, build terbaru)
+
+§12b mengukur satu rute contoh 42 km; bagian ini mengukur **himpunan pasangan**
+yang jaraknya <= 40 km dengan build yang sekarang dikirim (penalti belok 0,25x,
+3 region termuat), karena aplikasi membatasi rute maksimum 40 km.
+
+### 16a. Metode
+- Host homelab: Intel i3-6100T (2 core/4 thread), 7,8 GB, 19 container lain
+  tetap jalan; graf Java (`5d3fdd1b`, ban 3.790, skip 593), Sumatra
+  (`58ebc2b0`, 511/48), Nusa-Tenggara (`bdde65eb`, 181/42).
+- Instance uji terpisah di port 18081: `GOMEMLIMIT=768MiB -conc N -rate 0
+  -timeout 120s` (sama dengan container, kecuali rate limit dimatikan).
+- 600 pasang `paper/results/pairs-java.csv` dikirim berurutan (HTTP keep-alive);
+  298 menghasilkan rute <= 40 km (jarak p50 12,6 km, p95 36,4 km); 81 tetap
+  `422` karena snap > 3 km, bukan karena panjang rute.
+- Throughput: subset <= 40 km yang sama, klien keep-alive, 20 s per level.
+
+### 16b. Hasil (298 pasang <= 40 km)
+
+| concurrency | RPS | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|
+| 1 | — | **24,3 ms** | **246,2 ms** | 419,9 ms | 609,5 ms |
+| 2 | 24,66 | 32,9 ms | 336,6 ms | 577,9 ms | 780,4 ms |
+| 4 | 23,50 | 73,6 ms | 705,4 ms | 982,0 ms | 1.145,2 ms |
+| 8 | 24,85 | 192,7 ms | 1.205,0 ms | 1.531,3 ms | 1.810,5 ms |
+
+- Plafon CPU 2C/4T ~**24-25 RPS**; level 2/4/8 jenuh pada angka yang sama.
+- `-conc 2` memberi p50 sepertiga `-conc 4` (32,9 vs 73,6 ms) pada RPS sama,
+  jadi untuk batas 40 km `-conc 2` cukup dan antrean lebih pendek.
+- RSS 805 MB steady, puncak 859 MB (limit heap 768 MiB) dengan tiga region.
+- Seluruh 600 pasang (tanpa batas): p50 92,6 ms, p95 1.550,7 ms — ekor itu dari
+  pasangan panjang dan `422`, bukan dari rute <= 40 km.
+
+### 16c. Akurasi pada segmen <= 40 km (E1, 324 pasang OSRM <= 40 km)
+Median selisih jarak **0,03%**, p95 **7,44%**, max 70,12%: gerbang p95 < 12%
+**lulus** pada segmen ini. Ekor 21,12% di §13/§15 berasal dari pasangan panjang;
+jadi batas 40 km juga memperbaiki sisi akurasi, bukan hanya kapasitas.
+
+### 16d. Reproduksi
+```bash
+GOMEMLIMIT=768MiB bin/rid-server -graph data/java.graph -graph data/sumatra.graph \
+  -graph data/nusa-tenggara.graph -addr 127.0.0.1:18081 -conc 1 -rate 0 -timeout 120s
+# 600 pasang dari paper/results/pairs-java.csv via HTTP keep-alive; saring distance_m <= 40000
+```
+
+Catatan: angka latency E1 (§13c) untuk segmen ini tidak dipakai — sebagian
+baris 0-5 km/30-50 km tercatat 1-4 ms (terkontaminasi cache/alat ukur), jadi
+tabel di atas adalah pengukuran ulang bersih di mesin yang sama dengan deploy.
