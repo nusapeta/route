@@ -27,11 +27,11 @@ func otherEndpoint(s Snap) uint32 {
 // alongTime converts Along (metres from Node to the projection) into
 // deciseconds at the segment's own speed.
 func (g *Graph) alongTime(s Snap) float64 {
-	l := float64(g.Len[s.Edge])
+	l := float64(g.EdgeLenM(s.Edge))
 	if l == 0 {
 		return 0
 	}
-	return s.Along * float64(g.Time[s.Edge]) / l
+	return s.Along * float64(g.EdgeTimeDs(s.Edge)) / l
 }
 
 // RouteSnap routes between two snapped points. When the returned path leaves
@@ -85,8 +85,8 @@ func (r *Router) RouteSnapCtx(ctx context.Context, a, b Snap, strict bool) (Snap
 	// both endpoints on the same segment: the node path is degenerate, so take
 	// the distance along the segment when possible.
 	if len(nodes) <= 1 && a.Edge == b.Edge {
-		dist = math.Abs(a.T-b.T) * float64(g.Len[a.Edge])
-		tds = math.Abs(a.T-b.T) * float64(g.Time[a.Edge])
+		dist = math.Abs(a.T-b.T) * float64(g.EdgeLenM(a.Edge))
+		tds = math.Abs(a.T-b.T) * float64(g.EdgeTimeDs(a.Edge))
 		nodes = nil
 	}
 	if dist < 0 {
@@ -95,8 +95,34 @@ func (r *Router) RouteSnapCtx(ctx context.Context, a, b Snap, strict bool) (Snap
 	if tds < 0 {
 		tds = 0
 	}
+	// ferry metres follow the same trim/spur logic as distance
+	ferry := float64(res.FerryM)
+	if g.IsFerry(a.Edge) {
+		if out.TrimStart {
+			ferry -= a.Along
+		} else {
+			ferry += a.Along
+		}
+	}
+	if g.IsFerry(b.Edge) {
+		if out.TrimEnd {
+			ferry -= b.Along
+		} else {
+			ferry += b.Along
+		}
+	}
+	if len(nodes) <= 1 && a.Edge == b.Edge {
+		ferry = 0
+		if g.IsFerry(a.Edge) {
+			ferry = math.Abs(a.T-b.T) * float64(g.EdgeLenM(a.Edge))
+		}
+	}
+	if ferry < 0 {
+		ferry = 0
+	}
 	out.Nodes = nodes
 	out.DistanceM = uint32(math.Round(dist))
 	out.TimeDs = uint32(math.Round(tds))
+	out.FerryM = uint32(math.Round(ferry))
 	return out, nil
 }

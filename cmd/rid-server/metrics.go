@@ -23,7 +23,7 @@ type metrics struct {
 
 	req200, req304, req400, req422, req429, req500, req504 atomic.Int64
 	rateLimited                                            atomic.Int64
-	expansions, fallback, canceled, tooFar                 atomic.Int64
+	expansions, fallback, canceled, tooFar, relaxed        atomic.Int64
 	errNoRoute, errSnap, errCrossRegion                    atomic.Int64
 
 	hist [12]atomic.Int64 // len(latencyBuckets)+1, the last is +Inf
@@ -134,6 +134,7 @@ func (m *metrics) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# HELP route_inflight In-flight /route requests\n# TYPE route_inflight gauge\nroute_inflight %d\n", m.inflight.Load())
 	fmt.Fprintf(w, "# HELP route_expansions_total A* expansions summed over requests\n# TYPE route_expansions_total counter\nroute_expansions_total %d\n", m.expansions.Load())
 	fmt.Fprintf(w, "# HELP route_fallback_total Routes served without turn restrictions\n# TYPE route_fallback_total counter\nroute_fallback_total %d\n", m.fallback.Load())
+	fmt.Fprintf(w, "# HELP route_relaxed_total Long routes served with a greedier heuristic after the budget ran out\n# TYPE route_relaxed_total counter\nroute_relaxed_total %d\n", m.relaxed.Load())
 	fmt.Fprintf(w, "# HELP route_rate_limited_total Requests refused by the per-IP limiter\n# TYPE route_rate_limited_total counter\nroute_rate_limited_total %d\n", m.rateLimited.Load())
 	fmt.Fprintf(w, "# HELP route_canceled_total Searches stopped by the request deadline\n# TYPE route_canceled_total counter\nroute_canceled_total %d\n", m.canceled.Load())
 	fmt.Fprintf(w, "# HELP route_errors_total Failed routes by reason\n# TYPE route_errors_total counter\n")

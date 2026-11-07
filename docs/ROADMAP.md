@@ -177,15 +177,75 @@ beberapa detik.
 
 ### M5 — Cakupan (3-4 hari)
 
-- [ ] Profil motor (tabel kecepatan + `motorcycle=no`, `service` lebih permisif).
-- [ ] Semua pulau besar: Kalimantan, Sulawesi, Bali-Nusra (~1 menit build masing).
-- [ ] Konektor ferry (Merak-Bakauheni, Ketapang-Gilimanuk, dsb) sebagai sub-graph
-      sehingga rute lintas selat tidak lagi `422`.
-- [ ] Kurangi artefak: turunkan `Time` dari `Len` + kelas jalan (hemat ~187 MB di
-      Java), varint untuk `GO`/`GL`.
+- [x] Profil motor (`-profile motor`): tabel kecepatan sendiri, `motorcycle=no`
+      menang atas apa pun, `motor_vehicle=no` **tidak** memblokir motor (motor
+      bukan motor_vehicle), tol dibuang kecuali `motorcycle=yes`, dan
+      `path`/`footway`/`cycleway` boleh dipakai kalau ditandai untuk motor.
+- [x] Semua pulau besar: Java, Sumatra, Kalimantan, Sulawesi, Bali-Nusra,
+      Maluku, Papua — satu perintah (`make islands` / `make motor`).
+- [x] Ferry jadi edge biasa dengan waktu dari tag `duration`
+      (`Merak-Bakauheni` 2 jam, bukan 30 km / 20 km/jam), ditandai di graph
+      sebagai daftar edge sparse dan diekspos di respons (`ferry_m`,
+      `has_ferry`, `ferry_spans`).
+- [x] Format v4 memangkas artefak: `Off` uint32 (−4 B/node), `Len` uint16
+      satuan 4 m (−2 B/edge), section `Time` dihapus dan diganti `Cls` uint8
+      (−3 B/edge). Total −12 B/node-edge: Java 1.019 → **693 MB**.
 
-**Selesai bila:** Jakarta -> Medan mengembalikan rute (dengan segmen ferry
-ditandai), dan graph Java <= 800 MB.
+**Hasil terukur:**
+
+| region | node | edge | v3 | v4 | build (4 worker) |
+|---|---|---|---|---|---|
+| Java | 22,7 M | 46,7 M | 1.019 MB | **693 MB** | 3m53s |
+| Sumatra | 11,9 M | 24,3 M | 533 MB | **364 MB** | 1m09s |
+| Kalimantan | — | — | — | **215 MB** | 51s |
+| Sulawesi | — | — | — | **173 MB** | 45s |
+| Bali-Nusra | — | — | — | **153 MB** | 51s |
+| Maluku | — | — | — | **25 MB** | 8s |
+| Papua | — | — | — | **34 MB** | 8s |
+
+Tujuh region = 1.657 MB (v3 setara ~2,4 GB). Anggaran 800 MB berlaku per
+artefak yang dimuat: region terbesar (Java) 693 MB, dan subset yang realistis
+untuk satu box (Java + Bali-Nusra) 846 MB.
+
+**Akurasi & kecepatan v4** (rute sama, graph sama, box uji sama):
+
+| rute | v3 | v4 | selisih |
+|---|---|---|---|
+| Jakarta-Bandung 148 km | 148.536 m / 6424,0 s / 5,46 s | 148.673 m / 6428,4 s / **2,71 s** | +0,09% / +0,07% |
+| Jakarta-Cikarang 42 km | 42.304 m / 1938,3 s / 442 ms | 42.369 m / 1941,1 s / **260 ms** | +0,15% / +0,14% |
+| Bandung-Cimahi 13 km | 13.058 m / 773,7 s / 53 ms | 13.100 m / 775,2 s / **29 ms** | +0,32% / +0,19% |
+
+Kuantisasi 4 m dan kelas 0,5 km/h menggeser jarak <0,35%; yang lebih penting,
+pencarian jadi ~2x lebih cepat karena `Off` uint32 memangkas trafik memori dan
+satu section hilang.
+
+**Ferry dan rute lintas selat.** Ferry jadi edge biasa, jadi tidak perlu
+sub-graph: kalau kedua ujung ada di satu graph, rutenya keluar apa adanya.
+
+| query | hasil | ferry |
+|---|---|---|
+| Ketapang -> Gilimanuk (`java.graph`) | 15,1 km / 1436 s | `ferry_m=4180`, `ferry_spans=[[321,329]]` |
+| Merak -> Bakauheni (graph nasional) | 29,2 km / 5226 s | `ferry_m=28535`, `ferry_spans=[[1,25]]` |
+| Jakarta -> Medan (graph nasional) | **2004,5 km / 92.963 s** | `ferry_m=29072`, `relaxed=true` |
+
+**Temuan yang mengubah implementasi: tangga ε saat budget habis.** Koridor
+>800 km dulu berhenti di `ErrTooFar` (Palembang -> Medan sudah gagal di v2/v3,
+jadi ini bukan regresi v4). Sekarang `Route` mencoba ulang dengan heuristik yang
+lebih rakus sebelum menyerah: ε 1,5 -> 2,0 -> 3,0, dan hasilnya ditandai
+`Relaxed` (+ `X-Route`/`/metrics`). Ongkosnya terukur di Jakarta-Bandung:
+ε 1,5 = 148,67 km; ε 2,0 = 148,62 km (+0,07% jarak, +1,8% waktu, 5,6 jt -> 103 rb
+ekspansi); ε 2,5 = 155,3 km (+4,4%). Jadi 2,0 murah, 3,0 hanya untuk lintas
+pulau. Jakarta -> Medan butuh ε 3,0: 4,8 jt ekspansi, 19-22 s di box uji (default
+`-timeout 10s` akan memotongnya, jadi `-timeout 60s` untuk kelas ini).
+
+Graph nasional: `data/indonesia.graph`, 53,9 M node / 110,2 M edge, **1.650 MB**,
+8m08s dengan `GOMEMLIMIT=4GiB` di box 7 GB (workers 3). Artefak ini tidak untuk
+dideploy per-default (budget 800 MB), tapi membuktikan konektivitas 7 region.
+
+**Catatan pengukuran:** box uji M5 ini dipakai bersama (4 core, load 3-5), jadi
+angka absolutnya lebih lambat dari §2/RESULTS. Yang diukur adalah rasio A/B
+bergantian: ekspansi identik, CPU per query turun **1,6-2x** (Jakarta-Bandung
+18,6-22,1 s -> 11,7-13,7 s; Jakarta-Cikarang 2,2-2,4 s -> 0,95-1,54 s).
 
 ### M6 — Bukti (paper)
 

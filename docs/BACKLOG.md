@@ -203,7 +203,84 @@ bila `If-None-Match` cocok; `Cache-Control: public, max-age=60`.
 
 ## M5. Cakupan
 
-### 13. Profil motor (M)
+### 13. Profil motor (M) — selesai (M5)
+
+**Hasil.** Dua artefak, bukan satu graph dengan bobot ganda: `-profile car|motor`
+saat build. Alasannya diukur: kelas kecepatan motor menambah 2,3 M node / 1,5 M
+edge (jalan/gang yang boleh motor) sehingga `data/java-motor.graph` = 714 MB vs
+693 MB — lebih murah daripada menyimpan dua tabel waktu per edge di runtime.
+
+| rute | mobil | motor | catatan |
+|---|---|---|---|
+| Jakarta-Cikarang 42 km | 42,4 km / 1941 s | 40,8 km / 2525 s | motor menghindari tol, waktu 1,3x |
+| Jakarta-Bandung 148 km | 148,7 km / 6428 s | 167,0 km / 9042 s | tanpa tol: 1,4x waktu, butuh ε 2,0 |
+
+### 13b. Profil motor — sisa pekerjaan (S)
+
+- `motorcycle:conditional`, `access:conditional` (jam ganjil-genap, dsb) belum.
+- Bobot gang: satu `footway` = 10 km/h untuk semua; turunkan dari `surface`/
+  `smoothness` kalau data cukup.
+- Motor belum punya perilaku "menerobos kemacetan" (traffic tidak dimodelkan),
+  jadi rute motor = rute mobil yang lebih lambat di jalan kecil.
+
+### 14. Konektor ferry (M) — selesai (M5)
+
+**Hasil.** Tidak perlu sub-graph: `route=ferry` sudah jadi edge biasa (sejak
+awal), yang kurang hanya (a) waktu dari tag `duration` — sekarang dipakai
+(`Merak-Bakauheni` 2 jam, bukan 30 km / 20 km/jam) dan (b) penanda. Penanda
+disimpan sebagai **daftar edge sparse** (`uint32[ferryCount]`, ~10 rb entri
+se-Indonesia), bukan array penuh: percobaan pertama (bit di `GL` uint16/edge)
+menambah 93 MB di Java tanpa manfaat. Respons memuat `ferry_m`, `has_ferry`,
+`ferry_spans` (rentang indeks ke `points`/polyline).
+
+Sisa: ferry yang way-nya terpotong batas extract Geofabrik (node ujung tidak
+tersambung ke jalan) masih butuh graph nasional atau stitching antar-file —
+lihat item 17b.
+
+### 15. Kecilkan artefak (M) — selesai (M5)
+
+**Hasil.** Format v4: `Off` uint32 (-4 B/node), `Len` uint16 satuan 4 m
+(-2 B/edge), section `Time` dihapus -> `Cls` uint8 (-3 B/edge). Java 1.019 ->
+**693 MB** (-32%), Sumatra 533 -> 364 MB, tujuh region 1.657 MB. `GO`/`GL`
+varint tidak perlu: keduanya kosong (geometri interior belum ditulis).
+
+Sisa (ide v5, kalau 800 MB per region mau ditekan lagi): koordinat 24-bit
+offset per region (-2 B/node), `GNodes` grid 3 B/node (-1 B/node), atau
+delta+varint per blok 64k dengan indeks blok (butuh desain akses acak).
+
+### 17b. Stitching antar-file (M)
+
+**Masalah.** `-graph data/java.graph,data/sumatra.graph` memilih region dari snap
+dan membalas `422` kalau kedua ujung beda region, padahal ferry Merak-Bakauheni
+ada di salah satu file.
+
+**Rencana.** Tabel connector per pasangan region (node pelabuhan A, node
+pelabuhan B, jarak/waktu ferry), lalu rute dijalankan per-leg dan digabung jadi
+satu respons (satu polyline, `legs[]`). Alternatif: satu graph nasional
+(1,65 GB, sudah terbukti bisa dibangun 8 menit) untuk deployment besar.
+
+**Lulus bila.** Jakarta -> Medan 200 tanpa file >800 MB tanpa `relaxed=true`
+kalau bisa dihindari.
+
+### 13c. Budget ekspansi & hierarki (M)
+
+**Temuan M5.** Koridor panjang butuh ε 3,0 dan 4,8 jt ekspansi (Jakarta-Medan
+19-22 s, 4-5 GB graph nasional di page cache). Tangga ε menutupi masalah, tapi
+ini tanda batas: rute >800 km sebaiknya lewat hierarki (highway graph dulu,
+lalu detail di sekitar ujung), bukan menaikkan `maxExpansions`.
+
+### 14b. Jadwal ferry (S)
+
+`duration` OSM sering kosong atau kasar; untuk Merak-Bakauheni hasilnya 1,45 jam
+(OK), tapi banyak lintasan kecil tanpa tag sama sekali (jatuh ke 20 km/jam).
+Kalau akurasi ferry penting, tabel statis per lintasan lebih jujur daripada OSM.
+
+### 15b. Profil motor untuk 7 region (S)
+
+Baru Java, Sumatra, Sulawesi, Bali-Nusra yang dibangun profil motor (butuh
+4-5 menit/region untuk Java, <1 menit sisanya). Sisanya tinggal `make motor`.
+
+### 16. Restriction via-way (M)
 
 **Rencana.** Tabel kecepatan kedua (motor 30-50 km/h di kelas kecil), akses:
 `motorcycle=no` ditolak, `motor_vehicle` dihormati, `service` dan gang lebih

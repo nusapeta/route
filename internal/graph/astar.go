@@ -11,9 +11,20 @@ type Route struct {
 	Nodes      []uint32 // node sequence, src..dst
 	DistanceM  uint32
 	TimeDs     uint32
+	FerryM     uint32 // metres of the route covered by ferry crossings
 	Expansions int
+	// FerrySpans holds [start,end] index ranges into Nodes (inclusive start,
+	// inclusive end) covered by ferry crossings, so callers can draw them
+	// dashed. Empty when the route stays on land.
+	FerrySpans [][2]uint32
 	// Fallback is set when restrictions were dropped to find a path.
 	Fallback bool
+	// Relaxed is set when the first search ran out of budget and the router
+	// retried with a greedier heuristic. The answer is reachable and sane but
+	// may be a few percent slower than the optimal one.
+	Relaxed bool
+	// Epsilon records the heuristic weight that produced the answer.
+	Epsilon float32
 }
 
 // ErrNoRoute is returned when the destination is unreachable.
@@ -42,6 +53,8 @@ type Router struct {
 	pool   chan *workspace
 	eps    float32 // heuristic weight: 1.0 = optimal, 1.25 = ~4x faster
 	strict bool    // enforce turn restrictions
+
+	maxSpeedMps float64 // heuristic bound; never above maxSpeedMps global
 }
 
 // NewRouter creates a router; concurrency bounds peak memory.
@@ -53,7 +66,13 @@ func NewRouter(g *Graph, concurrency int) *Router {
 	for slots < g.NodeCount && slots < 1<<20 {
 		slots <<= 1
 	}
-	r := &Router{g: g, pool: make(chan *workspace, concurrency), eps: 1.5, strict: true}
+	r := &Router{
+		g:           g,
+		pool:        make(chan *workspace, concurrency),
+		eps:         1.5,
+		strict:      true,
+		maxSpeedMps: g.MaxSpeedMps(),
+	}
 	for i := 0; i < concurrency; i++ {
 		r.pool <- newWorkspace(slots, g.EdgeCount)
 	}
@@ -240,12 +259,27 @@ func (r *Router) RouteStrictCtx(ctx context.Context, src, dst uint32, strict boo
 	if src == dst {
 		return Route{Nodes: []uint32{src}}, nil
 	}
-	res, err := r.search(ctx, src, dst, strict)
+	res, err := r.search(ctx, src, dst, strict, r.eps)
+	if err == ErrTooFar && ctx.Err() == nil {
+		// The corridor is longer than the expansion budget. Rather than
+		// failing, retry with a greedier heuristic: the frontier collapses by
+		// an order of magnitude for a route a few percent slower. The ladder
+		// ends at 3, which is what a cross-island (>1900 km) request needs.
+		for _, eps := range relaxedLadder(r.eps) {
+			if res2, err2 := r.search(ctx, src, dst, strict, eps); err2 == nil {
+				res2.Relaxed = true
+				return res2, nil
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+	}
 	if err != nil && err != ErrCanceled && ctx.Err() == nil && strict && (len(g.Ban) > 0 || len(g.Only) > 0) {
 		// A restriction may have made the destination unreachable (bad OSM
 		// data, or our conservative via-way handling). Retry unrestricted and
 		// flag the answer so callers can count it.
-		if res2, err2 := r.search(ctx, src, dst, false); err2 == nil {
+		if res2, err2 := r.search(ctx, src, dst, false, r.eps); err2 == nil {
 			res2.Fallback = true
 			return res2, nil
 		}
@@ -253,16 +287,30 @@ func (r *Router) RouteStrictCtx(ctx context.Context, src, dst uint32, strict boo
 	return res, err
 }
 
-func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool) (Route, error) {
+// relaxedLadder is the sequence of heuristic weights tried when the budget runs
+// out: 2.0 lifts a ~150 km route out of trouble, 3.0 a ~2000 km one. Each step
+// costs more detour (measured: 1.9% at 2.0, 4% at 2.5, 6% at 3.0 on
+// Jakarta-Bandung / Jakarta-Medan), so they are only reached on failure.
+func relaxedLadder(eps float32) []float32 {
+	out := make([]float32, 0, 2)
+	for _, e := range []float32{2, 3} {
+		if e > eps {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps float32) (Route, error) {
 	g := r.g
 	w := <-r.pool
 	defer func() { r.pool <- w }()
 	w.reset()
-	h := r.newHctx(dst)
+	h := r.newHctx(dst, eps)
 
 	for e := g.Off[src]; e < g.Off[src+1]; e++ {
 		ee := uint32(e)
-		g0 := float32(g.Time[ee])
+		g0 := g.EdgeTimeDs(ee)
 		if !w.set(ee, g0, invalidEdge) {
 			return Route{}, ErrTooFar
 		}
@@ -279,6 +327,7 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool) (Ro
 		if g.To[cur.node] == dst {
 			res, err := r.reconstruct(w, src, cur.node)
 			res.Expansions = expanded
+			res.Epsilon = eps
 			return res, err
 		}
 		if cur.f > gCur+h.estEdge(g, cur.node)+0.5 {
@@ -307,7 +356,7 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool) (Ro
 			if restrict && !span.Empty() && span.Forbidden(ee) {
 				continue
 			}
-			ng := gCur + float32(g.Time[ee])
+			ng := gCur + g.EdgeTimeDs(ee)
 			if old, _, seen := w.get(ee); seen && ng >= old {
 				continue
 			}
@@ -359,9 +408,9 @@ func cosFloor(a, b float64) float64 {
 	return cosTab[i] * (1 - 1e-9)
 }
 
-func (r *Router) newHctx(dst uint32) hctx {
+func (r *Router) newHctx(dst uint32, eps float32) hctx {
 	lat, lon := r.g.Coords(dst)
-	return hctx{lat: lat, lon: lon, scale: r.eps * 10 / float32(maxSpeedMps)}
+	return hctx{lat: lat, lon: lon, scale: eps * 10 / float32(r.maxSpeedMps)}
 }
 
 // heuristicMargin keeps the flat-earth estimate below the great-circle distance.
@@ -403,14 +452,34 @@ func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
 	}
 	nodes := make([]uint32, 0, len(edges)+1)
 	nodes = append(nodes, src)
-	var dist, tm uint32
-	for i := len(edges) - 1; i >= 0; i-- {
+	var dist, ferry uint32
+	var tm float32
+	var spans [][2]uint32
+	n := len(edges) - 1
+	for i := n; i >= 0; i-- {
 		x := edges[i]
 		nodes = append(nodes, r.g.To[x])
-		dist += r.g.Len[x]
-		tm += r.g.Time[x]
+		l := r.g.EdgeLenM(x)
+		dist += l
+		tm += r.g.EdgeTimeDs(x)
+		if r.g.IsFerry(x) {
+			ferry += l
+			// node index of this edge's head in the finished slice
+			head := uint32(n-i) + 1
+			if k := len(spans); k > 0 && spans[k-1][1] == head-1 {
+				spans[k-1][1] = head
+			} else {
+				spans = append(spans, [2]uint32{head - 1, head})
+			}
+		}
 	}
-	return Route{Nodes: nodes, DistanceM: dist, TimeDs: tm}, nil
+	return Route{
+		Nodes:      nodes,
+		DistanceM:  dist,
+		TimeDs:     uint32(math.Round(float64(tm))),
+		FerryM:     ferry,
+		FerrySpans: spans,
+	}, nil
 }
 
 // Haversine returns the great circle distance in meters.

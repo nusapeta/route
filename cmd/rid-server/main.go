@@ -334,6 +334,9 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	if res.Fallback {
 		s.m.fallback.Add(1)
 	}
+	if res.Relaxed {
+		s.m.relaxed.Add(1)
+	}
 
 	// Geometry follows the road: it starts and ends at the projected points.
 	// The raw pin can still be requested with &pin=1 (straight spur included).
@@ -371,6 +374,38 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		// projected points (on the road) as [lat, lng], for a pin layer
 		"snap_from": []float64{round6(snapF.Lat), round6(snapF.Lon)},
 		"snap_to":   []float64{round6(snapT.Lat), round6(snapT.Lon)},
+	}
+	if res.FerryM > 0 {
+		body["ferry_m"] = res.FerryM
+		body["has_ferry"] = true
+		// spans index into points[] (and so into the decoded polyline), so a
+		// client can style the crossings dashed without re-reading geometry
+		off := 0
+		if p.pin {
+			off = 1
+		}
+		if res.TrimStart {
+			off--
+		}
+		spans := make([][2]int, 0, len(res.FerrySpans))
+		for _, sp := range res.FerrySpans {
+			a0 := int(sp[0]) + 1 + off // +1 for Head
+			a1 := int(sp[1]) + 1 + off
+			if a0 < 0 {
+				a0 = 0
+			}
+			if a1 < a0 {
+				continue
+			}
+			spans = append(spans, [2]int{a0, a1})
+		}
+		if len(spans) > 0 {
+			body["ferry_spans"] = spans
+		}
+	}
+	if res.Relaxed {
+		body["relaxed"] = true
+		body["epsilon"] = res.Epsilon
 	}
 	if res.Fallback {
 		body["fallback"] = true

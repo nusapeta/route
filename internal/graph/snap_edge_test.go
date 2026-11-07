@@ -44,8 +44,8 @@ func TestSnapEdgeProjects(t *testing.T) {
 	if sn.Node != from && sn.Node != to {
 		t.Errorf("node = %d, want an endpoint", sn.Node)
 	}
-	if sn.Along > float64(g.Len[sn.Edge]) {
-		t.Errorf("along %.1f exceeds edge length %d", sn.Along, g.Len[sn.Edge])
+	if sn.Along > float64(g.EdgeLenM(sn.Edge)) {
+		t.Errorf("along %.1f exceeds edge length %d", sn.Along, g.EdgeLenM(sn.Edge))
 	}
 
 	// The node snapper must be worse here: it can only return an endpoint.

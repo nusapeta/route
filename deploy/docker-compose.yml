@@ -1,7 +1,9 @@
-# Homelab deploy: Jawa + Sumatra, satu proses.
+# Homelab deploy: Jawa + Sumatra + Bali/Nusra, satu proses, graph v4.
 #   cd deploy && docker compose up -d --build
 # Graph dibangun sekali di host (butuh RAM lebih besar dari saat run):
-#   make java sumatra
+#   make java sumatra nusa-tenggara
+# Format v3 (java-v3.graph.bak) hanya terbaca oleh image pre-m5; untuk rollback
+# simpan image lama: docker tag routeid:local routeid:pre-m5
 services:
   routeid:
     build:
@@ -21,6 +23,8 @@ services:
       - /data/java.graph
       - -graph
       - /data/sumatra.graph
+      - -graph
+      - /data/nusa-tenggara.graph
       - -addr
       - :8080
       # 2 core fisik: 4 workspace -> throughput ~2,4x dibanding conc 1

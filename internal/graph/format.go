@@ -2,15 +2,15 @@
 //
 // File layout (little endian, mmap friendly):
 //
-//	header (256 bytes, fixed)
+//	header (320 bytes, fixed)
 //	section 0  Lat      int32[nodeCount]
 //	section 1  Lon      int32[nodeCount]
-//	section 2  Off      uint64[nodeCount+1]   CSR: edge indexes of node
+//	section 2  Off      uint32[nodeCount+1]   CSR: edge indexes of node
 //	section 3  To       uint32[edgeCount]
-//	section 4  Len      uint32[edgeCount]      meters
-//	section 5  Time     uint32[edgeCount]      deciseconds
-//	section 6  GO       uint32[edgeCount]      geometry offset (point index)
-//	section 7  GL       uint16[edgeCount]      geometry point count (interior)
+//	section 4  Len      uint16[edgeCount]      metres / 4 (LenUnit)
+//	section 5  Cls      uint8[edgeCount]       speed class (km/h * 2); time derives from it
+//	section 6  GO       uint32[]              reserved: geometry offset (unused)
+//	section 7  Ferry    uint32[ferryCount]    sorted edge indexes that are ferry crossings
 //	section 8  CLat     int32[coordCount]      interior shape points
 //	section 9  CLon     int32[coordCount]
 //	section 10 GOff     uint64[cellCount+1]    spatial grid over nodes
@@ -29,6 +29,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -42,14 +43,20 @@ const (
 	// (from,to) edge pairs, sTurnTo = allowed pairs for only_* rules) plus
 	// header counters. v3 adds provenance: SHA-256 of the source extract,
 	// build time, and a key=value metadata blob appended after the last
-	// section. v1/v2 files still load, with restrictions disabled (v1) and
-	// no provenance (v1, v2).
-	Version = 3
+	// section.
+	//
+	// v4 compacts the edge record: Off is uint32 (was uint64), Len is
+	// uint16 in units of LenUnit metres (was uint32 metres) and the Time
+	// section is gone: travel time is derived from Len and a per-edge
+	// speed class (Cls), which costs 1 byte instead of 4 while keeping
+	// both metrics. That is 4 B/node + 5 B/edge less (~280 MB on Java).
+	// v1-v3 files are rejected; re-run the extractor.
+	Version = 4
 	// VersionMin is the oldest readable format version.
-	VersionMin = 1
+	VersionMin = 4
 
 	magicLE     = 0x47444952 // "RIDG"
-	headerSize  = 256
+	headerSize  = 320
 	numSections = 14
 
 	// Header offsets of the v3 provenance fields. The slice 212..256 was
@@ -57,6 +64,9 @@ const (
 	hPBFHash   = 212 // [32]byte SHA-256 of the source .osm.pbf
 	hBuildUnix = 244 // uint32   seconds since Unix epoch (UTC), 0 = unknown
 	hMetaOff   = 248 // uint64   file offset of the metadata blob, 0 = none
+	// hFerry (v4) is the number of entries in the sparse ferry edge list. The
+	// header grew to 320 bytes for it; sections start after the header.
+	hFerry = 256 // uint32   count of ferry edges
 )
 
 const (
@@ -65,9 +75,9 @@ const (
 	sOff
 	sTo
 	sLen
-	sTime
+	sCls
 	sGO
-	sGL
+	sFerry
 	sCLat
 	sCLon
 	sGOff
@@ -78,6 +88,68 @@ const (
 
 // E7 is the fixed point scale for coordinates (1e-7 degree, ~1.1cm).
 const E7 = 1e7
+
+// LenUnit is the resolution of the Len section, in metres: an edge stores
+// round(metres/4) in a uint16, so it can describe up to ~262 km. Every edge is
+// one OSM node-to-node hop (metres to a few km), so the quantisation error is
+// at most 2 m per edge, ~0.1% of a city route.
+const LenUnit = 4
+
+// MaxLen4 is the largest storable Len value (in LenUnit metres).
+const MaxLen4 = 1<<16 - 1
+
+// SpeedClassScale converts km/h to the Cls byte: c = round(km/h * 2). Class 0
+// means unknown/zero speed and is never written; 254 caps at 127 km/h, above
+// anything the profiles emit.
+const SpeedClassScale = 2
+
+// classRate[c] is the time in deciseconds to cover one LenUnit (4 m) at the
+// speed encoded by class c: 4 m at v m/s is 40/v ds and v = c/7.2 m/s, so the
+// rate is 288/c — exact for every integer km/h (c = 2*km/h).
+var classRate = func() (t [256]float32) {
+	for c := 1; c < 256; c++ {
+		t[c] = 288 / float32(c)
+	}
+	return t
+}()
+
+// MaxSpeedMps is the fastest speed any edge in this graph can carry, used to
+// bound the A* heuristic. A motorcycle graph tops out well below a car one, and
+// the tighter bound is what keeps long bike routes inside the expansion budget.
+// Falls back to the global 130 km/h bound when the extractor did not stamp it.
+func (g *Graph) MaxSpeedMps() float64 {
+	if v := g.meta["max_speed_kmh"]; v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 1 && f <= 130 {
+			return f / 3.6
+		}
+	}
+	return 130.0 / 3.6
+}
+
+// EdgeLenM is the length of edge e in metres.
+func (g *Graph) EdgeLenM(e uint32) uint32 { return uint32(g.Len[e]) * LenUnit }
+
+// EdgeTimeDs is the travel time of edge e in deciseconds.
+func (g *Graph) EdgeTimeDs(e uint32) float32 { return float32(g.Len[e]) * classRate[g.Cls[e]] }
+
+// IsFerry reports whether edge e is a ferry crossing. The list is sparse (a
+// few thousand edges even nationwide) and binary searched, which is per-route
+// work in reconstruct, not per-expansion work in the hot loop.
+func (g *Graph) IsFerry(e uint32) bool {
+	lo, hi := 0, len(g.Ferry)
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		switch v := g.Ferry[mid]; {
+		case v == e:
+			return true
+		case v < e:
+			lo = mid + 1
+		default:
+			hi = mid
+		}
+	}
+	return false
+}
 
 // Graph is a read-only, memory mapped road graph.
 type Graph struct {
@@ -95,12 +167,12 @@ type Graph struct {
 	bbox       [4]float64 // minLat, minLon, maxLat, maxLon (zeros = scan)
 
 	Lat, Lon []int32
-	Off      []uint64
+	Off      []uint32
 	To       []uint32
-	Len      []uint32
-	Time     []uint32
-	GO       []uint32
-	GL       []uint16
+	Len      []uint16 // metres / LenUnit
+	Cls      []uint8  // speed class, see SpeedClassScale
+	GO       []uint32 // reserved (always empty in v4)
+	Ferry    []uint32 // sorted edge indexes of ferry crossings
 	CLat     []int32
 	CLon     []int32
 	GOff     []uint64
@@ -151,10 +223,14 @@ func Open(path string) (*Graph, error) {
 	ver := be.Uint32(data[4:])
 	banCount := uint32(0)
 	onlyCount := uint32(0)
+	ferryCount := uint32(0)
 	if ver >= 2 {
 		banCount = be.Uint32(data[200:])
 		onlyCount = be.Uint32(data[204:])
 		g.Skipped = be.Uint32(data[208:])
+	}
+	if ver >= 4 {
+		ferryCount = be.Uint32(data[hFerry:])
 	}
 	if ver >= 3 {
 		copy(g.pbfHash[:], data[hPBFHash:hPBFHash+32])
@@ -191,12 +267,11 @@ func Open(path string) (*Graph, error) {
 
 	g.Lat = i32s(data, off[sLat], g.NodeCount)
 	g.Lon = i32s(data, off[sLon], g.NodeCount)
-	g.Off = u64s(data, off[sOff], g.NodeCount+1)
+	g.Off = u32s(data, off[sOff], g.NodeCount+1)
 	g.To = u32s(data, off[sTo], g.EdgeCount)
-	g.Len = u32s(data, off[sLen], g.EdgeCount)
-	g.Time = u32s(data, off[sTime], g.EdgeCount)
-	g.GO = u32s(data, off[sGO], g.EdgeCount)
-	g.GL = u16s(data, off[sGL], g.EdgeCount)
+	g.Len = u16s(data, off[sLen], g.EdgeCount)
+	g.Cls = u8s(data, off[sCls], g.EdgeCount)
+	g.Ferry = u32s(data, off[sFerry], ferryCount)
 	g.CLat = i32s(data, off[sCLat], g.CoordCount)
 	g.CLon = i32s(data, off[sCLon], g.CoordCount)
 	cells := uint32(0)
@@ -243,6 +318,13 @@ func u16s(d []byte, off uint64, n uint32) []uint16 {
 	return unsafe.Slice((*uint16)(unsafe.Pointer(&d[off])), n)
 }
 
+func u8s(d []byte, off uint64, n uint32) []uint8 {
+	if n == 0 {
+		return nil
+	}
+	return d[off : off+uint64(n)]
+}
+
 func u64s(d []byte, off uint64, n uint32) []uint64 {
 	if n == 0 {
 		return nil
@@ -257,14 +339,16 @@ func (g *Graph) Coords(n uint32) (lat, lon float64) {
 
 // Builder accumulates a graph in memory and serializes it.
 type Builder struct {
-	Lat, Lon      []int32
-	Off           []uint64
-	To, Len, Time []uint32
-	GO            []uint32
-	GL            []uint16
-	CLat, CLon    []int32
-	TurnOff       []uint64
-	TurnTo        []uint32
+	Lat, Lon   []int32
+	Off        []uint32
+	To         []uint32
+	Len        []uint16
+	Cls        []uint8
+	GO         []uint32 // reserved
+	Ferry      []uint32 // sorted edge indexes
+	CLat, CLon []int32
+	TurnOff    []uint64
+	TurnTo     []uint32
 
 	GridStep           float64
 	GridLat0, GridLon0 float64
@@ -370,12 +454,12 @@ func (b *Builder) Write(path string) error {
 	sizes := [numSections]uint64{
 		4 * uint64(len(b.Lat)),
 		4 * uint64(len(b.Lon)),
-		8 * uint64(len(b.Off)),
+		4 * uint64(len(b.Off)),
 		4 * uint64(len(b.To)),
-		4 * uint64(len(b.Len)),
-		4 * uint64(len(b.Time)),
+		2 * uint64(len(b.Len)),
+		1 * uint64(len(b.Cls)),
 		4 * uint64(len(b.GO)),
-		2 * uint64(len(b.GL)),
+		4 * uint64(len(b.Ferry)),
 		4 * uint64(len(b.CLat)),
 		4 * uint64(len(b.CLon)),
 		8 * uint64(len(b.GOff)),
@@ -436,6 +520,7 @@ func (b *Builder) Write(path string) error {
 	be.PutUint32(hdr[200:], uint32(len(b.Ban)))
 	be.PutUint32(hdr[204:], uint32(len(b.Only)))
 	be.PutUint32(hdr[208:], b.RestSkipped)
+	be.PutUint32(hdr[hFerry:], uint32(len(b.Ferry)))
 	copy(hdr[hPBFHash:], b.PBFHash)
 	be.PutUint32(hdr[hBuildUnix:], b.BuildUnix)
 	be.PutUint64(hdr[hMetaOff:], metaOff)
@@ -525,16 +610,26 @@ func (b *Builder) Write(path string) error {
 		}
 		return nil
 	}
+	writeU8s := func(v []uint8) error {
+		if len(v) == 0 {
+			return nil
+		}
+		if _, err := bw.Write(v); err != nil {
+			return err
+		}
+		written += uint64(len(v))
+		return nil
+	}
 
 	steps := []func() error{
 		func() error { return writeI32s(b.Lat) },
 		func() error { return writeI32s(b.Lon) },
-		func() error { return writeU64s(b.Off) },
+		func() error { return writeU32s(b.Off) },
 		func() error { return writeU32s(b.To) },
-		func() error { return writeU32s(b.Len) },
-		func() error { return writeU32s(b.Time) },
+		func() error { return writeU16s(b.Len) },
+		func() error { return writeU8s(b.Cls) },
 		func() error { return writeU32s(b.GO) },
-		func() error { return writeU16s(b.GL) },
+		func() error { return writeU32s(b.Ferry) },
 		func() error { return writeI32s(b.CLat) },
 		func() error { return writeI32s(b.CLon) },
 		func() error { return writeU64s(b.GOff) },

@@ -23,8 +23,9 @@ func cityGraph(t testing.TB) *Builder {
 	t.Helper()
 	const n, d = 30, 0.0012 // ~133 m spacing
 	type edge struct {
-		to         uint32
-		length, ds uint32
+		to    uint32
+		len4  uint16
+		class uint8
 	}
 	adj := make([][]edge, n*n)
 	latOf := func(i int) int32 { return int32(math.Round((-7.8 + float64(i)*d) * E7)) }
@@ -38,11 +39,8 @@ func cityGraph(t testing.TB) *Builder {
 		if int(a)/n%7 == 0 { // every 7th row is a slower local street
 			speed = 5.0
 		}
-		ds := uint32(math.Round(float64(m) / speed * 10))
-		if ds == 0 {
-			ds = 1
-		}
-		adj[a] = append(adj[a], edge{c, m, ds})
+		len4 := uint16(math.Max(1, math.Round(float64(m)/LenUnit)))
+		adj[a] = append(adj[a], edge{c, len4, uint8(math.Round(speed * 3.6 * SpeedClassScale))})
 	}
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
@@ -60,21 +58,21 @@ func cityGraph(t testing.TB) *Builder {
 	b := &Builder{
 		Lat: make([]int32, n*n),
 		Lon: make([]int32, n*n),
-		Off: make([]uint64, uint32(n*n)+1),
+		Off: make([]uint32, uint32(n*n)+1),
 	}
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
 			k := i*n + j
 			b.Lat[k], b.Lon[k] = latOf(i), lonOf(j)
-			b.Off[k] = uint64(len(b.To))
+			b.Off[k] = uint32(len(b.To))
 			for _, e := range adj[k] {
 				b.To = append(b.To, e.to)
-				b.Len = append(b.Len, e.length)
-				b.Time = append(b.Time, e.ds)
+				b.Len = append(b.Len, e.len4)
+				b.Cls = append(b.Cls, e.class)
 			}
 		}
 	}
-	b.Off[uint32(n*n)] = uint64(len(b.To))
+	b.Off[uint32(n*n)] = uint32(len(b.To))
 	b.BuildGrid(0.02)
 	return b
 }
@@ -197,8 +195,8 @@ func TestGoldenRoutes(t *testing.T) {
 	}
 }
 
-// TestProvenanceRoundTrip checks that the v3 metadata survives a write/read
-// cycle and that pre-v3 files still load without provenance.
+// TestProvenanceRoundTrip checks that the v3+ metadata survives a write/read
+// cycle and that pre-v4 files are rejected rather than misread.
 func TestProvenanceRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "prov.graph")
@@ -246,25 +244,18 @@ func TestProvenanceRoundTrip(t *testing.T) {
 	}
 	g.Close()
 
-	// Simulate a v2 file: same bytes, older version field.
+	// A pre-v4 file must be rejected instead of misread: v4 changed the
+	// widths of Off/Len and replaced Time with Cls.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	binary.LittleEndian.PutUint32(raw[4:], 2)
+	binary.LittleEndian.PutUint32(raw[4:], 3)
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	g2, err := Open(path)
-	if err != nil {
-		t.Fatalf("open v2: %v", err)
-	}
-	defer g2.Close()
-	if g2.PBFHashHex() != "" || g2.Meta() != nil || !g2.BuildTime().IsZero() {
-		t.Errorf("v2 file should have no provenance, got %+v", g2.Provenance())
-	}
-	if g2.NodeCount != uint32(len(cityGraph(t).Lat)) {
-		t.Errorf("v2 node count = %d", g2.NodeCount)
+	if _, err := Open(path); err == nil {
+		t.Fatal("v3 file should be rejected by a v4 reader")
 	}
 }
 

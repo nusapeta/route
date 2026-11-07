@@ -195,9 +195,9 @@ func (g *Graph) snapCell(lat, lon float64, r, c int, best *Snap) {
 			}
 			s := Snap{Edge: uint32(e), From: u, To: v, T: t, Lat: plat, Lon: plon, Dist: d}
 			if t <= 0.5 {
-				s.Node, s.Along, s.Reverse = u, t*float64(g.Len[e]), false
+				s.Node, s.Along, s.Reverse = u, t*float64(g.EdgeLenM(e)), false
 			} else {
-				s.Node, s.Along, s.Reverse = v, (1-t)*float64(g.Len[e]), true
+				s.Node, s.Along, s.Reverse = v, (1-t)*float64(g.EdgeLenM(e)), true
 			}
 			*best = s
 		}

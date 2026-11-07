@@ -65,7 +65,7 @@ func TestHeuristicAdmissible(t *testing.T) {
 
 	var worst float64
 	for dst := uint32(0); dst < g.NodeCount; dst += 7 {
-		h := r.newHctx(dst)
+		h := r.newHctx(dst, r.eps)
 		for n := uint32(0); n < g.NodeCount; n += 11 {
 			lat, lon := g.Coords(n)
 			got := float64(h.est(lat, lon))
@@ -79,7 +79,7 @@ func TestHeuristicAdmissible(t *testing.T) {
 	}
 	// Country-scale separation: the flat-earth error grows quadratically with the
 	// angular separation, so check a 10-degree span independently of the graph.
-	h := r.newHctx(0)
+	h := r.newHctx(0, r.eps)
 	lat0, lon0 := g.Coords(0)
 	for dLat := -10.0; dLat <= 10.0; dLat += 0.5 {
 		for dLon := -10.0; dLon <= 10.0; dLon += 0.5 {

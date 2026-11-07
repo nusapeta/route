@@ -76,7 +76,7 @@ type restView struct {
 	wayIndex map[int64]int32
 	flat     []int64
 	wayOff   []int
-	off      []uint64
+	off      []uint32
 	to       []uint32
 	ids      []int64  // osm node ids, sorted (pre-permutation order)
 	perm     []uint32 // pre-rank -> final rank, nil when order=osm
@@ -144,12 +144,12 @@ func (v *restView) wayNodes(w int32) []int64 {
 
 // edge finds the directed edge u->t in the CSR, if it exists.
 func (v *restView) edge(u, t int64) (uint32, bool) {
-	if u < 0 || t < 0 || u == t || uint64(u)+1 >= uint64(len(v.off)) {
+	if u < 0 || t < 0 || u == t || u+1 >= int64(len(v.off)) {
 		return 0, false
 	}
 	for e := v.off[u]; e < v.off[u+1]; e++ {
 		if v.to[e] == uint32(t) {
-			return uint32(e), true
+			return e, true
 		}
 	}
 	return 0, false

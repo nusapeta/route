@@ -54,12 +54,14 @@ tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
 
 ### Batasan (jangan diklaim lebih)
 
-- Tanpa hierarki (CH/MLD): >60 km melambat superlinear. 148 km = 4,2 s.
-- Snap ke **node**, bukan ke ruas: ujung rute bisa meleset beberapa ratus meter
-  di jalan yang way-nya jarang (E4 belum dikerjakan).
-- Satu region per rute: Jakarta -> Medan balas `422` (butuh ferry/konektor).
-- Profil hanya mobil; motor/gang belum ada. `restriction:conditional` dan
-  vehicle-class dihitung tapi belum diterapkan.
+- Tanpa hierarki (CH/MLD): >60 km melambat superlinear. 148 km = 2,7 s (v4;
+  4,2 s di v3), dan koridor >800 km masih menabrak batas ekspansi (`ErrTooFar`).
+- Satu graf = satu profil: mobil dan motor adalah dua artefak terpisah
+  (`data/java.graph` vs `data/java-motor.graph`), bukan parameter query.
+- Satu region per rute. Lintas selat dilayani hanya kalau kedua ujung jatuh di
+  satu graph (mis. ferry Ketapang-Gilimanuk di `java.graph`); rute antar-file
+  (Merak -> Bakauheni dengan `java.graph` + `sumatra.graph`) masih `422`.
+- `restriction:conditional` dan vehicle-class dihitung tapi belum diterapkan.
 - **Belum ada validasi akurasi terhadap referensi independen** (E2). Jarak sudah
   dicek terhadap itineari yang dikenal, bukan uji statistik.
 - Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
@@ -77,7 +79,7 @@ p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
 | M2 | snap ke ruas (bukan node) | galat ujung p50 <= 20 m, p95 <= 60 m |
 | M3 | biaya per ekspansi (heuristik, workspace 12 B/slot, heap 4-ary); ALT ditunda karena memori | latensi 1,9-2,0x, dalam box uji; RPS i3 menyusul deploy |
 | M4 | timeout, rate limit, `/metrics`, ETag | tak ada request menahan slot >10 s |
-| M5 | profil motor, semua pulau, ferry, artefak <= 800 MB | Jakarta -> Medan dapat rute |
+| M5 | profil motor, semua pulau, ferry, artefak <= 800 MB | 7 region terbangun, ferry ditandai, Java 693 MB |
 | M6 | E1 baseline OSRM, E2 ground truth | tabel komparasi terisi angka nyata |
 
 Rincian item, kriteria lulus, dan biaya: [`docs/ROADMAP.md`](docs/ROADMAP.md) dan
@@ -91,7 +93,10 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
 ```
 
 - **Node = setiap node OSM** → geometri jalan persis, tanpa shape point terpisah.
-- **CSR** adjacency (Off/To/Len/Time), koordinat fixed point 1e-7.
+- **CSR** adjacency (Off/To/Len/Cls), koordinat fixed point 1e-7. Format v4:
+  `Off` uint32, `Len` uint16 satuan 4 m, waktu **tidak** disimpan — dihitung
+  dari `Len` + kelas kecepatan per edge (`Cls` = km/h x 2), dan ferry disimpan
+  sebagai daftar edge sparse (bukan array penuh). 12 B/node + 7 B/edge.
 - **Hilbert curve ordering**: node diurutkan geografis → A* tetap page-local
   (RSS metropolitan 1.225 → 675 MB, p50 7-20% lebih cepat).
 - **Weighted A*** (ε=1.5 default): 28% lebih cepat dari ε=1.0, panjang rute identik.
@@ -100,13 +105,21 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
   tidak). Grid 0.02° (~2,2 km/cell) dengan pencarian per-ring.
 - Bobot = waktu tempuh (detik desimal) dari `maxspeed` atau default per kelas
   jalan yang disetel untuk Indonesia (residential 25 km/h, service 15 km/h, dll).
+- **Profil** dipilih saat build: `car` (default, tabel mobil) atau `motor`
+  (tabel motor: service/gang lebih permisif, tol dibuang kecuali
+  `motorcycle=yes`, `path`/`footway` dipakai kalau ditandai boleh motor).
+- **Ferry** (`route=ferry`) ikut jadi edge; waktu pakai tag `duration` kalau ada
+  (Merak-Bakauheni 2 jam ≠ 30 km / 20 km/jam), dan respons menandai segmennya.
 
 ## Pakai
 
 ```bash
 make build          # semua binary ke bin/
 make fetch REGION=java
-make java           # unduh + build data/java.graph
+make java           # unduh + build data/java.graph (profil mobil)
+make graph REGION=java PROFILE=motor   # -> data/java-motor.graph
+make islands        # ketujuh region Geofabrik, profil mobil
+make motor          # ketujuh region, profil motor
 
 # cek rute
 bin/rid-route -graph data/java.graph -from -6.1754,106.8272 -to -6.5950,106.8166
@@ -153,8 +166,10 @@ Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`,
 `/healthz` dan `/version` menjawab "graph dan binary mana yang sedang jalan",
 jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
 `snap_from`/`snap_to` (titik proyeksi di jalan), `snap_from_m`/`snap_to_m`
-(offset meter), `trimmed`, `bbox`, `points_n`; header `X-Route-Ms`,
-`X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`.
+(offset meter), `trimmed`, `bbox`, `points_n`, dan kalau rute menyeberang:
+`ferry_m`, `has_ferry`, `ferry_spans` (rentang indeks ke `points`/polyline yang
+bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
+`X-Route-Region`, `X-Route-Trim`.
 
 ### Cache, batas waktu, batas laju (M4)
 
@@ -393,12 +408,21 @@ bin/rid-server -graph data/java.graph,data/sumatra.graph -addr :8080
 bin/rid-server -graph data/ -addr :8080          # semua *.graph di direktori
 ```
 
-Terukur (VmHWM):
-| region | node | edge | disk | build | peak RAM build |
-|---|---|---|---|---|---|
-| java | 22.7 M | 46.7 M | 1.019 MB | 86 s | 3.2 GB (1.8 GB dgn `GOMEMLIMIT=1800MiB`) |
-| sumatra | 11.9 M | 24.3 M | 533 MB | 23 s | 1.4 GB |
-| nasional (est.) | ~44 M | ~90 M | ~2.0-2.2 GB | ~3 mnt | ~5 GB dgn `GOMEMLIMIT=5GiB` |
+Ketujuh region Geofabrik terbangun (format v4, profil mobil; disk = artefak):
+
+| region | node | edge | disk | build (4 worker) |
+|---|---|---|---|---|
+| java | 22,7 M | 46,7 M | **693 MB** | 3m53s |
+| sumatra | 11,9 M | 24,3 M | **364 MB** | 1m09s |
+| kalimantan | 7,1 M | 14,2 M | **215 MB** | 51s |
+| sulawesi | 5,9 M | 11,7 M | **173 MB** | 45s |
+| nusa-tenggara (Bali-Nusra) | 5,2 M | 10,3 M | **153 MB** | 51s |
+| maluku | 0,8 M | 1,6 M | **25 MB** | 8s |
+| papua | 1,1 M | 2,2 M | **34 MB** | 8s |
+| nasional (7 region, satu file) | 53,9 M | 110,2 M | **1.650 MB** | 8m08s |
+
+Profil motor membesar sedikit karena gang/`path` yang boleh dilalui motor ikut
+masuk: `java-motor` 714 MB (23,4 M node / 48,2 M edge).
 
 Cek sehat graph per region sebelum dipakai (snap per titik + peta lubang):
 
@@ -413,10 +437,27 @@ Uji yang sudah lolos di satu proses (java + sumatra): Jakarta->Bandung
 (`java`, 148.5 km), Medan->Binjai (`sumatra`, 22.7 km), Medan->Parapat
 (175.0 km), Banda Aceh->Medan (578.7 km), RSS total 357 MB (mmap).
 
-Rute lintas-region (mis. Merak -> Bakauheni) belum didukung: dua titik harus
-jatuh di satu region, kalau tidak server membalas `422`. Kalau butuh, gabungkan
-jadi satu graph dari pbf nasional (`scripts/build-national.sh`) — butuh mesin
-≥8 GB atau streaming extractor yang belum ada.
+**Rute lintas selat.** Ferry adalah edge biasa, jadi rute menyeberang keluar
+kalau kedua ujung ada di satu graph:
+
+| query | hasil |
+|---|---|
+| Ketapang -> Gilimanuk (`java.graph`) | 15,1 km, `ferry_m=4180`, `ferry_spans=[[321,329]]` |
+| Merak -> Bakauheni (`indonesia.graph`) | 29,2 km / 1,45 jam, `ferry_m=28535` |
+| Jakarta -> Medan (`indonesia.graph`) | 2004,5 km / 25,8 jam, `ferry_m=29072`, `relaxed=true` |
+
+Kalau titiknya jatuh di dua file region berbeda, server tetap membalas `422`
+("cross-region route not supported") — stitching antar-file ada di BACKLOG 17b.
+Untuk melayani lintas pulau hari ini: bangun graph nasional
+(`scripts/build-national.sh`, 8 menit, `GOMEMLIMIT=4GiB` di box 7 GB) atau
+taruh banyak region di satu server dan terima batas itu.
+
+**Koridor panjang = `relaxed`.** Sebelum menyerah dengan `ErrTooFar`, router
+mencoba ulang dengan heuristik lebih rakus (ε 2,0 lalu 3,0) dan menandai hasil
+`relaxed=true` + `epsilon`. Ongkosnya: Jakarta-Bandung ε 2,0 = 148,62 km
+(+0,07%), ε 2,5 = 155,3 km (+4,4%). Jakarta -> Medan (2004 km) butuh ε 3,0, 4,8
+jt ekspansi, 19-22 s — jadi pakai `-timeout 60s` untuk kelas ini, bukan default
+10 s.
 
 ## Repo layout
 
@@ -501,12 +542,18 @@ graf). Bandingkan tabel CSR penuh: 8 B x 46,7 jt edge = 374 MB.
 
 ## Format file
 
-Lihat doc comment `internal/graph/format.go`. Header 256 B + 14 section
-(Lat, Lon, CSR Off/To/Len/Time, geometri interior, grid, lalu section
-`Ban`/`Only` berisi pasangan edge terlarang/diizinkan). Versi format 3:
-menambah provenance di header (SHA-256 pbf, waktu build) plus blob
-`key=value` di akhir file (sumber, hash profil, versi extractor, order, grid).
-File v1/v2 tetap terbaca: v2 tanpa provenance, v1 juga tanpa restriction.
+Lihat doc comment `internal/graph/format.go`. Header 320 B + 14 section: Lat,
+Lon (int32 1e-7), CSR `Off`/`To`, `Len` (uint16 satuan 4 m), `Cls` (uint8 = km/h
+x 2), daftar edge ferry (sparse), grid snap, lalu `Ban`/`Only` (pasangan edge
+terlarang/diizinkan). **Waktu tempuh tidak disimpan**: dihitung dari
+`Len x 288/Cls` desisecond, jadi satu edge = 4 + 2 + 1 = 7 B dan satu node =
+4 + 4 + 4 = 12 B.
+
+Versi 4 menambah: `Off` uint32, `Len`/`Cls` di atas, dan daftar ferry. Header
+punya provenance sejak v3 (SHA-256 pbf, waktu build) plus blob `key=value` di
+akhir file (sumber, profil + hash, batas kecepatan, versi extractor, order,
+grid). File v1-v3 **ditolak** oleh reader v4 (lebarnya beda, salah baca lebih
+buruk daripada error jelas): jalankan ulang extractor, 1-8 menit per region.
 
 ## Catatan data
 

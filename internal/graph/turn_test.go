@@ -15,16 +15,16 @@ import (
 func tinyGraph(t *testing.T, withRestriction bool) *Graph {
 	t.Helper()
 	b := &Builder{
-		Lat:  []int32{-70000000, -70000000, -70000000, -70010000},
-		Lon:  []int32{106000000, 106001000, 106002000, 106001000},
-		Off:  []uint64{0, 1, 3, 4, 5},
-		To:   []uint32{1, 0, 2, 1, 0},
-		Len:  []uint32{100, 100, 100, 100, 140},
-		Time: []uint32{100, 100, 100, 100, 140},
+		Lat: []int32{-70000000, -70000000, -70000000, -70010000},
+		Lon: []int32{106000000, 106001000, 106002000, 106001000},
+		Off: []uint32{0, 1, 3, 4, 5},
+		To:  []uint32{1, 0, 2, 1, 0},
+		Len: []uint16{25, 25, 25, 25, 35}, // LenUnit metres
+		Cls: []uint8{72, 72, 72, 72, 72},  // 36 km/h
 	}
 	// CSR by from-node:
 	//   edge0 0->1, edge1 1->0, edge2 1->3, edge3 2->1, edge4 3->0
-	b.Off = []uint64{0, 1, 3, 4, 5}
+	b.Off = []uint32{0, 1, 3, 4, 5}
 	b.To = []uint32{1, 0, 3, 1, 0}
 	b.BuildGrid(0.02)
 	if withRestriction {
@@ -73,10 +73,10 @@ func TestOnlyRule(t *testing.T) {
 	b := &Builder{
 		Lat:  []int32{-70000000, -70000000, -70000000},
 		Lon:  []int32{106000000, 106001000, 106002000},
-		Off:  []uint64{0, 1, 3},
+		Off:  []uint32{0, 1, 3},
 		To:   []uint32{1, 0, 2},
-		Len:  []uint32{100, 100, 100},
-		Time: []uint32{100, 100, 100},
+		Len:  []uint16{25, 25, 25}, // LenUnit metres
+		Cls:  []uint8{72, 72, 72},  // 36 km/h
 		Only: SortUniquePacked([]uint64{PackTurn(0, 1)}),
 	}
 	b.BuildGrid(0.02)

@@ -1,7 +1,10 @@
 # routeid — build, test, and data targets.
 GO      ?= go
 REGION  ?= java
+PROFILE ?= car
 MEMLIM  ?= 2GiB
+# Regions Geofabrik publishes for Indonesia (see scripts/fetch.sh).
+ISLANDS  = java sumatra kalimantan sulawesi nusa-tenggara maluku papua
 
 # Provenance stamped into binaries: `make build` records the commit, `make
 # static` uses a reproducible SOURCE_DATE_EPOCH when the build must be bit-identical.
@@ -11,7 +14,7 @@ LDFLAGS := -X main.commit=$(COMMIT) -X main.buildTime=$(BUILT) \
            -X routeid/internal/extract.Version=$(COMMIT)
 STATIC  := -s -w $(LDFLAGS)
 
-.PHONY: all build test vet fmt clean fetch java sumatra bench restcheck
+.PHONY: all build test vet fmt clean fetch graph java sumatra islands motor bench restcheck
 
 all: build
 
@@ -44,13 +47,26 @@ fetch:
 
 # Build a regional graph. Extraction is the only memory-hungry step, so cap
 # the GC: Java peaks at ~1.8 GB with this limit instead of ~3.2 GB.
-java: build
-	[ -f data/java-latest.osm.pbf ] || scripts/fetch.sh java
-	GOMEMLIMIT=$(MEMLIM) bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
+# The car profile keeps the historical name (data/java.graph); other profiles
+# get a suffix so an A/B stays one command away.
+graph: build
+	[ -f data/$(REGION)-latest.osm.pbf ] || scripts/fetch.sh $(REGION)
+	GOMEMLIMIT=$(MEMLIM) bin/rid-extract -pbf data/$(REGION)-latest.osm.pbf \
+	  -out data/$(REGION)$(if $(filter-out car,$(PROFILE)),-$(PROFILE),).graph \
+	  -profile $(PROFILE)
 
-sumatra: build
-	[ -f data/sumatra-latest.osm.pbf ] || scripts/fetch.sh sumatra
-	GOMEMLIMIT=$(MEMLIM) bin/rid-extract -pbf data/sumatra-latest.osm.pbf -out data/sumatra.graph
+java:
+	$(MAKE) graph REGION=java
+
+sumatra:
+	$(MAKE) graph REGION=sumatra
+
+# Motorcycle graphs for every island, next to the car ones.
+islands: build
+	@for r in $(ISLANDS); do $(MAKE) graph REGION=$$r PROFILE=car || exit 1; done
+
+motor: build
+	@for r in $(ISLANDS); do $(MAKE) graph REGION=$$r PROFILE=motor || exit 1; done
 
 bench: build
 	bin/rid-bench -graph data/java.graph -pairs paper/results/pairs-java.csv

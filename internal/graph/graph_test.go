@@ -18,10 +18,10 @@ func buildLine(t *testing.T) string {
 		{-6.210, 106.810},
 	}
 	b := &graph.Builder{
-		Off:  []uint64{0, 1, 4, 5, 6},
-		To:   []uint32{1, 0, 2, 3, 1, 1},
-		Len:  make([]uint32, 6),
-		Time: make([]uint32, 6),
+		Off: []uint32{0, 1, 4, 5, 6},
+		To:  []uint32{1, 0, 2, 3, 1, 1},
+		Len: make([]uint16, 6),
+		Cls: make([]uint8, 6),
 	}
 	for _, c := range coords {
 		b.Lat = append(b.Lat, int32(math.Round(c[0]*graph.E7)))
@@ -33,8 +33,8 @@ func buildLine(t *testing.T) string {
 			float64(b.Lat[a])/graph.E7, float64(b.Lon[a])/graph.E7,
 			float64(b.Lat[z])/graph.E7, float64(b.Lon[z])/graph.E7,
 		)
-		b.Len[e] = uint32(math.Round(d))
-		b.Time[e] = uint32(math.Round(d / (40 / 3.6) * 10)) // 40 km/h
+		b.Len[e] = uint16(math.Round(d / graph.LenUnit))
+		b.Cls[e] = 80 // 40 km/h
 	}
 	b.BuildGrid(0.02)
 
@@ -47,7 +47,7 @@ func buildLine(t *testing.T) string {
 
 func edgeEnds(b *graph.Builder, e uint32) (from, to uint32) {
 	for n := 0; n+1 < len(b.Off); n++ {
-		if uint64(e) >= b.Off[n] && uint64(e) < b.Off[n+1] {
+		if e >= b.Off[n] && e < b.Off[n+1] {
 			return uint32(n), b.To[e]
 		}
 	}
@@ -98,12 +98,12 @@ func TestRoundTripAndRoute(t *testing.T) {
 
 func TestUnreachable(t *testing.T) {
 	b := &graph.Builder{
-		Off:  []uint64{0, 0, 0},
-		To:   nil,
-		Len:  nil,
-		Time: nil,
-		Lat:  []int32{-6.2 * graph.E7, 0},
-		Lon:  []int32{106.8 * graph.E7, 0},
+		Off: []uint32{0, 0, 0},
+		To:  nil,
+		Len: nil,
+		Cls: nil,
+		Lat: []int32{-6.2 * graph.E7, 0},
+		Lon: []int32{106.8 * graph.E7, 0},
 	}
 	b.Lat[1] = int32(math.Round(-6.2 * graph.E7))
 	b.Lon[1] = int32(math.Round(106.9 * graph.E7))
