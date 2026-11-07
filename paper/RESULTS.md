@@ -599,6 +599,9 @@ diunduh 2026-11-07), dan dijalankan bersamaan di mesin ini:
 |---|---|---|
 | perintah | `rid-server -conc 1 -rate 0 -timeout 60s` | `osrm-routed --algorithm mld` (thread default) |
 | graph | format 4, 22.712.775 node / 46.676.434 edge, 3.790 ban, 593 restriction di-skip | MLD, profil `car.lua` |
+Angka §13 dan §14 diukur **sebelum penalti belok ada** (biaya = waktu kelas
+jalan). Default sekarang 0,25x penalti belok; dampak terukurnya di §15, dan
+p95 jarak tidak berubah (21,12%).
 
 ### 13a. Preprocess dan artefak
 
@@ -759,7 +762,68 @@ perbedaan fungsi biaya, bukan akurasi.
   bisa memutuskan rute mana yang lebih baik.
 - Untuk menurunkan selisih jarak: tambahkan penalti belok dan/atau preferensi
   kelas jalan (mengubah perilaku routing, harus diikuti E1 ulang), atau ubah
-  metrik primer E1 menjadi durasi. Keduanya keputusan produk, belum
-  diimplementasikan.
+  metrik primer E1 menjadi durasi. Penalti belok sudah diimplementasikan dan
+  diukur, hasilnya di §15; preferensi kelas jalan belum.
 - 167 `restriction:conditional` tetap batasan model (butuh evaluasi waktu),
   dicatat di `BACKLOG.md`.
+
+## 15. Penalti belok: implementasi dan dampaknya pada E1
+Dasar: §14 menyimpulkan selisih jarak berasal dari fungsi biaya. Penalti belok
+dicoba lebih dulu karena ia satu-satunya bagian `weight` OSRM yang bisa
+ditambahkan tanpa mengubah tabel kecepatan maupun format graf.
+
+### 15a. Model biaya
+Biaya per edge = waktu kelas jalan (tidak berubah) + biaya belok masuk edge.
+Biaya belok dihitung dari sudut antara arah datang dan arah keluar pada node
+(bearing meter, `dirTo`), dibucket seperti tabel di bawah; total biaya belok
+dikalikan `-turn-penalty` (default **0,25**, `0` mematikan).
+| sudut | kosinus | biaya tabel | pada 0,25x |
+|---|---|---|---|
+| <= 22,5° (lurus) | >= 0,92388 | 0 | 0 |
+| 22,5-67,5° | >= 0,38268 | 2 s | 0,5 s |
+| 67,5-135° | >= -0,70711 | 7,5 s | 1,875 s |
+| > 135° (U-turn) | < -0,70711 | 20 s | 5 s |
+Biaya belok masuk ke `TimeDs` yang dilaporkan, jadi ETA ikut naik; jarak dan
+`EdgeTimeDs` per edge tidak berubah. Tidak ada perubahan format graf
+(`format:4`, fingerprint `e6148c94f791`); `ProfileHash` hanya provenance,
+bukan validasi, jadi graf E1 yang ada tetap dipakai.
+### 15b. Metode
+Graf, pasangan, filter snap, dan container OSRM sama dengan §13. Empat run
+harness berturut-turut pada mesin yang sama, hanya `-turn-penalty` yang
+berbeda: 0 (CSV §13), 0,25, 1, 2. Jarak bersifat deterministik sehingga bebas
+dari noise beban; **latency antar-run tidak sebanding** (run 0,25x dan 1x
+berjalan saat mesin dibebani proses lain: p50 0-5 km 4,5 ms dan 12,8 ms vs
+3,6 ms di run §13), jadi latency tidak dilaporkan ulang di sini.
+### 15c. Hasil (332 pasang, |Δ| jarak relatif terhadap OSRM)
+| konfigurasi | rute berubah | mean \|Δ\| | p50 | p75 | p90 | **p95** | p99 | max | >10% | ETA vs 0 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 (sebelum §15) | - | 3,60% | 0,46% | 3,03% | 11,20% | **21,12%** | 43,65% | 48,30% | 38 | - |
+| 0,25x (dipakai) | 111/600 | 3,50% | 0,39% | 2,82% | 10,56% | **21,12%** | 43,79% | 48,28% | 37 | +1,6% (p95 +5,1%) |
+| 1x | 227/600 | 3,96% | 0,47% | 3,65% | 12,52% | **22,02%** | 40,97% | 45,17% | 43 | +6,1% (p95 +19,7%) |
+| 2x | 294/600 | 4,19% | 0,59% | 4,36% | 13,19% | **22,02%** | 43,79% | 47,62% | 44 | +11,7% (p95 +37,2%) |
+Bacaan:
+- Penalti belok **tidak menurunkan p95**: 21,12% di semua skala <= 0,25x dan
+  naik ke 22,02% pada 1x. Ekor distribusi tidak ditentukan oleh jumlah belok.
+- 1x memperbaiki outlier ekstrem (−48,30% -> −17,03%; p99 43,65% -> 40,97%)
+  tetapi merusak banyak pasangan menengah, sehingga mean dan p75 memburuk.
+  Contoh 0-5 km: 3.786 m/530,5 s menjadi 5.314 m/582,2 s — rute optimum di
+  model baru memang 54 s waktu tempuh lebih mahal, ditebus penalti belok.
+- 0,25x menggeser seluruh badan distribusi sedikit ke arah OSRM (mean −0,10
+  poin, p75 −0,21, p90 −0,64) dengan 111 rute berubah dan ETA +1,6% median.
+  Ini alasan default dipilih 0,25x, bukan 1x.
+- Uji heuristik: dengan 1x, `-eps 1.5` dan `-eps 1.2` menghasilkan rute
+  **identik pada 600/600 pasangan**; satu pasang 30-50 km pada `-eps 1.0`
+  juga memberi rute yang sama (jarak 106.760 m, waktu 5.587,2 s; ekspansi
+  1,28 juta / 1,53 juta / 1,73 juta). Perubahan rute berasal dari model
+  biaya, bukan suboptimalitas weighted A*.
+### 15d. Kesimpulan
+- Ekor p95 tetap digerakkan perbedaan **tabel kecepatan kelas jalan**
+  (routeid 1-3% lebih cepat di modelnya sendiri, jarak 15-30% lebih panjang),
+  bukan jumlah belok. Menutup gerbang p95 < 12% butuh kalibrasi kecepatan
+  kelas (atau metrik primer diganti durasi), dicatat di `BACKLOG.md` 16c.
+- Penalti belok tetap dikirim karena: menghilangkan detour ekstrem yang
+  membuat ETA tidak masuk akal (p99/max membaik pada 1x), memberi tie-break
+  terukur pada 0,25x, dan menyiapkan permukaan untuk preferensi kelas jalan.
+- Golden test M1 diregenerasi: waktu rute sintetis naik ~1% (0,25x), jarak
+  mayoritas identik; beberapa pasangan snap berubah node/total karena rute
+  memilih edge snap yang berbeda.

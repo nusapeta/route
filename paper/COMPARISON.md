@@ -30,6 +30,7 @@ Valhalla/GraphHopper/OSRM CH masih butuh run sendiri sebelum masuk tabel.
 | Koreksi ujung rute | Medan–Binjai: offset 45→4 m, jarak −58 m, `trimmed=both` | `GET /route` + `X-Route-Trim` | terukur |
 | E1 latency vs OSRM MLD (332 pasang cocok) | routeid p50 **35,1 ms**, p95 **522 ms**; OSRM **1,4 ms / 3,4 ms** | `scripts/m6-compare.py` (Ryzen 5 5600G) | terukur |
 | E1 jarak vs OSRM | median **−0,005%**, p95 **21,05%**, max 48,30%; 38/332 >10% | idem, filter snap <=250 m & gap <=50 m | terukur, gerbang p95 gagal |
+| Penalti belok (0,25x default) | mean \|Δ\| 3,60% -> **3,50%**, p75 3,03% -> 2,82%, p90 11,20% -> 10,56%, p95 **21,12% tetap**; 111/600 rute berubah, ETA +1,6% median | `rid-server -turn-penalty 0/0,25/1/2` + harness E1 | terukur, `RESULTS.md` §15 |
 | E1 RSS | start **17.280 kB**, setelah 600 pasangan **815.312 kB**; OSRM 2,362/2,451 GiB | `/proc`, `docker stats` | terukur |
 | E1 artefak & preprocess | **693.111.912 B / 28 s** vs **5.082.571.256 B / 250 s** (extract+partition+customize) | `du -sb`, `scripts/m6-osrm.sh extract` | terukur |
 | E1 cakupan | 81/600 routeid `422` (72 snap >3 km); OSRM 0 error, snap tujuan pada 81 itu p50 14,7 km | idem | terukur |
@@ -73,13 +74,15 @@ kedua engine <=50 m di kedua ujung. Rincian: `RESULTS.md` §13.
 | pasangan selisih >10% | 38/332 (11,4%) | — | | 10/332 >25% |
 | routeid 422 | 81/600 (72 snap, 7 budget, 2 no-route) | 0 error | | OSRM snap tujuan p50 14,7 km pada 81 itu |
 | turn restriction ditegakkan | 3.790 ban, 593 di-skip | `car.lua` | | audit `RESULTS.md` §14: bukan penyebab p95 jarak |
+| penalti belok | 0,25x tabel (2/7,5/20 s), ETA +1,6% median | `car.lua` `weight` | | `RESULTS.md` §15: p95 tidak turun, badan distribusi membaik |
 
 Catatan metrik: selisih jarak bukan ukuran akurasi. Audit `RESULTS.md` §14
 menunjukkan 38 outlier berasal dari perbedaan fungsi biaya (routeid meminimalkan
 waktu murni termasuk `track`; OSRM `weight` = durasi + penalti belok +
-preferensi kelas jalan), bukan dari restriction yang di-skip. Angka durasi juga
-tidak sebanding (tabel kecepatan kelas vs `car.lua` maxspeed), jadi tidak
-dipakai sebagai klaim.
+preferensi kelas jalan), bukan dari restriction yang di-skip. Penalti belok
+sudah ditambahkan (default 0,25x, `RESULTS.md` §15): p95 tidak berubah, sisa
+selisih berasal dari tabel kecepatan kelas. Angka durasi juga tidak sebanding
+(tabel kecepatan kelas vs `car.lua` maxspeed), jadi tidak dipakai sebagai klaim.
 
 Isi dengan `scripts/m6-compare.py` (jarak + latency per bucket + snap) dan
 `scripts/m6-osrm.sh extract` (waktu + peak RSS tiap tahap); angka di atas dari

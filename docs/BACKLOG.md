@@ -301,17 +301,31 @@ jendela waktu per ban di format v5 + evaluasi jam lokal request, (c) terapkan
 larangan tanpa syarat (konservatif, bisa menutup jalan di luar jam).
 **Lulus bila.** Pilihan eksplisit + angka dampak pada 30 pasangan yang
 melintasi jalan dengan conditional.
-### 16c. Penalti belok / preferensi kelas jalan (M)
+### 16c. Penalti belok — selesai sebagian (keputusan produk: 0,25x)
 **Masalah.** routeid meminimalkan waktu murni; OSRM meminimalkan `weight`
 (durasi + penalti belok + preferensi kelas). Akibatnya p95 selisih jarak E1
 21,05% walau rute routeid 1-3% lebih cepat di modelnya sendiri
 (`RESULTS.md` §14). Detour 15-30% lebih panjang untuk keuntungan waktu kecil
 adalah pengalaman pengguna yang buruk.
-**Rencana.** Tambah biaya per belok (ms) dan faktor kelas jalan (atau penalti
-jarak/track); ekspos sebagai flag profil agar bisa diukur. Wajib E1 ulang +
-golden test M1.
-**Lulus bila.** p95 selisih jarak turun tanpa menaikkan durasi median > 2%,
-atau keputusan produk menolak perubahan ini secara eksplisit.
+**Hasil.** Penalti belok diimplementasikan (tabel 22,5°/67,5°/135° =
+2/7,5/20 s, `-turn-penalty`, default 0,25x, masuk `TimeDs`). E1 diulang pada
+0/0,25/1/2x (`RESULTS.md` §15): p95 **tetap 21,12%** di 0,25x dan naik ke
+22,02% di 1x; mean 3,60% -> 3,50%, p75 3,03% -> 2,82%, p90 11,20% -> 10,56%,
+ETA +1,6% median (0,25x). 1x memperbaiki outlier ekstrem (max 48,30% ->
+45,17%) tetapi merusak pasangan menengah.
+**Kriteria lulus (p95 turun tanpa ETA +2%) tidak tercapai** untuk p95; dipilih
+0,25x sebagai tie-break termurah. Sisa selisih -> 16d.
+### 16d. Kalibrasi tabel kecepatan kelas jalan (M)
+**Masalah.** Ekor p95 E1 (21%) tidak bergerak oleh penalti belok
+(`RESULTS.md` §15). Routeid 1-3% lebih cepat di modelnya sendiri dengan jarak
+15-30% lebih panjang: tabel kecepatan per kelas (dipakai juga oleh OSRM
+sebagai `maxspeed` + `car.lua`) berbeda jauh pada jalan kolektor/lokal.
+**Rencana.** Bandingkan kecepatan efektif per kelas antara model routeid dan
+`car.lua`; kalibrasi tabel dari data E1/E2 (bukan dari intuisi); ukur ulang
+p95 jarak + durasi. Perubahan tabel mengubah `ProfileHash` tetapi bukan format
+graf, jadi rebuild hanya perlu bila `Len`/`Cls` berubah.
+**Lulus bila.** p95 selisih jarak < 12% pada 332 pasangan E1 tanpa menaikkan
+durasi median > 2%, atau metrik primer E1 diganti durasi secara eksplisit.
 ### 16. Restriction via-way (M)
 
 **Rencana.** Tabel kecepatan kedua (motor 30-50 km/h di kelas kecil), akses:

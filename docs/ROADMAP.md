@@ -57,7 +57,9 @@ sebanyak mungkin rute per detik.
 
 Yang belum ada nombornya: ground truth (E2). E1 sudah terukur: median jarak
 −0,005% tetapi p95 21,05% (gerbang 12% gagal); audit `RESULTS.md` §14
-menunjukkan p95 itu perbedaan fungsi biaya, bukan restriction yang di-skip, jadi
+menunjukkan p95 itu perbedaan fungsi biaya, bukan restriction yang di-skip. Itu
+menjadi dasar §15: penalti belok 0,25x dikirim, p95 tidak berubah (sisa selisih
+dari tabel kecepatan kelas), jadi
 README/paper tetap tidak
 boleh mengklaim "tercepat" maupun "paling akurat" — hanya biaya per rute
 (memori, artefak, latency) dan perbandingan antar-engine.
@@ -282,6 +284,9 @@ target p50 14,7 km. Gerbang p95 <12% tidak lulus → tidak ada klaim akurasi.
 - [x] Audit p95: 593 restriction di-skip + 38 outlier (`paper/RESULTS.md` §14);
       hasilnya perbedaan fungsi biaya, bukan restriction; 7 `restriction:motorcar`
       diperbaiki.
+- [x] Penalti belok 0,25x sebagai default + E1 ulang 0/0,25/1/2x
+      (`paper/RESULTS.md` §15): mean 3,60% -> 3,50%, p95 tetap 21,12%, ETA
+      +1,6%; sisa selisih dari tabel kecepatan kelas (`BACKLOG.md` 16c).
 - [x] E1 baseline OSRM MLD di mesin sama (`docs/M6.md`).
 - [ ] E2 ground truth 60-200 pasangan (butuh API key Google/Mapbox/HERE, atau 60
       pasang manual; OSRM bukan ground truth).

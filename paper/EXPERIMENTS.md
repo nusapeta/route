@@ -16,7 +16,9 @@ Ringkas: preprocess 28 s vs 250 s; artefak 693 MB vs 5,08 GB; RSS sebelum query
 (332 pasang setelah filter snap): median −0,005% (lulus gerbang <5%), p95
 **21,05%** (gerbang <12% **gagal**), max 48,30%; audit §14 membuktikan p95 ini
 bukan akibat restriction yang di-skip melainkan perbedaan fungsi biaya
-(penalti belok/kelas jalan, `track`). 81/600 routeid `422`
+(penalti belok/kelas jalan, `track`). Tindak lanjut §15: penalti belok 0,25x
+sebagai default menurunkan mean/p75/p90 (3,60 -> 3,50 / 3,03 -> 2,82 /
+11,20 -> 10,56) tetapi p95 tetap 21,12%; 1x bahkan 22,02%. 81/600 routeid `422`
 (72 snap >3 km); OSRM tidak gagal tetapi snap tujuannya p50 14,7 km pada pasangan
 itu. **E1 tidak boleh dipakai untuk klaim akurasi**; itu tugas E2.
 

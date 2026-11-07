@@ -167,9 +167,14 @@ single key comparison per transition.
 
 We run A* with an admissible geometric bound: $h(e) = \varepsilon \cdot
 \|\mathrm{head}(e),t\| / v_{\max}$, with $v_{\max}=130$\,km/h and an inflation factor
-$\varepsilon \ge 1$. Costs are travel times, so the returned route is the fastest
-path under static speeds, which matches how hosted APIs choose routes (important:
-minimising distance instead would produce visibly different polylines). The open
+$\varepsilon \ge 1$. Costs are travel times plus a turn cost, so the returned
+route is the fastest path under static speeds, which matches how hosted APIs
+choose routes (important: minimising distance instead would produce visibly
+different polylines). The turn cost is read from the change of heading between
+arrival and departure edge---two node coordinates per expansion, no new graph
+field---bucketed at 22.5$^\circ$/67.5$^\circ$/135$^\circ$ into 0/2/7.5/20\,s; it
+is shipped at a quarter of that weight, which leaves the E1 distance spread
+unchanged but removes the worst detours (\texttt{paper/RESULTS.md}\,\S15). The open
 set is a binary heap; distances and parents live in a generation-stamped
 open-addressing table that grows at 70\,\% load, so no per-query clearing is
 needed and a query allocates nothing. Routers hand out pre-allocated workspaces
@@ -518,9 +523,14 @@ planned accuracy gate (median ${<}5\%$, p95 ${<}12\%$) fails at p95 and this pap
 makes no accuracy claim. That spread is not a restriction defect: an audit of all
 593 skipped restriction relations and of the 38 largest deviations
 (\texttt{paper/RESULTS.md}\,\S14) shows it comes from differing cost functions
---- routeid minimises drive time without turn penalties and keeps \texttt{track}
-edges, OSRM minimises \texttt{weight} --- so distance is a third quantity that
-neither engine optimises. The protocol, failure breakdown and reproduction
+--- routeid minimises drive time and keeps \texttt{track} edges, OSRM minimises
+\texttt{weight} --- so distance is a third quantity that neither engine
+optimises. Adding turn costs (a 22.5/67.5/135$^\circ$ table of 2/7.5/20\,s,
+shipped at a quarter of that weight) leaves p95 unchanged at $21.12\%$ and even
+raises it to $22.02\%$ at full weight, while the median deviation and the
+p75/p90 percentiles improve slightly (\texttt{paper/RESULTS.md}\,\S15); the
+remaining spread tracks the per-class speed table. The protocol, failure
+breakdown and reproduction
 commands are in \texttt{paper/RESULTS.md}\,\S13; the independent-reference
 harness (E2) is described in \texttt{paper/EXPERIMENTS.md} but not yet run. (iii) The latency benchmark has
 526 successful queries; p99 estimates are therefore weak. (iv) Snap failures

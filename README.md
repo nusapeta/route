@@ -81,8 +81,12 @@ dan preprocess, bukan latency.
   §14) menunjukkan p95 jarak **bukan** akibat restriction yang di-skip,
   melainkan perbedaan fungsi biaya: routeid meminimalkan waktu murni (termasuk
   `track`), OSRM meminimalkan `weight` (durasi + penalti belok + preferensi
-  kelas jalan). Jadi README ini tidak mengklaim "tercepat" maupun "paling
-  akurat"; yang terukur baru biaya per rute dan perbandingan antar-engine.
+  kelas jalan). Penalti belok sudah dikirim (default `-turn-penalty 0.25`,
+  tabel 2/7,5/20 s dibagi empat) dan diukur ulang pada 0/0,25/1/2x: p95 jarak
+  tetap 21,12%, mean 3,60% -> 3,50%, p90 11,20% -> 10,56% (`paper/RESULTS.md`
+  §15). Sisa selisih berasal dari tabel kecepatan kelas. Jadi README ini tidak
+  mengklaim "tercepat" maupun "paling akurat"; yang terukur baru biaya per
+  rute dan perbandingan antar-engine.
   Ground truth independen (E2) masih terbuka; resepnya di `docs/M6.md`.
 - Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
 
@@ -208,6 +212,14 @@ bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
 - **Rate limit `-rate`/`-burst` (default 15/menit per IP, burst 5)** → `429` +
   `Retry-After`. Di belakang reverse proxy pakai `-trust-proxy` supaya IP diambil
   dari `X-Forwarded-For`; tanpa flag itu header diabaikan (tidak bisa dipalsukan).
+- **Biaya belok `-turn-penalty` (default 0,25, `0` = waktu murni).** Biaya
+  belok dibaca dari sudut antara arah datang dan arah keluar
+  (22,5°/67,5°/135° → 2/7,5/20 s, dikali flag) dan masuk ke `duration_s`,
+  `distance_m` tidak berubah. Pengaruhnya pada E1: p95 jarak tetap 21,12%,
+  mean 3,60% → 3,50%, ETA +1,6% median (`paper/RESULTS.md` §15).
+- **Bobot heuristik `-eps` (default 1,5, `1,0` = optimal).** Turun ke 1,2 di
+  E1 menghasilkan rute identik dengan 20% ekspansi lebih banyak, jadi 1,5
+  dipertahankan.
 - Semua angka di atas terlihat di `/metrics`, jadi tidak perlu log untuk tahu
   berapa ekspansi/fallback/penolakan yang terjadi.
 
