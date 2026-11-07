@@ -9,42 +9,51 @@ Kebutuhan: 2 titik lat/lng, rute <=50 km, mobil, Indonesia, akurat, resource
 ringan, jalan tanpa bayar per-request.
 
 Angka routeid di bawah **semua terukur di repo ini** (perintahnya ada di
-`paper/RESULTS.md`). Angka OSRM adalah konteks dari dokumentasi/pengalaman umum,
-**bukan** head-to-head — E1 di `paper/EXPERIMENTS.md` belum dijalankan.
+`paper/RESULTS.md`). E1 sudah dijalankan: OSRM v5.26.0 MLD dan routeid di
+**mesin yang sama** (Ryzen 5 5600G), PBF Java yang sama, 600 pasangan identik;
+332 pasang masuk statistik jarak setelah filter snap (rincian `RESULTS.md` §13).
+Angka latency lama (i5-7360U) tetap ada di §1-§12 dan tidak dicampur ke tabel ini.
 
-| | routeid (Java) | OSRM MLD (Java) | status OSRM |
-|---|---|---|---|
-| Graph di disk | 972 MB | ~1-2 GB | dokumentasi |
-| RSS start-up | **15 MB** | ~1-1.5 GB | dokumentasi |
-| RSS 1x rute 148 km | **385 MB** (bertambah per workspace) | tetap ~1-1.5 GB | dokumentasi |
-| Preprocess 22,7 jt node | **58 s** (1,9 GB dgn `GOMEMLIMIT`) | ~15-40 menit | dokumentasi |
-| Latency 15 km | 136-155 ms | ~10-30 ms | dokumentasi |
-| Latency 42 km | 191 ms (1 query, sebelum M3) | ~10-30 ms | dokumentasi |
-| Throughput 42 km | 10,9 RPS @4 core-thread (sebelum M3); 1,76x setelah M3 di box uji | belum diukur | - |
-| Turn restriction | ya (edge-based A*), 3.795 ban / 155 only_rules | ya | dokumentasi |
-| Traffic / ETA real-time | tidak | tidak | - |
-| Binary / image | 6,6 MB statis / image 23 MB | image + profile Lua | dokumentasi |
+| | routeid (Java, E1) | OSRM MLD v5.26.0 (Java, E1) |
+|---|---|---|
+| Graph di disk | **693 MB** (1 file) | **5,08 GB** (4,73 GiB, banyak file) |
+| RSS sebelum query | **17 MB** | 2,36 GiB |
+| RSS setelah 600 pasangan | **815 MB** | 2,45 GiB |
+| Preprocess (22,7 jt node) | **28 s** (`GOMEMLIMIT=2GiB`) | 250 s (151+83+16 s; peak 6,25 GB) |
+| p50 0-5 / 5-15 / 15-30 / 30-50 / 50-80 km | **3,6 / 19,7 / 54,7 / 139,0 / 397,3 ms** | 0,7 / 1,1 / 1,7 / 2,2 / 3,2 ms |
+| p95 bucket yang sama | **14,0 / 68,7 / 226,7 / 478,4 / 1.060,9 ms** | 1,1 / 1,7 / 2,3 / 3,0 / 4,5 ms |
+| Selisih jarak rute (332 pasang) | median **−0,005%**, p95 **21,05%**, max 48,30% | referensi; gerbang p95 <12% **gagal** |
+| Cakupan 600 pasangan | 332 cocok, 81 `422`, 187 keluar filter snap | 0 error; pada 81 itu snap tujuan p50 14,7 km |
+| Turn restriction | 3.787 ban / 596 di-skip saat build | `car.lua` |
+| Traffic / ETA real-time | tidak | tidak |
 
-Kolom yang paling penting untuk app: **rute <=42 km selesai di 0,2-0,4 detik**
-dan prosesnya memakai 15 MB saat idle, bukan 1 GB. Trade-off yang diterima:
-tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
-40 km di app justru menjaga angka ini tetap bagus.
+Kolom OSRM CH belum dijalankan. Binary/image routeid (6,6 MB statis, image
+23 MB) terukur di build lama, bukan bagian E1.
+
+Kolom yang paling penting untuk app: **rute <=50 km selesai 0,004-0,14 s (p50)
+dan prosesnya memakai 17 MB saat idle, bukan 2,4 GiB**. Trade-off yang diterima:
+tanpa CH/MLD rute jauh melambat (148 km = 2,7-4,2 s di v3/v4; p95 bucket 50-80 km
+E1 = 1,06 s), jadi batas 40 km di app justru menjaga angka ini tetap bagus.
+OSRM tetap ~25x lebih cepat di p50; keunggulan routeid ada di memori, artefak,
+dan preprocess, bukan latency.
 
 ### Keunggulan yang bisa dipertahankan
 
 1. **Footprint kecil & deterministik.** Idle **12,8 MB** dengan Java + Sumatra
-   termuat (14,9 MB untuk tiga region), image 24 MB, start sampai `/healthz` 200
-   dalam **10 ms** — cocok untuk homelab, sidecar, atau box RAM 1 GB.
+   termuat (v4; **17 MB** untuk Java saja di E1), image 24 MB, start sampai
+   `/healthz` 200 dalam **10 ms**; OSRM idle 2,36 GiB. Cocok untuk homelab atau
+   sidecar — Java setelah 600 query campuran naik ke 815 MB, jadi box 1 GB
+   terlalu mepet untuk beban itu.
 2. **Pipeline sesederhana tuntutan:** satu binary statis (6,6 MB), tanpa
-   dependency runtime, tanpa profile Lua. `osm.pbf -> map.graph` dalam ~1 menit
-   per pulau, jadi rebuild bulanan itu sepele.
+   dependency runtime, tanpa profile Lua. `osm.pbf -> map.graph` **28 s untuk
+   Jawa** (E1) vs 250 s pipeline OSRM, jadi rebuild bulanan itu sepele.
 3. **Multi-region satu proses.** Java + Sumatra + Bali/Nusra termuat bersama,
    region dipilih dari snap terdekat (bukan dari bbox request), dan dua file yang
    tumpang tindih diresnap ke satu file yang memuat kedua ujungnya.
-4. **Memori mengikuti beban, bukan ukuran data.** Graph 1,06 GB
-   (Java 693 MB + Sumatra 364 MB) di-`mmap`, dan hanya halaman yang tersentuh
-   masuk RSS: idle 12,8 MB, puncak **399 MB** pada 4 rute 148 km paralel
-   (`-conc 4`; heap workspace A* bisa dibatasi `-conc` dan `GOMEMLIMIT`).
+4. **Memori mengikuti halaman tersentuh, bukan ukuran file.** Graph 1,06 GB
+   (Java 693 MB + Sumatra 364 MB) di-`mmap`; idle 12,8 MB, puncak **399 MB**
+   pada 4 rute 148 km paralel (`-conc 4`), **815 MB** setelah 600 pasangan
+   campuran di E1 — OSRM 2,45 GiB untuk beban yang sama.
 5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
    dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
    hanya 3,17% pada data uji.
@@ -53,8 +62,8 @@ tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
    `eps=1.5` 28% lebih cepat dari `eps=1.0` dengan 526/526 panjang rute identik.
 7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 67 RPS @7 km,
    17 RPS @15 km, dan 42 km **13,8-16,0 RPS** pada pengukuran v4 terakhir
-   (sebelumnya 11 RPS), saturasi di 4 query paralel. Angka-angka ini
-   perbandingan antar-versi routeid, **belum** head-to-head dengan OSRM (M6).
+   (sebelumnya 11 RPS), saturasi di 4 query paralel. Ini kapasitas routeid
+   sendiri; E1 menunjukkan OSRM ~25x lebih cepat p50 untuk satu query.
 
 ### Batasan (jangan diklaim lebih)
 
@@ -66,11 +75,12 @@ tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
   satu graph (mis. ferry Ketapang-Gilimanuk di `java.graph`); rute antar-file
   (Merak -> Bakauheni dengan `java.graph` + `sumatra.graph`) masih `422`.
 - `restriction:conditional` dan vehicle-class dihitung tapi belum diterapkan.
-- **Belum ada head-to-head dengan OSRM** (E1) **dan belum ada validasi akurasi
-  terhadap referensi independen** (E2). Jadi README ini tidak mengklaim
-  "tercepat" maupun "paling akurat": yang terukur baru biaya per rute. Resep
-  menjalankan kedua uji itu (dan apa yang harus diterima kalau OSRM ternyata
-  lebih cepat) ada di `docs/M6.md`.
+- **E1 sudah dijalankan; E2 belum.** E1 membandingkan OSRM MLD di mesin yang
+  sama: median selisih jarak −0,005% (lulus gerbang <5%) tetapi p95 21,05%
+  (gerbang <12% gagal), dan OSRM ~25x lebih cepat p50. Jadi README ini tidak
+  mengklaim "tercepat" maupun "paling akurat"; yang terukur baru biaya per rute
+  dan perbandingan antar-engine. Ground truth independen (E2) masih terbuka;
+  resepnya di `docs/M6.md`.
 - Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
 
 ## Roadmap
@@ -87,9 +97,9 @@ p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
 | M3 | biaya per ekspansi (heuristik, workspace 12 B/slot, heap 4-ary); ALT ditunda karena memori | latensi 1,9-2,0x, dalam box uji; RPS i3 menyusul deploy |
 | M4 | timeout, rate limit, `/metrics`, ETag | tak ada request menahan slot >10 s |
 | M5 ✅ | format v4 (Java 693 MB), ferry, profil motor, tangga ε, 7 region | rute lintas pulau `200` dengan penanda ferry |
-| M6 ⬜ | baseline OSRM + ground truth di mesin lain | tiap klaim di README punya angka pendukung |
+| M6 🟡 | baseline OSRM (E1) selesai; ground truth (E2) terbuka | tiap klaim di README punya angka pendukung |
 | M5 | profil motor, semua pulau, ferry, artefak <= 800 MB | 7 region terbangun, ferry ditandai, Java 693 MB |
-| M6 | E1 baseline OSRM, E2 ground truth | tabel komparasi terisi angka nyata |
+| M6 | E1 baseline OSRM, E2 ground truth | E1 terisi (median lulus, p95 gagal); E2 belum |
 
 Rincian item, kriteria lulus, dan biaya: [`docs/ROADMAP.md`](docs/ROADMAP.md) dan
 [`docs/BACKLOG.md`](docs/BACKLOG.md). Non-goals yang sengaja ditolak (traffic

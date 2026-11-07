@@ -2,8 +2,8 @@
 
 Dokumen kerja untuk Table *positioning* (`main.tex`, `tab:positioning`).
 Aturan main: **hanya angka yang punya perintah reproduksi di `RESULTS.md` yang
-boleh masuk kolom routeid.** Kolom pembanding (OSRM, Valhalla, GraphHopper) baru
-boleh diisi setelah E1 dijalankan di mesin yang sama.
+boleh masuk kolom routeid.** Kolom OSRM MLD sudah terisi dari E1 (mesin sama);
+Valhalla/GraphHopper/OSRM CH masih butuh run sendiri sebelum masuk tabel.
 
 ## 1. Ledger klaim
 
@@ -28,6 +28,11 @@ boleh diisi setelah E1 dijalankan di mesin yang sama.
 | Galat snap ruas >150 m | p50 16,1 m / p95 34,9 m (node: 67,3 / 114,0) | `rid-snapcheck -bbox ... -offset 40` | terukur |
 | SnapEdge vs oracle | mean −1,25 m, 0% sampel >1 m lebih buruk | idem | terukur |
 | Koreksi ujung rute | Medan–Binjai: offset 45→4 m, jarak −58 m, `trimmed=both` | `GET /route` + `X-Route-Trim` | terukur |
+| E1 latency vs OSRM MLD (332 pasang cocok) | routeid p50 **35,1 ms**, p95 **522 ms**; OSRM **1,4 ms / 3,4 ms** | `scripts/m6-compare.py` (Ryzen 5 5600G) | terukur |
+| E1 jarak vs OSRM | median **−0,005%**, p95 **21,05%**, max 48,30%; 38/332 >10% | idem, filter snap <=250 m & gap <=50 m | terukur, gerbang p95 gagal |
+| E1 RSS | start **17.280 kB**, setelah 600 pasangan **815.312 kB**; OSRM 2,362/2,451 GiB | `/proc`, `docker stats` | terukur |
+| E1 artefak & preprocess | **693.111.912 B / 28 s** vs **5.082.571.256 B / 250 s** (extract+partition+customize) | `du -sb`, `scripts/m6-osrm.sh extract` | terukur |
+| E1 cakupan | 81/600 routeid `422` (72 snap >3 km); OSRM 0 error, snap tujuan pada 81 itu p50 14,7 km | idem | terukur |
 
 Catatan M2: galat snapping sudah terukur (ledger di atas), tetapi itu galat
 menempelkan titik ke jalan — bukan bukti bahwa jarak rute benar. Klaim akurasi rute
@@ -37,53 +42,65 @@ tetap menunggu E2.
 
 | klaim | kenapa |
 |---|---|
-| "lebih cepat dari OSRM" | tidak ada run head-to-head (E1) |
-| "lebih akurat" | tidak ada ground truth (E2); yang terukur baru galat *attachment*, bukan galat jarak rute |
-| "RSS lebih kecil dari OSRM" | angka OSRM di paper masih dari dokumentasi |
+| "lebih cepat dari OSRM" | E1 sudah jalan: OSRM menang latency (p50 1,4 ms vs 35 ms; p95 3,4 ms vs 522 ms) |
+| "lebih akurat" | E2 belum ada ground truth. E1 hanya perbandingan antar-engine; p95 selisih jarak 21% (gerbang 12% gagal) |
+| "RSS lebih kecil dari OSRM" tanpa angka | terukur (17 MB vs 2,36 GiB idle; 815 MB vs 2,45 GiB setelah 600 pasangan), tetapi harus menyebut mesin, beban, dan bahwa RSS memuat halaman mmap |
 | "siap untuk seluruh Indonesia" | tujuh pulau sudah terbangun, tapi rute antar-file masih ditolak (`422`) kecuali satu graph nasional 1.650 MB dipakai |
-| "hemat memori" tanpa kualifikasi | heap tumbuh mengikuti rute terpanjang x `-conc` |
+| "hemat memori" tanpa kualifikasi | heap tumbuh mengikuti rute terpanjang x `-conc`; E1: 815 MB setelah 600 pasangan campuran |
 
-## 3. Worksheet E1 (OSRM, mesin sama)
+## 3. Worksheet E1 (OSRM MLD, mesin sama) — terisi
 
-Isi setelah `osrm/osrm-backend` dijalankan pada `java-latest.osm.pbf` yang sama.
-Gunakan pasangan identik: `paper/results/pairs-java.csv`.
+Run: 2026-11-07, AMD Ryzen 5 5600G (6C/12T), 16 GB RAM, 30 GiB swap.
+PBF dan set pasangan identik (`paper/results/pairs-java.csv`, 600 pasang).
+Hanya 332 pasang masuk statistik jarak: snap kedua engine <=250 m dan titik snap
+kedua engine <=50 m di kedua ujung. Rincian: `RESULTS.md` §13.
 
-| metrik | routeid (terukur, v4) | OSRM MLD | OSRM CH | catatan |
+| metrik | routeid (E1) | OSRM MLD | OSRM CH | catatan |
 |---|---|---|---|---|
-| preprocess extract | 3m53s (4 worker, box berbeban) |  |  | `osrm-extract` |
-| preprocess contract/customize | - (tanpa tahap ini) |  |  | |
-| ukuran artefak | **693 MB** (1 file) |  |  | `.osrm*` = banyak file |
-| RSS idle | 12,8 MB (2 region) |  |  | |
-| RSS @4x148 km, `-conc 4` | 399 MB |  |  | `docker stats` |
-| p50 5-15 km | 16 ms |  |  | bucket sama; §2 diukur di v3 |
-| p50 15-30 km | 62 ms |  |  | v4 ~1,6-2x lebih cepat (§12b) |
-| p50 30-50 km | 146 ms |  |  | idem |
-| p50 50-80 km | 388 ms |  |  | idem |
-| jarak rute sama? | - |  |  | `m6-compare.py` mengisi ini |
-| turn restriction ditegakkan | ya (0 pelanggaran) |  |  | profil car.lua |
+| preprocess extract | 28 s (`GOMEMLIMIT=2GiB`) | 151 s, peak 6.254 MB | tidak dijalankan | 1 file vs pipeline 3 tahap |
+| preprocess partition/customize | - | 83 s + 16 s (peak 3.798/2.350 MB) | | routeid tanpa tahap ini |
+| total preprocess | **28 s** | **250 s** | | ~9x |
+| ukuran artefak | **693.111.912 B** (693 MB) | **5.082.571.256 B** (4,73 GiB) | | 7,3x; `.osrm*` banyak file |
+| RSS sebelum query | 17.280 kB | 2,362 GiB | | `docker stats`; mmap ikut terhitung |
+| RSS setelah 600 pasangan | 815.312 kB | 2,451 GiB | | puncak bukan diukur serentak |
+| p50 0-5 km | 3,6 ms | 0,7 ms | | 86 pasang |
+| p50 5-15 km | 19,7 ms | 1,1 ms | | 73 pasang |
+| p50 15-30 km | 54,7 ms | 1,7 ms | | 67 pasang |
+| p50 30-50 km | 139,0 ms | 2,2 ms | | 56 pasang |
+| p50 50-80 km | 397,3 ms | 3,2 ms | | 50 pasang |
+| p95 0-5/…/50-80 km | 14,0 / 68,7 / 226,7 / 478,4 / 1.060,9 ms | 1,1 / 1,7 / 2,3 / 3,0 / 4,5 ms | | |
+| jarak rute: median / p95 / max | **−0,005% / 21,05% / 48,30%** | referensi | | gerbang p95 <12% **gagal** |
+| pasangan selisih >10% | 38/332 (11,4%) | — | | 10/332 >25% |
+| routeid 422 | 81/600 (72 snap, 7 budget, 2 no-route) | 0 error | | OSRM snap tujuan p50 14,7 km pada 81 itu |
+| turn restriction ditegakkan | 3.787 ban, 596 di-skip | `car.lua` | | belum diaudit per rute |
 
-Isi dengan `scripts/m6-compare.py` (mengisi jarak + latency per bucket) dan
-`scripts/m6-osrm.sh extract` (waktu + peak RSS tiap tahap).
+Isi dengan `scripts/m6-compare.py` (jarak + latency per bucket + snap) dan
+`scripts/m6-osrm.sh extract` (waktu + peak RSS tiap tahap); angka di atas dari
+run terakhir yang menghasilkan `paper/results/m6-osrm-vs-routeid.csv`.
 
 Perintah acuan — sudah dibungkus jadi skrip, resep lengkap di `docs/M6.md`:
 
 ```bash
 scripts/m6-osrm.sh extract data/java-latest.osm.pbf   # + wall & peak RSS tiap tahap
-scripts/m6-osrm.sh serve   data/java-latest.osrm      # osrm-routed MLD :5000
+
+# serve: container detached (mode service gagal exit 1 di mesin ini)
+sudo -u arifsani -g docker docker run -d --name osrm-routed -p 5000:5000 \
+  -v "$PWD/data:/data" osrm/osrm-backend:latest \
+  osrm-routed --algorithm mld /data/java-latest.osrm
 
 # routeid di mesin yang sama, conc 1
 bin/rid-server -graph data/java.graph -addr 127.0.0.1:8080 -conc 1 -rate 0 -timeout 60s
 
-# 601 pasangan identik, diukur bergantian (OSRM lon,lat ditangani skrip)
+# 600 pasangan identik, diukur bergantian (OSRM lon,lat ditangani skrip)
 scripts/m6-compare.py --pairs paper/results/pairs-java.csv \
   --routeid http://127.0.0.1:8080 --osrm http://127.0.0.1:5000 \
-  --csv paper/results/m6-osrm-vs-routeid.csv
+  --max-snap 250 --max-gap 50 --csv paper/results/m6-osrm-vs-routeid.csv
 ```
 
-Peringatan RAM: `osrm-extract` untuk Jawa butuh ~4-6 GB. Mesin 8 GB wajib punya
-swap, dan jangan dijalankan bersamaan dengan `rid-extract` / load test — angka
-waktu dan RSS jadi sampah. Laptop pengembangan (i5-7360U, 7,8 GB) dinilai tidak
-memadai; homelab ditolak karena 28 container lain membuat latency bising.
+Peringatan RAM: `osrm-extract` Jawa terukur **peak 6.254 MB**; mesin 16 GB cukup,
+mesin 8 GB wajib swap. Jangan dijalankan bersamaan dengan `rid-extract` atau
+load test — waktu dan RSS jadi sampah. E1 dijalankan di Ryzen 5 5600G; belum
+dicoba di i5-7360U 7,8 GB.
 
 Catatan metodologi: OSRM MLD di sini memakai `car.lua` (maxspeed), routeid
 memakai tabel kecepatan per kelas jalan — jadi **durasi tidak sebanding**.
@@ -99,8 +116,9 @@ Butuh referensi independen; OSRM bukan ground truth (dua-duanya graf OSM).
 | Google Routes API | 200-500 pasangan, tersebar | `distanceMeters`, `duration`, `polyline` | perlu API key (~$1 untuk 200-500 query) |
 
 Status: **belum ada** — tidak ada API key di mesin pengembangan, dan OSRM tidak
-bisa dipakai sebagai pengganti (dua-duanya graf OSM). Urutan kerja dan definisi
-selesai ada di `docs/M6.md` §E2.
+bisa dipakai sebagai pengganti (dua-duanya graf OSM). Limitation eksplisit sudah
+ditulis di abstrak + `main.tex` §Threats~(ii): tidak ada klaim akurasi. Urutan
+kerja dan definisi selesai ada di `docs/M6.md` §E2.
 
 Metrik yang dilaporkan: selisih jarak relatif `|d_routeid - d_ref| / d_ref`,
 rasio detour, dan persentase rute dengan selisih >10%. Tanpa ini, klaim

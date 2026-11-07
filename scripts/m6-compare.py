@@ -35,6 +35,15 @@ def pct(vals, q):
     return v[i]
 
 
+def haversine_m(a, b):
+    """Jarak meter antara dua [lat, lon]."""
+    from math import asin, cos, radians, sin, sqrt
+    lat1, lon1 = map(radians, a)
+    lat2, lon2 = map(radians, b)
+    h = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
+    return 6371000.0 * 2 * asin(sqrt(h))
+
+
 def conn(base):
     u = urlparse(base)
     return u.hostname, u.port or (443 if u.scheme == "https" else 80)
@@ -70,7 +79,9 @@ def ask_routeid(hp, f, t, timeout):
         return {"ms": ms, "err": f"http {st}: {body[:80].decode(errors='replace')}"}
     j = json.loads(body)
     return {"ms": ms, "dist": j.get("distance_m"), "dur": j.get("duration_s"),
-            "relaxed": bool(j.get("relaxed"))}
+            "relaxed": bool(j.get("relaxed")),
+            "snap_f": j.get("snap_from_m"), "snap_t": j.get("snap_to_m"),
+            "snap_f_ll": j.get("snap_from"), "snap_t_ll": j.get("snap_to")}
 
 
 def ask_osrm(hp, f, t, timeout):
@@ -83,7 +94,15 @@ def ask_osrm(hp, f, t, timeout):
     if j.get("code") != "Ok" or not j.get("routes"):
         return {"ms": ms, "err": str(j.get("code"))}
     r = j["routes"][0]
-    return {"ms": ms, "dist": r["distance"], "dur": r["duration"]}
+    # Waypoint distance = jarak dari koordinat input ke titik snap. Tanpa ini,
+    # pasangan yang targetnya jatuh di laut/hutan terlihat "berhasil" padahal
+    # kedua engine menempel ke jalan yang berbeda (bisa beda 8 km).
+    wp = j.get("waypoints") or []
+    return {"ms": ms, "dist": r["distance"], "dur": r["duration"],
+            "snap_f": wp[0].get("distance") if len(wp) > 0 else None,
+            "snap_t": wp[1].get("distance") if len(wp) > 1 else None,
+            "snap_f_ll": wp[0].get("location")[::-1] if len(wp) > 0 else None,
+            "snap_t_ll": wp[1].get("location")[::-1] if len(wp) > 1 else None}
 
 
 def main():
@@ -94,6 +113,12 @@ def main():
     ap.add_argument("--csv", default="")
     ap.add_argument("--limit", type=int, default=0, help="0 = semua pasangan")
     ap.add_argument("--timeout", type=float, default=120.0)
+    ap.add_argument("--max-snap", type=float, default=0.0,
+                    help="hanya hitung pasangan yang keempat titik snap <= N meter "
+                         "(0 = tanpa filter; error tetap dihitung terpisah)")
+    ap.add_argument("--max-gap", type=float, default=0.0,
+                    help="hanya hitung pasangan yang titik snap routeid dan OSRM "
+                         "berjarak <= N meter di kedua ujung (0 = tanpa filter)")
     a = ap.parse_args()
 
     rid, osm = conn(a.routeid), conn(a.osrm)
@@ -107,7 +132,14 @@ def main():
     if w:
         w.writerow(["bucket", "ride_ms", "osrm_ms", "ride_dist", "osrm_dist",
                     "ride_dur", "osrm_dur", "dist_delta_pct", "dur_ratio",
-                    "from_lat", "from_lon", "to_lat", "to_lon", "relaxed", "err"])
+                    "ride_snap_f", "ride_snap_t", "osrm_snap_f", "osrm_snap_t",
+                    "ride_snap_from_lat", "ride_snap_from_lon",
+                    "ride_snap_to_lat", "ride_snap_to_lon",
+                    "osrm_snap_from_lat", "osrm_snap_from_lon",
+                    "osrm_snap_to_lat", "osrm_snap_to_lon",
+                    "snap_gap_f", "snap_gap_t",
+                    "from_lat", "from_lon", "to_lat", "to_lon", "relaxed",
+                    "ride_err", "osrm_err"])
 
     by = {}
     for i, r in enumerate(rows, 1):
@@ -123,24 +155,48 @@ def main():
             R = ask_routeid(rid, f, t, a.timeout)
 
         err = R.get("err") or O.get("err")
+        gap_f = gap_t = None
+        if all(R.get(k) and O.get(k) for k in ("snap_f_ll", "snap_t_ll")):
+            gap_f = haversine_m(R["snap_f_ll"], O["snap_f_ll"])
+            gap_t = haversine_m(R["snap_t_ll"], O["snap_t_ll"])
         dd = dr = None
         if not err and R.get("dist") and O.get("dist"):
             dd = (R["dist"] - O["dist"]) / O["dist"] * 100
             if O.get("dur"):
                 dr = R["dur"] / O["dur"]
         if w:
+            rfl = R.get("snap_f_ll") or [None, None]
+            rtl = R.get("snap_t_ll") or [None, None]
+            ofl = O.get("snap_f_ll") or [None, None]
+            otl = O.get("snap_t_ll") or [None, None]
             w.writerow([bucket, f"{R.get('ms', 0):.3f}", f"{O.get('ms', 0):.3f}",
                         R.get("dist"), O.get("dist"), R.get("dur"), O.get("dur"),
                         "" if dd is None else f"{dd:.2f}",
                         "" if dr is None else f"{dr:.4f}",
-                        f[0], f[1], t[0], t[1], int(R.get("relaxed", False)), err or ""])
+                        R.get("snap_f"), R.get("snap_t"),
+                        O.get("snap_f"), O.get("snap_t"),
+                        rfl[0], rfl[1], rtl[0], rtl[1],
+                        ofl[0], ofl[1], otl[0], otl[1],
+                        "" if gap_f is None else f"{gap_f:.6f}",
+                        "" if gap_t is None else f"{gap_t:.6f}",
+                        f[0], f[1], t[0], t[1], int(R.get("relaxed", False)),
+                        R.get("err") or "", O.get("err") or ""])
 
-        b = by.setdefault(bucket, {"n": 0, "fail": 0, "ride": [], "osrm": [],
+        b = by.setdefault(bucket, {"fail": 0, "excl": 0, "ride": [], "osrm": [],
                                    "dd": [], "dr": [], "gt10": 0})
         if err:
             b["fail"] += 1
             continue
-        b["n"] += 1
+        snaps = [R.get("snap_f"), R.get("snap_t"),
+                 O.get("snap_f"), O.get("snap_t")]
+        if a.max_snap > 0 and (any(s is None for s in snaps)
+                               or any(s > a.max_snap for s in snaps)):
+            b["excl"] += 1
+            continue
+        if a.max_gap > 0 and (gap_f is None or gap_t is None
+                              or gap_f > a.max_gap or gap_t > a.max_gap):
+            b["excl"] += 1
+            continue
         b["ride"].append(R["ms"])
         b["osrm"].append(O["ms"])
         if dd is not None:
@@ -154,14 +210,15 @@ def main():
     if out:
         out.close()
 
-    print(f"{'bucket':<10}{'n':>5}{'fail':>6}{'ride_p50':>10}{'ride_p95':>10}"
+    print(f"{'bucket':<10}{'n':>5}{'fail':>6}{'snap>N':>7}{'ride_p50':>10}{'ride_p95':>10}"
           f"{'osrm_p50':>10}{'osrm_p95':>10}{'dist_delta%':>13}{'>10%':>7}{'dur_ratio r/o':>15}")
     for bucket, b in by.items():
-        if not b["n"]:
-            print(f"{bucket:<10}{0:>5}{b['fail']:>6}")
+        n = len(b["ride"])
+        if not n:
+            print(f"{bucket:<10}{0:>5}{b['fail']:>6}{b['excl']:>7}")
             continue
         gt = 100.0 * b["gt10"] / len(b["dd"]) if b["dd"] else 0.0
-        print(f"{bucket:<10}{b['n']:>5}{b['fail']:>6}"
+        print(f"{bucket:<10}{n:>5}{b['fail']:>6}{b['excl']:>7}"
               f"{pct(b['ride'], 0.5):>10.1f}{pct(b['ride'], 0.95):>10.1f}"
               f"{pct(b['osrm'], 0.5):>10.1f}{pct(b['osrm'], 0.95):>10.1f}"
               f"{statistics.median(b['dd']) if b['dd'] else float('nan'):>13.2f}"

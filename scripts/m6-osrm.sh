@@ -31,8 +31,13 @@ run_stage() { # run_stage <nama> <args...>
 	docker rm -f "$name" >/dev/null 2>&1 || true
 	docker run -d --name "$name" -v "$DATA:/data" "$IMG" "$@" >/dev/null
 	while [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ]; do
+		# docker stats melaporkan "123.4MiB" / "1.234GiB"; satuannya wajib
+		# dikalikan, jangan cuma dibuang hurufnya (bug lama: 5GiB -> 5MB).
 		cur=$(docker stats --no-stream --format '{{.MemUsage}}' "$name" 2>/dev/null |
-			awk -F'/' '{print $1}' | tr -d ' MiBGiB' | awk '{printf "%d", $1}')
+			awk '{v=$1; n=v+0; u=substr(v,length(v)-2);
+			      if (u=="GiB") n*=1024; else if (u=="KiB") n/=1024;
+			      else if (u=="TiB") n*=1024*1024;
+			      printf "%d", n}')
 		[ -n "${cur:-}" ] && [ "$cur" -gt "$peak" ] && peak=$cur
 		sleep 2
 	done
@@ -40,7 +45,9 @@ run_stage() { # run_stage <nama> <args...>
 	local code
 	code=$(docker inspect -f '{{.State.ExitCode}}' "$name" 2>/dev/null || echo "?")
 	docker rm -f "$name" >/dev/null 2>&1 || true
-	printf '%-16s wall=%ss peak_rss~%sMB exit=%s\n' "$name" "$(( $(date +%s) - t0 ))" "$peak" "$code"
+	local peak_txt="~${peak}MB"
+	[ "$peak" -eq 0 ] && peak_txt="n/a (stage <2s)"
+	printf '%-16s wall=%ss peak_rss=%s exit=%s\n' "$name" "$(( $(date +%s) - t0 ))" "$peak_txt" "$code"
 }
 
 case "$MODE" in

@@ -7,10 +7,20 @@ Urut berdasarkan dampak ke kredibilitas.
 Paper sekarang **tidak** punya pembanding terkontrol. Tanpa ini, klaim
 "lebih ringan" hanya sebanding dengan angka yang dilaporkan orang lain.
 
-**Status (2026-11-07):** belum dijalankan. Sudah dibungkus jadi skrip yang bisa
-dijalankan di mesin lain: `scripts/m6-osrm.sh` (build + peak RSS + ukuran
-artefak) dan `scripts/m6-compare.py` (601 pasangan identik, routeid vs OSRM
-bergantian). Kebutuhan RAM/disk, resep, dan definisi selesai: **`docs/M6.md`**.
+**Status (2026-11-07): sudah dijalankan** di Ryzen 5 5600G (6C/12T, 16 GB),
+OSRM v5.26.0 MLD vs routeid, PBF Java yang sama, 600 pasangan identik.
+Hasil lengkap: `RESULTS.md` §13; worksheet: `COMPARISON.md` §3.
+
+Ringkas: preprocess 28 s vs 250 s; artefak 693 MB vs 5,08 GB; RSS sebelum query
+17 MB vs 2,36 GiB; p50 35,1 ms vs 1,4 ms; p95 522 ms vs 3,4 ms. Jarak rute
+(332 pasang setelah filter snap): median −0,005% (lulus gerbang <5%), p95
+**21,05%** (gerbang <12% **gagal**), max 48,30%. 81/600 routeid `422`
+(72 snap >3 km); OSRM tidak gagal tetapi snap tujuannya p50 14,7 km pada pasangan
+itu. **E1 tidak boleh dipakai untuk klaim akurasi**; itu tugas E2.
+
+Skrip: `scripts/m6-osrm.sh` (build + peak RSS + ukuran artefak) dan
+`scripts/m6-compare.py` (600 pasangan identik, bergantian, `--max-snap 250
+--max-gap 50`). Kebutuhan RAM/disk, resep, dan definisi selesai: **`docs/M6.md`**.
 Perintah manual di bawah tetap sah sebagai acuan.
 
 ```bash
@@ -52,6 +62,8 @@ identik, dengan jumlah query sukses yang sama.
 
 Butuh Google Routes API key + billing (atau Mapbox/HERE sebagai pembanding kedua).
 Status: **belum**, dan tidak bisa digantikan E1 (OSRM memakai graf OSM yang sama).
+Limitation eksplisit sudah tercatat di abstrak + §Threats~(ii); tanpa E2, klaim
+"akurat" tetap tidak boleh muncul.
 Kalau key tidak tersedia, opsi jujur: 60 pasang manual lewat Google Maps, atau
 nyatakan E2 di luar cakupan dan jaga abstrak tetap tanpa kata "akurat" (kondisi
 paper saat ini). Lihat `docs/M6.md` §E2.

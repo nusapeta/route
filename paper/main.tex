@@ -31,8 +31,11 @@ Hilbert-curve renumbering of graph nodes, which improves page locality
 workload), and inflation of the A* heuristic, which buys a 1.9$\times$ median
 speed-up while leaving 99.8\,\% of route lengths unchanged. We report the
 negative results too: beyond roughly 60\,km the absence of a hierarchy becomes
-the dominant cost (p95 latency above one second), and turn restrictions, which
-our current graph does not encode, are the main remaining accuracy gap.
+the dominant cost (p95 latency above one second), and turn restrictions (via-way
+rules remain unapplied) are the main remaining accuracy gap. A controlled
+comparison against OSRM's MLD on the same machine agrees at the median route
+distance but deviates by 21\,\% at p95, so we make no accuracy claim pending an
+independent reference.
 \end{abstract}
 
 \ccsdesc[500]{Information systems~Geographic information systems}
@@ -204,14 +207,24 @@ work and would make T1 feasible on 8\,GB machines.
 
 \section{Evaluation}
 \subsection{Setup}
-All numbers come from one machine: Intel Core i5-7360U (2 cores, 4 threads,
-2.3\,GHz), 7\,GB RAM, Linux 7.2.8, Go 1.27.3. Data: Geofabrik extracts of Java
-(857.6\,MB) and Sumatra (283.3\,MB) downloaded on 2026-11-06. Latency is measured
-with a fixed set of origin--destination pairs (601 pairs, 120 per straight-line
-distance bucket, sampled once and stored in \texttt{paper/results/pairs-java.csv})
-so that every configuration routes an identical workload; percentiles are
-computed over successful queries. Failed queries are pairs whose endpoint has no
-road within 5\,km (coastline, forest) and are reported rather than hidden.
+Numbers in this section come from two machines and are never mixed.
+\emph{Routeid-only} measurements (extraction, latency, footprint, restrictions)
+use an Intel Core i5-7360U (2 cores, 4 threads, 2.3\,GHz), 7\,GB RAM, Linux
+7.2.8, Go 1.27.3. The head-to-head comparison with OSRM
+(Table~\ref{tab:positioning}) was run on an AMD Ryzen 5 5600G (6 cores,
+12 threads), 16\,GB RAM, 30\,GiB swap, Linux 7.2.15, with OSRM v5.26.0
+(Docker image \texttt{osrm/osrm-backend}, MLD) and routeid at the same commit.
+Data: Geofabrik extracts of Java (857.6\,MB) and Sumatra (283.3\,MB) downloaded
+on 2026-11-06. Latency is measured with a fixed set of origin--destination pairs
+(601 pairs, 120 per straight-line distance bucket, sampled once and stored in
+\texttt{paper/results/pairs-java.csv}) so that every configuration routes an
+identical workload; percentiles are computed over successful queries. Failed
+queries are pairs whose endpoint has no road within 5\,km (coastline, forest) and
+are reported rather than hidden. The OSRM comparison uses the same pair file,
+but only pairs whose endpoints both engines snap within 250\,m, and whose snapped
+points lie within 50\,m of each other, enter the distance statistics
+(332 of 600); the rationale and the full breakdown are in
+\texttt{paper/RESULTS.md}\,\S13.
 
 \subsection{Extraction cost and footprint}
 \begin{table}[t]
@@ -416,33 +429,47 @@ and the geometry now starts and ends on the carriageway.
 \small
 \begin{tabular}{@{}lrr@{}}
 \toprule
- & routeid (Java) & OSRM MLD (Java) \\
+ & routeid (Java) & OSRM MLD v5.26.0 (Java) \\
 \midrule
-graph on disk            & 972\,MB (measured) & 1--2\,GB (documented) \\
-RSS after start-up       & 15\,MB (measured)   & 1--1.5\,GB (documented) \\
-preprocessing, 22.7\,M nodes & 58\,s (measured) & 15--40\,min (documented) \\
-latency 15\,km           & 136--155\,ms (measured) & 10--30\,ms (documented) \\
-latency 42\,km           & 191\,ms (measured)  & 10--30\,ms (documented) \\
-turn restrictions        & yes (3{,}795 bans)  & yes \\
-binary / image           & 6.6\,MB / 23\,MB   & engine + Lua profile \\
+graph on disk            & 693\,MB (measured) & 5.08\,GB (measured) \\
+RSS before any query     & 17\,MB (measured)  & 2.36\,GiB (measured) \\
+RSS after 600 pairs      & 815\,MB (measured) & 2.45\,GiB (measured) \\
+preprocessing, 22.7\,M nodes & 28\,s (measured) & 250\,s (measured; peak 6.25\,GB) \\
+p50, 0--5/5--15/15--30/30--50/50--80\,km & 3.6/19.7/54.7/139/397\,ms & 0.7/1.1/1.7/2.2/3.2\,ms \\
+p95, same buckets        & 14.0/68.7/226.7/478.4/1060.9\,ms & 1.1/1.7/2.3/3.0/4.5\,ms \\
+distance delta (332 pairs) & median $-0.005\%$, p95 $21.05\%$ & reference \\
+turn restrictions        & 3{,}787 bans (596 skipped) & \texttt{car.lua} profile \\
 \bottomrule
 \end{tabular}
-\caption{Positioning table. Only the routeid column is measured here; the OSRM
-column summarises documented/typical figures and is \emph{not} a controlled
-comparison. Rows must be replaced with measurements before this table is used to
-claim a speed advantage.}
+\caption{Controlled comparison on one machine (Ryzen 5 5600G, 16\,GB). Same
+PBF, same 600 origin--destination pairs, alternating request order; distance
+statistics use the 332 pairs where both engines snap within 250\,m and to points
+within 50\,m of each other. Routeid: HTTP server, \texttt{-conc 1}. OSRM: MLD,
+default threads. The planned accuracy gate (median ${<}5\%$, p95 ${<}12\%$) is
+met at the median but \emph{not} at p95, so this table does not support an
+accuracy claim.}
 \label{tab:positioning}
 \end{table}
 
-We did not benchmark OSRM on this machine: the container runtime available to us
-was not usable, so published/typical figures (a few GB of graph, roughly
-1--1.5\,GB resident for a national extract, tens of minutes of preprocessing) are
-quoted only as context, not as a controlled comparison. A controlled run is the
-first item in \texttt{paper/EXPERIMENTS.md}.
+The controlled run changes the qualitative picture from context figures: OSRM is
+about $25\times$ faster at the median (1.4\,ms vs.\ 35.1\,ms over all matched
+pairs) and serves every request, while routeid keeps a $7.3\times$ smaller
+artifact, preprocesses $9\times$ faster, and uses two orders of magnitude less
+memory (17\,MB vs.\ 2.36\,GiB before queries). The routeid column here refers to
+the format-4 graph built for this run (693\,MB, 28\,s on the Ryzen); the
+extraction table reports the earlier format-3 build, hence the different
+artifact size and build time. Route distances agree at the median but not in the
+tail: 38 of 332 pairs differ by more than 10\%, and the worst case by 48\%, which
+is why no accuracy claim is made. Routeid also rejects 81 of 600 pairs with
+\texttt{422}: 72 because the endpoint has no road within its 3\,km snap radius,
+7 because the search budget is exhausted and 2 for lack of a route. On those 81
+pairs OSRM succeeds but snaps its target a median of 14.7\,km (up to 44.6\,km)
+away, so they are not a like-for-like comparison and are reported separately
+rather than counted as wins.
 
 \section{Discussion}
 \paragraph{Where the design wins, concretely.}
-(i)~Footprint: 15\,MB resident and a 10\,ms start-up mean the router can share a
+(i)~Footprint: 17\,MB resident (E1; Java graph) and a 10\,ms start-up mean the router can share a
 small box with other services and be restarted without a cold cache penalty of
 gigabytes. (ii)~Operational simplicity: one 6.6\,MB static binary, no Lua profile
 and no runtime dependency, so a monthly OSM rebuild is a one-minute job per island
@@ -482,8 +509,15 @@ design.
 (i) One machine, one microarchitecture; the locality result should be re-measured
 on server CPUs with different cache and page sizes. (ii) No ground-truth accuracy
 evaluation: distances were sanity-checked against known itineraries, not compared
-statistically against a reference provider; the validation harness is described
-in \texttt{paper/EXPERIMENTS.md} but not yet run. (iii) The latency benchmark has
+statistically against a reference provider. A controlled head-to-head against
+OSRM MLD has now been run on one machine (600 identical pairs; 332 enter the
+distance statistics after snapping both endpoints within 250\,m and requiring the
+engines' snapped points to agree within 50\,m): the median route-distance
+deviation is $-0.005\%$ but p95 is $21.05\%$ and the maximum is $48.3\%$, so the
+planned accuracy gate (median ${<}5\%$, p95 ${<}12\%$) fails at p95 and this paper
+makes no accuracy claim. The protocol, failure breakdown and reproduction
+commands are in \texttt{paper/RESULTS.md}\,\S13; the independent-reference
+harness (E2) is described in \texttt{paper/EXPERIMENTS.md} but not yet run. (iii) The latency benchmark has
 526 successful queries; p99 estimates are therefore weak. (iv) Snap failures
 (coastline, forest) are excluded from percentiles and reported separately, and the
 snapping study uses injected offsets rather than recorded user taps. (v) The
@@ -493,9 +527,10 @@ national topology is estimated, not measured, from per-island scaling.
 For bounded-radius routing, the interesting resource is not query time but
 resident memory, and memory-mapping plus a locality-aware node numbering delivers
 it with a small, auditable code base. The immediate work is accuracy: edge-based
-turn restrictions, edge snapping, and a 500-pair comparison against a reference
-provider; then a streaming builder so that the whole country fits in one file on
-an 8\,GB machine, and a hierarchy only if the product needs long routes.
+turn restrictions, edge snapping, and an independent-reference comparison
+(E1 against OSRM is done and deliberately not treated as ground truth); then a
+streaming builder so that the whole country fits in one file on an 8\,GB machine,
+and a hierarchy only if the product needs long routes.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{refs}

@@ -53,11 +53,12 @@ sebanyak mungkin rute per detik.
 | M3 biaya per ekspansi | ✅ | latensi ~2x, memori -25 % |
 | M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,4 ms), `/metrics` |
 | M5 cakupan | ✅ | v4 (Java 693 MB), ferry, motor, 7 pulau, tangga ε |
-| M6 bukti (paper) | ⬜ | resep + skrip siap, jalan di mesin lain (`docs/M6.md`) |
+| M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 belum |
 
-Yang belum ada nombornya: head-to-head OSRM (E1) dan ground truth (E2). Sampai
-keduanya jalan, README/paper hanya boleh mengklaim biaya per rute (memori,
-artefak, latency), bukan "tercepat" atau "paling akurat".
+Yang belum ada nombornya: ground truth (E2). E1 sudah terukur: median jarak
+−0,005% tetapi p95 21,05% (gerbang 12% gagal), jadi README/paper tetap tidak
+boleh mengklaim "tercepat" maupun "paling akurat" — hanya biaya per rute
+(memori, artefak, latency) dan perbandingan antar-engine.
 
 ## Milestone
 
@@ -263,34 +264,28 @@ angka absolutnya lebih lambat dari §2/RESULTS. Yang diukur adalah rasio A/B
 bergantian: ekspansi identik, CPU per query turun **1,6-2x** (Jakarta-Bandung
 18,6-22,1 s -> 11,7-13,7 s; Jakarta-Cikarang 2,2-2,4 s -> 0,95-1,54 s).
 
-### M6 — Bukti (paper) — BELUM, handoff ke mesin lain
+### M6 — Bukti (paper) — E1 SELESAI (2026-11-07), E2 BELUM
 
-Resep lengkap: **`docs/M6.md`** (kebutuhan mesin, langkah copy-paste, apa yang
-dicatat, definisi selesai). Skripnya sudah ada dan sudah dicoba:
-`scripts/m6-osrm.sh` (extract/partition/customize/serve + peak RSS) dan
-`scripts/m6-compare.py` (601 pasangan identik, routeid vs OSRM bergantian,
-keluaran per bucket + CSV).
+Resep lengkap: **`docs/M6.md`**. E1 dijalankan di `omarchy` (Ryzen 5 5600G,
+6C/12T, 16 GB) dengan OSRM v5.26.0 MLD vs routeid, PBF Java yang sama, 600
+pasangan identik. Hasil: `paper/RESULTS.md` §13; worksheet:
+`paper/COMPARISON.md` §3.
 
-Kenapa belum dijalankan: `osrm-extract` Jawa butuh ~4-6 GB RSS; laptop
-pengembangan (i5-7360U, 7,8 GB, swap 15 GB) akan swapping sehingga waktu tidak
-bermakna, dan homelab (8 GB, 28 container lain) membuat latency bising — A/B M5
-di sana turun 36 -> 10 RPS hanya karena beban tetangga.
+Terukur: preprocess 28 s vs 250 s; artefak 693 MB vs 5,08 GB; RSS sebelum query
+17 MB vs 2,36 GiB; p50 35,1 ms vs 1,4 ms; p95 522 ms vs 3,4 ms. Jarak (332
+pasang setelah filter snap): median −0,005%, p95 21,05%, max 48,30%; 81/600
+routeid `422` (72 karena snap >3 km) dan pada pasangan itu OSRM menempel ke
+target p50 14,7 km. Gerbang p95 <12% tidak lulus → tidak ada klaim akurasi.
 
-- [ ] E1 baseline OSRM MLD di mesin sama (`docs/M6.md`).
+- [x] E1 baseline OSRM MLD di mesin sama (`docs/M6.md`).
 - [ ] E2 ground truth 60-200 pasangan (butuh API key Google/Mapbox/HERE, atau 60
       pasang manual; OSRM bukan ground truth).
-- [ ] Tabel positioning diisi angka nyata, bukan "documented".
-
-**Ekspektasi yang harus diterima sebelum mulai:** OSRM MLD hampir pasti menang
-latency (5-30 ms vs 16-388 ms per bucket). Kemenangan routeid ada di artefak
-(693 MB vs ±1,5-2 GB), RSS di bawah beban, dan kesederhanaan deploy. Kalau hasil
-itu tidak ingin dipublikasikan, alternatifnya bukan membatalkan M6 melainkan
-memindahkannya ke bab "batas yang diketahui" dan menghapus klaim "tercepat" dari
-README.
+- [x] Tabel positioning diisi angka nyata, bukan "documented".
 
 **Selesai bila:** `paper/COMPARISON.md` tidak lagi punya baris berstatus
 "belum diukur" untuk metrik inti, dan setiap klaim di README punya angka
-pendukungnya.
+pendukungnya. Untuk M6 penuh, E2 (atau limitation eksplisit di abstrak) masih
+kurang.
 
 ## Urutan & ketergantungan
 

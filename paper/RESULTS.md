@@ -1,7 +1,8 @@
 # Hasil pengukuran (mentah + provenance)
 
-Semua angka di `main.tex` berasal dari file ini. Mesin: Intel Core i5-7360U
-(2C/4T, 2.3 GHz), RAM 7 GB, Linux 7.2.8, Go 1.27.3.
+Semua angka di `main.tex` berasal dari file ini. Kecuali §13, mesin: Intel Core
+i5-7360U (2C/4T, 2.3 GHz), RAM 7 GB, Linux 7.2.8, Go 1.27.3. §13 (E1 vs OSRM)
+diukur di AMD Ryzen 5 5600G; lihat provenance di sana.
 Data: Geofabrik `java-latest.osm.pbf` (857.6 MB) dan `sumatra-latest.osm.pbf`
 (283.3 MB), diunduh 2026-11-06.
 
@@ -584,3 +585,116 @@ ke file lain" walau satu file memuat keduanya, yang dulu berakhir `422`. Sekaran
 server mengulang snap di kedua kandidat region dan menghitung
 `route_cross_region_resnapped_total`. Ketapang -> Gilimanuk: `200` dari
 `java.graph` (15,2 km, `ferry_m=4284`).
+
+## 13. E1: routeid vs OSRM MLD, mesin yang sama
+
+Berbeda dari §1-§12 (Intel i5-7360U, 2C/4T, 7 GB), bagian ini diukur di
+**AMD Ryzen 5 5600G (6C/12T, 3,9-4,4 GHz), 16 GB RAM, 30 GiB swap**,
+Linux 7.2.15, Go 1.27.3. Angka dari dua mesin tidak boleh dicampur.
+
+Kedua server memakai PBF yang sama, `data/java-latest.osm.pbf` (858 MB,
+diunduh 2026-11-07), dan dijalankan bersamaan di mesin ini:
+
+| | routeid `a18cd70` | OSRM v5.26.0 (`osrm/osrm-backend:latest`, digest `af5d4a83...`) |
+|---|---|---|
+| perintah | `rid-server -conc 1 -rate 0 -timeout 60s` | `osrm-routed --algorithm mld` (thread default) |
+| graph | format 4, 22.712.775 node / 46.676.434 edge, 3.787 ban, 596 restriction di-skip | MLD, profil `car.lua` |
+
+### 13a. Preprocess dan artefak
+
+| tahap | wall | peak RSS |
+|---|---|---|
+| `rid-extract` (GOMEMLIMIT=2GiB) | 28 s | tidak diukur di run ini |
+| `osrm-extract` | 151 s | 6.254 MB |
+| `osrm-partition` | 83 s | 3.798 MB |
+| `osrm-customize` | 16 s | 2.350 MB |
+| total OSRM | 250 s | 6.254 MB |
+
+Artefak: `java.graph` **693.111.912 B** (693 MB / 661 MiB) vs
+`java-latest.osrm*` **5.082.571.256 B** (5,08 GB / 4,73 GiB), rasio **7,3x**.
+Peak RSS OSRM diukur dengan `docker stats` per 2 s; tahap <2 s bisa terbaca
+`n/a`.
+
+### 13b. Beban dan filter pasangan
+
+`paper/results/pairs-java.csv` (600 pasang, 120/bucket). Generator pasangan
+memilih node sumber di jalan lalu menggeser titik tujuan sejauh bucket dengan
+bearing acak; akibatnya banyak titik tujuan jatuh di laut/hutan. Karena itu
+perbandingan jarak hanya memakai pasangan yang valid untuk kedua engine:
+
+- snap routeid dan OSRM di kedua ujung <= 250 m, dan
+- titik snap kedua engine berjarak <= 50 m di kedua ujung (bukan hanya dekat,
+  tetapi menempel ke ruas yang sama).
+
+Hasil: **332 pasang cocok**, **81 routeid 422**, **187 keluar filter snap**.
+Tanpa filter ini, selisih jarak didominasi perbedaan titik snap (OSRM dapat
+menempel puluhan kilometer dari input), bukan perbedaan rute.
+
+### 13c. Latency (HTTP, bergantian)
+
+Urutan request bergantian (OSRM dulu di pasangan genap, routeid dulu di ganjil),
+satu per satu. `p95|Δ|` = persentil 95 selisih jarak absolut dari 332 pasang.
+
+| bucket | cocok | 422 | keluar | ride p50 | ride p95 | OSRM p50 | OSRM p95 | Δ p50 | p95\|Δ\| | max\|Δ\| | >10% |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0-5 km | 86 | 0 | 34 | 3,6 ms | 14,0 ms | 0,7 ms | 1,1 ms | +0,030% | 21,05% | 45,17% | 10 |
+| 5-15 km | 73 | 6 | 41 | 19,7 ms | 68,7 ms | 1,1 ms | 1,7 ms | −0,030% | 14,96% | 48,30% | 5 |
+| 15-30 km | 67 | 12 | 41 | 54,7 ms | 226,7 ms | 1,7 ms | 2,3 ms | −0,005% | 22,73% | 45,04% | 10 |
+| 30-50 km | 56 | 27 | 37 | 139,0 ms | 478,4 ms | 2,2 ms | 3,0 ms | −0,020% | 14,68% | 29,82% | 5 |
+| 50-80 km | 50 | 36 | 34 | 397,3 ms | 1.060,9 ms | 3,2 ms | 4,5 ms | +0,015% | 22,03% | 23,81% | 8 |
+
+Total 332 pasang: latency p50 **35,1 ms vs 1,4 ms** (~25x), p95 **522 ms vs
+3,4 ms**. Jarak: median **−0,005%**, p95 **21,05%**, max **48,30%**,
+38/332 (11,4%) >10% dan 10/332 >25%.
+
+Gerbang yang ditetapkan di `COMPARISON.md` (median <5%, p95 <12%) **lulus di
+median, gagal di p95**. Selisih besar terkonsentrasi di minoritas pasangan;
+penyebabnya belum dibuktikan. Kandidat yang sudah diketahui: 596 restriction
+di-skip saat build (via-way, BACKLOG item 16) dan perbedaan profil akses.
+Tidak ada klaim akurasi sampai E2.
+
+Durasi tidak sebanding (routeid memakai tabel kecepatan kelas jalan, OSRM
+`car.lua` memakai maxspeed); rasio durasi r/o 0,93-1,02 hanya dicatat, bukan
+klaim.
+
+### 13d. Kegagalan dan biaya memori
+
+Dari 81 routeid 422: 72 `no road within snap distance` (radius server 3 km),
+7 `search space exhausted`, 2 `no route`. OSRM tidak gagal di satu pun, tetapi
+pada 81 pasangan itu titik snap tujuan OSRM berjarak **median 14,7 km, p90
+32,7 km, max 44,6 km** dari koordinat input — rute OSRM valid secara internal
+tetapi bukan pembanding yang setara. Routeid menolak titik seperti itu;
+OSRM menempel sejauh apa pun.
+
+| metrik | routeid | OSRM |
+|---|---|---|
+| RSS setelah start (Java, sebelum query) | 17.280 kB | 2,362 GiB |
+| RSS setelah 600 pasangan | 815.312 kB | 2,451 GiB |
+| artefak | 693.111.912 B | 5.082.571.256 B |
+
+Angka OSRM dari `docker stats --no-stream`; keduanya memakai mmap sehingga RSS
+ikut menghitung halaman file yang tersentuh, bukan hanya heap. RSS routeid
+setelah start diukur dari proses terpisah (`-addr :8081`), lalu dimatikan.
+
+### 13e. Reproduksi
+
+```bash
+# routeid
+GOMEMLIMIT=2GiB bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
+bin/rid-server -graph data/java.graph -addr 127.0.0.1:8080 -conc 1 -rate 0 -timeout 60s
+
+# OSRM (Docker; butuh ~7 GB saat extract)
+sudo -u arifsani -g docker ./scripts/m6-osrm.sh extract data/java-latest.osm.pbf
+sudo -u arifsani -g docker docker run -d --name osrm-routed -p 5000:5000 \
+  -v "$PWD/data:/data" osrm/osrm-backend:latest \
+  osrm-routed --algorithm mld /data/java-latest.osrm
+
+scripts/m6-compare.py --pairs paper/results/pairs-java.csv \
+  --routeid http://127.0.0.1:8080 --osrm http://127.0.0.1:5000 \
+  --max-snap 250 --max-gap 50 --csv paper/results/m6-osrm-vs-routeid.csv
+```
+
+CSV memuat snap mentah kedua engine (`ride_snap_*`, `osrm_snap_*`,
+`snap_gap_*`) supaya filter bisa diaudit ulang. Latency antar-run bergeser
+~5% (contoh p50 0-5 km: 3,6-3,9 ms); angka di tabel berasal dari run terakhir
+yang menghasilkan CSV di repo.
