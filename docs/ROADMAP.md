@@ -4,6 +4,9 @@
 router jalan Indonesia yang memakai puluhan MB, bukan gigabyte, dan tetap
 menjawab rute <=50 km di bawah setengah detik di perangkat murah.
 
+Rencana eksekusi aktif (memori + akurasi, terukur 2026-11-08):
+`docs/PLAN-resource-accuracy.md`.
+
 ## Non-goals (sengaja ditolak)
 
 Menolak hal-hal ini adalah bagian dari strategi, bukan kekurangan sementara:
