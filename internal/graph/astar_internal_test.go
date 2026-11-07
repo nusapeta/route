@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"context"
+	"errors"
 	"math"
 	"testing"
 )
@@ -90,4 +92,57 @@ func TestHeuristicAdmissible(t *testing.T) {
 		}
 	}
 	t.Logf("max slack %.4f deciseconds (negative is safe)", worst)
+}
+
+// cancelAfter reports a live context for the first n Err() calls and then
+// cancels, which lets a test cancel a search deterministically mid-run.
+type cancelAfter struct {
+	context.Context
+	n int
+}
+
+func (c *cancelAfter) Err() error {
+	c.n--
+	if c.n <= 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+// TestRouteCanceled checks that a canceled request stops the search and frees
+// its workspace instead of running until the expansion cap.
+func TestRouteCanceled(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/city.graph"
+	if err := cityGraph(t).Write(path); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	g, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer g.Close()
+	r := NewRouter(g, 1)
+
+	// Pre-canceled: must not even start.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := r.RouteCtx(ctx, 0, g.NodeCount-1); !errors.Is(err, ErrCanceled) {
+		t.Fatalf("pre-canceled: got %v, want ErrCanceled", err)
+	}
+
+	// Canceled a few checks into the search.
+	if _, err := r.RouteCtx(&cancelAfter{Context: context.Background(), n: 3}, 0, g.NodeCount-1); !errors.Is(err, ErrCanceled) {
+		t.Fatalf("mid-search cancel: got %v, want ErrCanceled", err)
+	}
+
+	// A live context still routes, and the workspace is reusable afterwards.
+	if _, err := r.RouteCtx(context.Background(), 0, g.NodeCount-1); err != nil {
+		t.Fatalf("live context: %v", err)
+	}
+	res, err := r.RouteCtx(context.Background(), 0, g.NodeCount-1)
+	if err != nil {
+		t.Fatalf("second route: %v", err)
+	}
+	t.Logf("nodes=%d expansions=%d", len(res.Nodes), res.Expansions)
 }

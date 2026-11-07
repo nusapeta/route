@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"context"
 	"errors"
 	"math"
 )
@@ -20,6 +21,11 @@ var ErrNoRoute = errors.New("no route")
 
 // ErrTooFar is returned when the search space is exhausted (usually >150 km).
 var ErrTooFar = errors.New("search space exhausted (route too long)")
+
+// ErrCanceled is returned when the caller's context ends before the search does.
+// The workspace is released immediately, so a timed-out query does not hold a
+// concurrency slot for the rest of its run.
+var ErrCanceled = errors.New("route canceled")
 
 const (
 	// maxSpeedMps bounds the A* heuristic in m/s (130 km/h).
@@ -208,24 +214,38 @@ const invalidEdge = ^uint32(0)
 // makes turn restrictions expressible: the transition (arrival edge,
 // departure edge) is exactly the pair an OSM restriction forbids.
 func (r *Router) Route(src, dst uint32) (Route, error) {
-	return r.RouteStrict(src, dst, r.strict)
+	return r.RouteCtx(context.Background(), src, dst)
+}
+
+// RouteCtx is Route with cancellation: the search stops when ctx ends and
+// returns ErrCanceled (wrapped with the context error).
+func (r *Router) RouteCtx(ctx context.Context, src, dst uint32) (Route, error) {
+	return r.RouteStrictCtx(ctx, src, dst, r.strict)
 }
 
 // RouteStrict overrides the router's restriction policy for a single query.
 func (r *Router) RouteStrict(src, dst uint32, strict bool) (Route, error) {
+	return r.RouteStrictCtx(context.Background(), src, dst, strict)
+}
+
+// RouteStrictCtx is RouteStrict with cancellation.
+func (r *Router) RouteStrictCtx(ctx context.Context, src, dst uint32, strict bool) (Route, error) {
 	g := r.g
+	if err := ctx.Err(); err != nil {
+		return Route{}, ErrCanceled
+	}
 	if src >= g.NodeCount || dst >= g.NodeCount {
 		return Route{}, ErrNoRoute
 	}
 	if src == dst {
 		return Route{Nodes: []uint32{src}}, nil
 	}
-	res, err := r.search(src, dst, strict)
-	if err != nil && strict && (len(g.Ban) > 0 || len(g.Only) > 0) {
+	res, err := r.search(ctx, src, dst, strict)
+	if err != nil && err != ErrCanceled && ctx.Err() == nil && strict && (len(g.Ban) > 0 || len(g.Only) > 0) {
 		// A restriction may have made the destination unreachable (bad OSM
 		// data, or our conservative via-way handling). Retry unrestricted and
 		// flag the answer so callers can count it.
-		if res2, err2 := r.search(src, dst, false); err2 == nil {
+		if res2, err2 := r.search(ctx, src, dst, false); err2 == nil {
 			res2.Fallback = true
 			return res2, nil
 		}
@@ -233,7 +253,7 @@ func (r *Router) RouteStrict(src, dst uint32, strict bool) (Route, error) {
 	return res, err
 }
 
-func (r *Router) search(src, dst uint32, restrict bool) (Route, error) {
+func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool) (Route, error) {
 	g := r.g
 	w := <-r.pool
 	defer func() { r.pool <- w }()
@@ -267,6 +287,14 @@ func (r *Router) search(src, dst uint32, restrict bool) (Route, error) {
 		expanded++
 		if expanded > maxExpansions {
 			return Route{}, ErrTooFar
+		}
+		// Checking a context costs a load and a compare; once per 256 pops it is
+		// noise next to an expansion, and a canceled request frees its workspace
+		// within a few milliseconds instead of running to the expansion cap.
+		if expanded&255 == 0 {
+			if err := ctx.Err(); err != nil {
+				return Route{}, ErrCanceled
+			}
 		}
 		head := g.Off[g.To[cur.node]]
 		headEnd := g.Off[g.To[cur.node]+1]

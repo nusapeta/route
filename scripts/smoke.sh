@@ -21,4 +21,15 @@ echo "== CORS preflight =="
 curl -sf -X OPTIONS -o /dev/null -D- "$base/route" | grep -i access-control-allow-origin
 
 echo "== headers =="
-curl -sf -o /dev/null -D- "$base/route?from=$from&to=$to" | grep -i x-route
+curl -sf -o /dev/null -D- "$base/route?from=$from&to=$to" | grep -iE "x-route|etag|cache-control"
+
+echo "== etag revalidation (expect 304) =="
+etag=$(curl -sf -o /dev/null -D- "$base/route?from=$from&to=$to" | awk 'tolower($1)=="etag:"{print $2}' | tr -d '\r')
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $etag" "$base/route?from=$from&to=$to")
+echo "If-None-Match: $etag -> $code"
+
+echo "== metrics =="
+curl -sf "$base/metrics" | grep -E "^route_(requests_total|request_duration_seconds_count|inflight|expansions_total)" | head -8
+
+echo "== rate limit (a burst over the configured -rate must give 429) =="
+for i in $(seq 1 12); do curl -s -o /dev/null -w '%{http_code} ' "$base/route?from=$from&to=$to"; done; echo

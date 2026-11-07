@@ -129,15 +129,41 @@ untuk koridor >150 km.
 
 ### M4 — Siap dipakai app (2-3 hari)
 
-- [ ] Timeout per request (`http.TimeoutHandler` 10 s) + `context` yang
-      membatalkan pencarian A* di tengah jalan.
-- [ ] Rate limit per IP (15 req/menit) dan bind `127.0.0.1` di belakang Caddy.
-- [ ] `/metrics` (Prometheus): request, bucket latency, ekspansi, fallback.
-- [ ] `ETag` + `Cache-Control` untuk query identik (app mengulang saat rotasi).
-- [ ] `points&simplify=8` jadi format yang didokumentasikan untuk Flutter.
+- [x] Timeout per request + `context` yang membatalkan A* di tengah jalan:
+      dicek tiap 256 ekspansi, `504 {"error":"deadline exceeded"}`, workspace
+      langsung dilepas. Default 10 s, flag `-timeout`.
+- [x] Rate limit per IP (default 15/menit, burst 5) -> `429` + `Retry-After`.
+      `-trust-proxy` supaya IP diambil dari `X-Forwarded-For`; tanpa flag itu
+      header diabaikan.
+- [x] `/metrics` Prometheus tanpa dependensi: `route_requests_total{code}`,
+      histogram `route_request_duration_seconds`, `route_inflight`,
+      `route_expansions_total`, `route_fallback_total`,
+      `route_rate_limited_total`, `route_canceled_total`,
+      `route_errors_total{reason}`, `routeid_build_info`.
+- [x] `ETag` + `Cache-Control` untuk query identik. Tag = fingerprint graph
+      (`pbf_sha256`, node/edge, commit) + query ternormalisasi, jadi urutan
+      parameter dan GET-vs-POST berbagi entri cache.
+- [x] `points`/`simplify` sudah terdokumentasi di README bagian Flutter.
+- [ ] Bind `127.0.0.1` di belakang Caddy: **belum**, karena di homelab sekarang
+      tidak ada reverse proxy untuk routeid — mengubah bind akan memutus akses
+      LAN yang dipakai Postman. Resepnya ada di `deploy/README.md`.
 
 **Selesai bila:** tidak ada request yang bisa menahan slot >10 s, dan dashboard
 menampilkan RPS/p95/fallback.
+
+**Hasil terukur (box uji yang sama, Java, `-conc 2`):**
+
+| uji | hasil |
+|---|---|
+| 304 vs 200 (rute 41,7 km) | p50 **0,2 ms** vs 43,1 ms (~200x) |
+| batas waktu 1 s pada rute 148 km | `504` pada 1,01 s, bukan 2,9 s |
+| request pendek saat 2 slot penuh, `-timeout 1s` | selesai 813 ms |
+| request pendek saat 2 slot penuh, `-timeout 20s` | selesai 2.596 ms |
+| 10 request cepat, `-rate 15 -burst 5` | 5x `200`, lalu `429` + `Retry-After: 4` |
+
+Artinya deadline bukan cuma mengubah status: ia mengembalikan slot ke antrean,
+jadi satu klien yang meminta rute 148 km tidak lagi "menyandera" server selama
+beberapa detik.
 
 ### M5 — Cakupan (3-4 hari)
 

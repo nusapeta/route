@@ -148,12 +148,31 @@ Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`,
 | `GET /route?from=lat,lng&to=lat,lng` | rute. Opsional: `format=json\|points\|geojson\|polyline`, `simplify=<m>`, `pin=1`, `restrictions=0` |
 | `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan **provenance** (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile_sha256`) |
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
+| `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}` |
 
 `/healthz` dan `/version` menjawab "graph dan binary mana yang sedang jalan",
 jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
 `snap_from`/`snap_to` (titik proyeksi di jalan), `snap_from_m`/`snap_to_m`
 (offset meter), `trimmed`, `bbox`, `points_n`; header `X-Route-Ms`,
 `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`.
+
+### Cache, batas waktu, batas laju (M4)
+
+- **`ETag` + `Cache-Control`.** `max-age` diambil dari flag `-maxage` (default
+  3600 detik, `0` mematikan header cache). Tag dibentuk dari
+  fingerprint graph (`pbf_sha256`, node/edge, commit) plus query yang sudah
+  dinormalisasi (urutan parameter dan GET-vs-POST tidak mengubah tag). Kirim
+  `If-None-Match` → `304` tanpa body: **p50 0,2 ms** vs 43 ms untuk rute 42 km,
+  jadi app yang mengulang query saat rotasi layar nyaris tidak memakai slot.
+- **Deadline `-timeout` (default 10 s).** `context` diteruskan ke dalam A* dan
+  dicek tiap 256 ekspansi; lewat batas → `504 {"error":"deadline exceeded"}` dan
+  workspace langsung dilepas. Klien yang memutus koneksi juga membatalkan
+  pencarian (bukan cuma diabaikan).
+- **Rate limit `-rate`/`-burst` (default 15/menit per IP, burst 5)** → `429` +
+  `Retry-After`. Di belakang reverse proxy pakai `-trust-proxy` supaya IP diambil
+  dari `X-Forwarded-For`; tanpa flag itu header diabaikan (tidak bisa dipalsukan).
+- Semua angka di atas terlihat di `/metrics`, jadi tidak perlu log untuk tahu
+  berapa ekspansi/fallback/penolakan yang terjadi.
 
 ## Integrasi Flutter
 

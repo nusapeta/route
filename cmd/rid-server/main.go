@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -47,6 +48,11 @@ func (rg *region) contains(lat, lon float64) bool {
 type server struct {
 	regions  []*region
 	maxSnapM float64
+	timeout  time.Duration
+	maxAge   int // Cache-Control max-age for /route, seconds
+	fp       string
+	m        *metrics
+	rl       *limiter
 }
 
 type strList []string
@@ -68,13 +74,18 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	conc := flag.Int("conc", 4, "concurrent routing workspaces per region")
 	snap := flag.Float64("snap", 3000, "max snap distance in meters")
+	timeout := flag.Duration("timeout", 10*time.Second, "per-request deadline; longer routes get 504")
+	rate := flag.Float64("rate", 15, "requests per minute per IP (0 disables the limiter)")
+	burst := flag.Float64("burst", 5, "token bucket burst per IP")
+	trustProxy := flag.Bool("trust-proxy", false, "read the client IP from X-Forwarded-For (only behind a proxy)")
+	maxAge := flag.Int("maxage", 3600, "Cache-Control max-age for /route in seconds (0 disables caching headers)")
 	flag.Parse()
 
 	if len(graphs) == 0 {
 		log.Fatal("need at least one -graph")
 	}
 
-	s := &server{maxSnapM: *snap}
+	s := &server{maxSnapM: *snap, timeout: *timeout, maxAge: *maxAge, m: &metrics{}}
 	for _, p := range expand(graphs) {
 		g, err := graph.Open(p)
 		if err != nil {
@@ -95,10 +106,14 @@ func main() {
 	}
 	sort.Slice(s.regions, func(i, j int) bool { return s.regions[i].name < s.regions[j].name })
 
+	s.fp = graphFingerprint(s.regions)
+	s.rl = newLimiter(*rate, *burst, *trustProxy)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/version", handleVersion)
-	mux.HandleFunc("/route", s.handleRoute)
+	mux.HandleFunc("/metrics", s.m.handleMetrics)
+	mux.Handle("/route", s.m.wrap(s.rl.wrap(s.handleRoute, s.m)))
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -113,7 +128,8 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	log.Printf("listening on %s (%d region(s))", *addr, len(s.regions))
+	log.Printf("listening on %s (%d region(s)) fingerprint %s timeout %s rate %.0f/min burst %.0f",
+		*addr, len(s.regions), s.fp, s.timeout, *rate, *burst)
 
 	select {
 	case err := <-errCh:
@@ -260,21 +276,57 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	}
 
 	start := time.Now()
+
+	// Cheap cache works before the expensive part: an identical query only pays
+	// for hashing, and a graph rebuild or binary upgrade changes the tag.
+	if s.maxAge > 0 {
+		etag := routeETag(s.fp, p)
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.maxAge))
+		if match := req.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+
 	rgF, snapF, ok1 := s.pickSnap(fLat, fLon)
 	rgT, snapT, ok2 := s.pickSnap(tLat, tLon)
 	if !ok1 || !ok2 {
+		s.m.errSnap.Add(1)
 		httpErr(w, 422, "no road within snap distance (region not loaded?)")
 		return
 	}
 	if rgF != rgT {
+		s.m.errCrossRegion.Add(1)
 		httpErr(w, 422, "cross-region route not supported ("+rgF.name+" -> "+rgT.name+")")
 		return
 	}
 	rg := rgF
-	res, err := rg.r.RouteSnap(snapF, snapT, p.restrictions)
+
+	// The deadline follows the client: if it disconnects, req.Context() ends and
+	// the search stops at the next check instead of burning a workspace slot.
+	ctx, cancel := context.WithTimeout(req.Context(), s.timeout)
+	defer cancel()
+	res, err := rg.r.RouteSnapCtx(ctx, snapF, snapT, p.restrictions)
 	if err != nil {
-		httpErr(w, 422, err.Error())
+		switch {
+		case errors.Is(err, graph.ErrCanceled):
+			s.m.canceled.Add(1)
+			httpErr(w, 504, "deadline exceeded ("+s.timeout.String()+")")
+		case errors.Is(err, graph.ErrTooFar):
+			s.m.tooFar.Add(1)
+			httpErr(w, 422, err.Error())
+		case errors.Is(err, graph.ErrNoRoute):
+			s.m.errNoRoute.Add(1)
+			httpErr(w, 422, err.Error())
+		default:
+			httpErr(w, 422, err.Error())
+		}
 		return
+	}
+	s.m.expansions.Add(int64(res.Expansions))
+	if res.Fallback {
+		s.m.fallback.Add(1)
 	}
 
 	// Geometry follows the road: it starts and ends at the projected points.
@@ -482,8 +534,11 @@ func cors(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Expose-Headers", "X-Route-Ms, X-Route-Region, X-Route-Expansions, X-Route-Trim")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, If-None-Match")
+		// ETag/Cache-Control/Retry-After are exposed so a Flutter web client can
+		// revalidate a cached route and read the back-off hint on a 429.
+		w.Header().Set("Access-Control-Expose-Headers",
+			"X-Route-Ms, X-Route-Region, X-Route-Expansions, X-Route-Trim, ETag, Cache-Control, Retry-After")
 		// Chrome asks for this before an HTTPS page may reach a LAN/localhost
 		// service (Private Network Access), e.g. hoppscotch.io -> localhost.
 		if r.Header.Get("Access-Control-Request-Private-Network") == "true" {

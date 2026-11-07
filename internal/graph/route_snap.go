@@ -1,6 +1,9 @@
 package graph
 
-import "math"
+import (
+	"context"
+	"math"
+)
 
 // SnapRoute is a route between two snapped points. Head and Tail are the
 // projected coordinates (lat, lon); Nodes holds the node path with the snapped
@@ -37,7 +40,13 @@ func (g *Graph) alongTime(s Snap) float64 {
 // geometry; otherwise the offset is added as a spur. This keeps the reported
 // distance consistent with the geometry without mutating the graph.
 func (r *Router) RouteSnap(a, b Snap, strict bool) (SnapRoute, error) {
-	res, err := r.RouteStrict(a.Node, b.Node, strict)
+	return r.RouteSnapCtx(context.Background(), a, b, strict)
+}
+
+// RouteSnapCtx is RouteSnap with cancellation; a canceled search releases its
+// workspace immediately instead of running to the expansion cap.
+func (r *Router) RouteSnapCtx(ctx context.Context, a, b Snap, strict bool) (SnapRoute, error) {
+	res, err := r.RouteStrictCtx(ctx, a.Node, b.Node, strict)
 	if err != nil {
 		return SnapRoute{}, err
 	}

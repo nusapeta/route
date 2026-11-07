@@ -148,3 +148,41 @@ docker compose restart      # atau: sudo systemctl restart routeid
 
 Untuk update tanpa downtime: bangun ke nama lain (`java-new.graph`), lalu
 jalankan dua server di port berbeda dan alihkan proxy.
+
+## M4: cache, batas waktu, batas laju, metrics
+
+Compose sekarang meneruskan `-timeout 10s -rate 15 -burst 5 -maxage 3600`.
+Arti praktisnya:
+
+- Query yang sama (graph sama, binary sama) dijawab `304` kalau klien mengirim
+  `If-None-Match`: ~0,2 ms, nyaris tidak memakai slot. `Cache-Control` membuat
+  app/browser menyimpannya selama `-maxage` detik.
+- Rute yang tidak selesai dalam `-timeout` dijawab `504` dan slotnya dikembalikan
+  ke antrean, jadi satu permintaan rute 148 km tidak menyandera server.
+- Per IP: 15 permintaan/menit (burst 5) -> `429` + `Retry-After`.
+- `curl localhost:8080/metrics` untuk dashboard.
+
+### Menaruh di belakang Caddy (disarankan)
+
+Sekarang port 8080 dipublikasikan langsung ke LAN, jadi **jangan** pakai
+`-trust-proxy`: `X-Forwarded-For` bisa dipalsukan dan rate limit bisa dilewati.
+Kalau mau pindah ke belakang Caddy:
+
+```yaml
+# deploy/docker-compose.yml
+    ports:
+      - "127.0.0.1:8080:8080"   # hanya proxy di host yang bisa menghubungi
+    command:
+      # ... flag lama ...
+      - -trust-proxy            # ambil IP dari X-Forwarded-For
+```
+
+```caddyfile
+route.example.com {
+    reverse_proxy 127.0.0.1:8080
+    encode gzip
+}
+```
+
+Setelah itu `curl http://192.168.1.219:8080` memang tidak menjawab lagi (itu
+tujuannya); akses lewat nama domain Caddy, dan Postman diarahkan ke sana.

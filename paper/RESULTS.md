@@ -414,3 +414,54 @@ Cek jawaban lintas-versi di box yang sama (rute berbeda, satu request):
 
 Rute 148 km (Jakarta-Bandung) juga ikut membaik: p50 5.038 -> 3.657 ms (1,38x),
 karena biaya per ekspansi yang turun tetap terasa walau frontier-nya besar.
+
+## 11. Cache, deadline, rate limit (M4)
+
+Semua diuji di box uji yang sama (Java, `-conc 2`), lalu di homelab setelah
+deploy.
+
+**304 vs 200.** `ETag` = fingerprint graph (`pbf_sha256`, jumlah node/edge,
+commit) + hash query ternormalisasi, jadi urutan parameter dan GET-vs-POST
+menghasilkan tag yang sama.
+
+| permintaan | p50 | bytes |
+|---|---|---|
+| `200` rute 41,7 km | 43,1 ms | 3,7 kB |
+| `304` (`If-None-Match` cocok) | **0,2 ms** | 0 |
+
+Sekitar 200x lebih murah, dan yang lebih penting: request 304 tidak pernah
+menyentuh workspace A*, jadi app yang mengulang query saat rotasi layar tidak
+lagi ikut menghabiskan slot.
+
+**Deadline mengembalikan slot, bukan cuma mengganti status.** Dua rute 148 km
+dijalankan paralel memenuhi kedua workspace, lalu satu rute 41,7 km datang:
+
+| `-timeout` | rute 148 km | rute pendek (antre) |
+|---|---|---|
+| 20 s | selesai 2.942 / 2.777 ms | selesai **2.596 ms** |
+| 1 s | `504` pada 1.062 / 1.011 ms | selesai **813 ms** |
+
+Tanpa deadline, rute pendek menunggu pekerjaan panjang selesai; dengan deadline
+ia hanya menunggu sampai slot dikembalikan. Ini alasan `-conc` tidak perlu
+dinaikkan untuk melindungi ekor latency.
+
+**Rate limit.** `-rate 15 -burst 5`, sepuluh request cepat dari satu IP:
+
+```
+200 200 200 200 200 429 429 429 429 429   (Retry-After: 4)
+```
+
+IP lain tidak terpengaruh (diuji di `TestLimiterWrap`), dan `X-Forwarded-For`
+hanya dipercaya kalau `-trust-proxy` diberikan.
+
+**/metrics.** 48 baris, tanpa dependensi: jumlah request per kode, histogram
+latency (bucket 10 ms..10 s + `+Inf`), `route_inflight`, `route_expansions_total`,
+`route_fallback_total`, `route_rate_limited_total`, `route_canceled_total`,
+`route_errors_total{reason=too_far|no_route|snap|cross_region}`, dan
+`routeid_build_info`.
+
+**Batas waktu di dalam A*.** Pengecekan `ctx.Err()` dilakukan tiap 256 ekspansi:
+satu pop ~200 ns, jadi biayanya di bawah 0,05% dan pembatalan terjadi dalam
+hitungan milidetik. `TestRouteCanceled` membatalkan setelah 3 pengecekan dan
+memastikan `ErrCanceled` (bukan `ErrTooFar`) serta workspace tetap bisa dipakai
+query berikutnya.
