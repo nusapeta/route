@@ -146,3 +146,26 @@ func TestRouteCanceled(t *testing.T) {
 	}
 	t.Logf("nodes=%d expansions=%d", len(res.Nodes), res.Expansions)
 }
+
+func TestTurnCostBuckets(t *testing.T) {
+	const s = float32(math.Sqrt2) / 2 // 45 degrees
+	cases := []struct {
+		name           string
+		ax, ay, bx, by float32
+		want           float32
+	}{
+		{"straight", 1, 0, 1, 0, 0},
+		{"30 degree bend", 1, 0, 0.866025, 0.5, turnSlightDs},
+		{"right angle", 1, 0, 0, 1, turnSharpDs},
+		{"45 degrees", 1, 0, s, s, turnSlightDs},
+		{"135 degrees", 1, 0, -s, s, turnSharpDs},
+		{"u-turn", 1, 0, -1, 0, turnUturnDs},
+		{"unknown incoming", 0, 0, 1, 0, 0},
+		{"unknown outgoing", 1, 0, 0, 0, 0},
+	}
+	for _, c := range cases {
+		if got := turnCostDs(c.ax, c.ay, c.bx, c.by); got != c.want {
+			t.Errorf("%s: turnCostDs = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

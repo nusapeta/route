@@ -75,6 +75,8 @@ func main() {
 	conc := flag.Int("conc", 4, "concurrent routing workspaces per region")
 	snap := flag.Float64("snap", 3000, "max snap distance in meters")
 	timeout := flag.Duration("timeout", 10*time.Second, "per-request deadline; longer routes get 504")
+	turnPenalty := flag.Float64("turn-penalty", 0.25, "turn cost multiplier; 0 = pure edge time")
+	eps := flag.Float64("eps", 1.5, "heuristic weight (1.0 = optimal but slow)")
 	rate := flag.Float64("rate", 15, "requests per minute per IP (0 disables the limiter)")
 	burst := flag.Float64("burst", 5, "token bucket burst per IP")
 	trustProxy := flag.Bool("trust-proxy", false, "read the client IP from X-Forwarded-For (only behind a proxy)")
@@ -93,8 +95,11 @@ func main() {
 		}
 		mnLat, mnLon, mxLat, mxLon := g.Bounds()
 		const pad = 0.05
+		r := graph.NewRouter(g, *conc)
+		r.SetEpsilon(float32(*eps))
+		r.SetTurnScale(float32(*turnPenalty))
 		rg := &region{
-			name: strings.TrimSuffix(filepath.Base(p), ".graph"), g: g, r: graph.NewRouter(g, *conc),
+			name: strings.TrimSuffix(filepath.Base(p), ".graph"), g: g, r: r,
 			minLat: mnLat - pad, maxLat: mxLat + pad,
 			minLon: mnLon - pad, maxLon: mxLon + pad,
 		}
@@ -429,6 +434,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	if res.Relaxed {
 		body["relaxed"] = true
 		body["epsilon"] = res.Epsilon
+		body["turn_penalty"] = res.TurnScale
 	}
 	if res.Fallback {
 		body["fallback"] = true

@@ -28,6 +28,7 @@ func main() {
 	graphPath := flag.String("graph", "map.graph", "graph file")
 	n := flag.Int("n", 200, "samples per bucket")
 	eps := flag.Float64("eps", 1.5, "heuristic weight")
+	turnPenalty := flag.Float64("turn-penalty", 0.25, "turn cost multiplier; 0 = pure edge time")
 	seed := flag.Int64("seed", 42, "rng seed")
 	csvOut := flag.String("csv", "", "write raw samples to CSV")
 	pairsIn := flag.String("pairs", "", "route fixed pairs from CSV (from_lat,from_lon,to_lat,to_lon)")
@@ -57,6 +58,7 @@ func main() {
 		r.SetStrict(false)
 	}
 	r.SetEpsilon(float32(*eps))
+	r.SetTurnScale(float32(*turnPenalty))
 
 	buckets := []struct {
 		name   string

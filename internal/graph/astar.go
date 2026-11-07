@@ -25,6 +25,8 @@ type Route struct {
 	Relaxed bool
 	// Epsilon records the heuristic weight that produced the answer.
 	Epsilon float32
+	// TurnScale records the turn cost multiplier used for the answer.
+	TurnScale float32
 }
 
 // ErrNoRoute is returned when the destination is unreachable.
@@ -49,10 +51,11 @@ const (
 
 // Router runs weighted A* queries over a Graph with a bounded workspace pool.
 type Router struct {
-	g      *Graph
-	pool   chan *workspace
-	eps    float32 // heuristic weight: 1.0 = optimal, 1.25 = ~4x faster
-	strict bool    // enforce turn restrictions
+	g         *Graph
+	pool      chan *workspace
+	eps       float32 // heuristic weight: 1.0 = optimal, 1.25 = ~4x faster
+	strict    bool    // enforce turn restrictions
+	turnScale float32 // multiplier on the turn cost table; 0 disables it
 
 	maxSpeedMps float64 // heuristic bound; never above maxSpeedMps global
 }
@@ -71,6 +74,7 @@ func NewRouter(g *Graph, concurrency int) *Router {
 		pool:        make(chan *workspace, concurrency),
 		eps:         1.5,
 		strict:      true,
+		turnScale:   defaultTurnScale,
 		maxSpeedMps: g.MaxSpeedMps(),
 	}
 	for i := 0; i < concurrency; i++ {
@@ -87,6 +91,17 @@ func (r *Router) Strict() bool { return r.strict }
 
 // SetStrict toggles turn restriction enforcement (used for A/B measurement).
 func (r *Router) SetStrict(v bool) { r.strict = v }
+
+// TurnScale reports the multiplier applied to the turn cost table.
+func (r *Router) TurnScale() float32 { return r.turnScale }
+
+// SetTurnScale scales the turn cost table; 0 disables turn costs entirely
+// (used for A/B measurement against pure edge-time routing).
+func (r *Router) SetTurnScale(v float32) {
+	if v >= 0 {
+		r.turnScale = v
+	}
+}
 
 // SetEpsilon adjusts the heuristic weight (1.0 = optimal but slow).
 func (r *Router) SetEpsilon(eps float32) {
@@ -320,7 +335,7 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 	var expanded int
 	for len(w.heap) > 0 {
 		cur := heapPop(&w.heap)
-		gCur, _, ok := w.get(cur.node)
+		gCur, came, ok := w.get(cur.node)
 		if !ok {
 			continue
 		}
@@ -328,6 +343,7 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 			res, err := r.reconstruct(w, src, cur.node)
 			res.Expansions = expanded
 			res.Epsilon = eps
+			res.TurnScale = r.turnScale
 			return res, err
 		}
 		if cur.f > gCur+h.estEdge(g, cur.node)+0.5 {
@@ -345,8 +361,15 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 				return Route{}, ErrCanceled
 			}
 		}
-		head := g.Off[g.To[cur.node]]
-		headEnd := g.Off[g.To[cur.node]+1]
+		v := g.To[cur.node]
+		head := g.Off[v]
+		headEnd := g.Off[v+1]
+		// Arrival direction of the incoming edge; zero means "no turn cost"
+		// (first edge of the route, or turn costs disabled).
+		var inDx, inDy float32
+		if r.turnScale != 0 && came != invalidEdge {
+			inDx, inDy = g.dirTo(g.To[came], v)
+		}
 		var span RestrictionSpan
 		if restrict {
 			span = g.Span(cur.node)
@@ -357,6 +380,10 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 				continue
 			}
 			ng := gCur + g.EdgeTimeDs(ee)
+			if inDx != 0 || inDy != 0 {
+				odx, ody := g.dirTo(v, g.To[ee])
+				ng += turnCostDs(inDx, inDy, odx, ody) * r.turnScale
+			}
 			if old, _, seen := w.get(ee); seen && ng >= old {
 				continue
 			}
@@ -473,6 +500,13 @@ func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
 			}
 		}
 	}
+	if r.turnScale != 0 && len(nodes) > 2 {
+		for i := 1; i+1 < len(nodes); i++ {
+			ax, ay := r.g.dirTo(nodes[i-1], nodes[i])
+			bx, by := r.g.dirTo(nodes[i], nodes[i+1])
+			tm += turnCostDs(ax, ay, bx, by) * r.turnScale
+		}
+	}
 	return Route{
 		Nodes:      nodes,
 		DistanceM:  dist,
@@ -480,6 +514,58 @@ func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
 		FerryM:     ferry,
 		FerrySpans: spans,
 	}, nil
+}
+
+// Turn costs, bucketed by the change of heading between two edges. They mirror
+// the shape of OSRM's weight function: going straight is free, a slight bend
+// costs little, a sharp turn costs about as much as a traffic light, and a
+// U-turn is penalised heavily. Without them a route can add tens of kilometres
+// of distance to save a few seconds of drive time.
+const (
+	// defaultTurnScale is the shipped strength: a quarter of the table below,
+	// enough to break ties against detours without rewriting the ETA. Measured
+	// on E1 (paper/RESULTS.md §15): full weight widens the distance spread.
+	defaultTurnScale = 0.25
+	turnSlightDs     = 20  // 2 s
+	turnSharpDs      = 75  // 7.5 s
+	turnUturnDs      = 200 // 20 s
+	// cosine thresholds for 22.5, 67.5 and 135 degrees
+	cosTurnSlight = 0.92388
+	cosTurnSharp  = 0.38268
+	cosTurnUturn  = -0.70711
+)
+
+// dirTo returns the unit direction, in metres, from node a to node b. It
+// returns (0, 0) when both nodes share a position.
+func (g *Graph) dirTo(a, b uint32) (float32, float32) {
+	lat1, lon1 := g.Coords(a)
+	lat2, lon2 := g.Coords(b)
+	dy := (lat2 - lat1) * metersPerDegLat
+	dx := (lon2 - lon1) * metersPerDegLat * cosFloor(lat1, lat2)
+	d := math.Sqrt(dx*dx + dy*dy)
+	if d == 0 {
+		return 0, 0
+	}
+	return float32(dx / d), float32(dy / d)
+}
+
+// turnCostDs is the cost in deciseconds of turning from direction in to
+// direction out. Zero directions mean "unknown" and cost nothing.
+func turnCostDs(inDx, inDy, outDx, outDy float32) float32 {
+	if inDx == 0 && inDy == 0 || outDx == 0 && outDy == 0 {
+		return 0
+	}
+	c := inDx*outDx + inDy*outDy
+	switch {
+	case c >= cosTurnSlight:
+		return 0
+	case c >= cosTurnSharp:
+		return turnSlightDs
+	case c >= cosTurnUturn:
+		return turnSharpDs
+	default:
+		return turnUturnDs
+	}
 }
 
 // Haversine returns the great circle distance in meters.

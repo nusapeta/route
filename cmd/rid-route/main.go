@@ -22,6 +22,7 @@ func main() {
 	from := flag.String("from", "", "lat,lng")
 	to := flag.String("to", "", "lat,lng")
 	eps := flag.Float64("eps", 1.25, "heuristic weight")
+	turnPenalty := flag.Float64("turn-penalty", 0.25, "turn cost multiplier; 0 = pure edge time")
 	flag.Parse()
 
 	g, err := graph.Open(*graphPath)
@@ -30,6 +31,7 @@ func main() {
 	}
 	r := graph.NewRouter(g, 1)
 	r.SetEpsilon(float32(*eps))
+	r.SetTurnScale(float32(*turnPenalty))
 
 	fla, flo := pt(*from)
 	tla, tlo := pt(*to)
