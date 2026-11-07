@@ -275,10 +275,16 @@ lalu detail di sekitar ujung), bukan menaikkan `maxExpansions`.
 (OK), tapi banyak lintasan kecil tanpa tag sama sekali (jatuh ke 20 km/jam).
 Kalau akurasi ferry penting, tabel statis per lintasan lebih jujur daripada OSM.
 
-### 15b. Profil motor untuk 7 region (S)
+### 15b. Profil motor untuk 7 region — selesai (M5)
 
-Baru Java, Sumatra, Sulawesi, Bali-Nusra yang dibangun profil motor (butuh
-4-5 menit/region untuk Java, <1 menit sisanya). Sisanya tinggal `make motor`.
+Ketujuh region punya artefak motor: Java 682 MB, Sumatra 349, Kalimantan 207,
+Sulawesi 167, Bali-Nusra 148, Maluku 25, Papua 35. Total 1,6 GB untuk 7 region
+(dibangun 1m09s..3m53s per region, 4 worker).
+
+Sisa: server belum bisa mengalihkan profil per-request — satu proses = satu
+profil (dua file graph, dua container, atau buka dua region dengan nama
+`java-motor`). Kalau perlu satu proses dua profil, `region` harus menyimpan
+pasangan graph dan `pickSnap` memilih berdasarkan param `profile`.
 
 ### 16. Restriction via-way (M)
 
