@@ -47,8 +47,8 @@ tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
    dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
    hanya 3,17% pada data uji.
 6. **Dua optimisasi yang terbukti, bukan klaim:** Hilbert ordering memangkas RSS
-   579 -> 104 MB dan latency 1,5-2x; weighted A* `eps=1.5` 2,4x lebih cepat
-   dengan rute identik.
+   metropolitan 1.225 -> 675 MB (1,8x) dan p50 7-20% lebih cepat; weighted A*
+   `eps=1.5` 28% lebih cepat dari `eps=1.0` dengan 526/526 panjang rute identik.
 7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 67 RPS @7 km,
    17 RPS @15 km, 11 RPS @42 km, saturasi di 4 query paralel.
 
@@ -360,7 +360,7 @@ jadi satu graph dari pbf nasional (`scripts/build-national.sh`) — butuh mesin
 
 ```
 cmd/rid-extract      pbf -> .graph (offline, bulanan)
-cmd/rid-server       HTTP /route, /healthz (prod)
+cmd/rid-server       HTTP /route, /healthz, /version (prod)
 cmd/rid-route        CLI satu rute (debug)
 cmd/rid-graphinfo    inspeksi header/grid + probe snap & scan lubang data
 docs/ROADMAP.md      north star, budget, milestone
@@ -378,12 +378,19 @@ scripts/             fetch.sh, build-national.sh, smoke.sh
 ## Test
 
 ```bash
-make test     # go vet + go test ./...
+make test                                              # go vet + go test ./...
+go test ./internal/graph -run TestGoldenRoutes -update  # terima perubahan rute yang disengaja
 ```
 
 Unit test mencakup round-trip format (termasuk Ban/Only), semantik
-`only_*`, dan pembuktian router memilih jalan memutar 2 hop saat belokan
-terlarang. CI (GitHub Actions) menjalankan vet + test + build di tiap push.
+`only_*`, pembuktian router memilih jalan memutar 2 hop saat belokan terlarang,
+round-trip provenance v3, dan **golden test 48 pasangan**: kota sintetis 30x30
+ditulis ke disk, di-snap, dirutekan, lalu dibandingkan per pasangan
+(`dist_m`, `time_ds`, jumlah node, hash FNV urutan node). Perubahan tak sengaja
+pada profil, snapping, atau A* langsung tampak sebagai diff — sudah diverifikasi
+tidak vakum: mengubah satu kecepatan 8,0 -> 8,5 m/s menggagalkan 3 pasangan.
+
+CI (GitHub Actions) menjalankan vet + test + build di tiap push.
 
 ## Benchmark
 
@@ -433,7 +440,10 @@ graf). Bandingkan tabel CSR penuh: 8 B x 46,7 jt edge = 374 MB.
 
 Lihat doc comment `internal/graph/format.go`. Header 256 B + 14 section
 (Lat, Lon, CSR Off/To/Len/Time, geometri interior, grid, lalu section
-`Ban`/`Only` berisi pasangan edge terlarang/diizinkan). Versi format 2;
+`Ban`/`Only` berisi pasangan edge terlarang/diizinkan). Versi format 3:
+menambah provenance di header (SHA-256 pbf, waktu build) plus blob
+`key=value` di akhir file (sumber, hash profil, versi extractor, order, grid).
+File v1/v2 tetap terbaca, hanya tanpa provenance;
 file versi 1 tetap terbaca dengan restriction dimatikan.
 
 ## Catatan data

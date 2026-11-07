@@ -3,20 +3,28 @@ GO      ?= go
 REGION  ?= java
 MEMLIM  ?= 2GiB
 
+# Provenance stamped into binaries: `make build` records the commit, `make
+# static` uses a reproducible SOURCE_DATE_EPOCH when the build must be bit-identical.
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+BUILT   := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X main.commit=$(COMMIT) -X main.buildTime=$(BUILT) \
+           -X routeid/internal/extract.Version=$(COMMIT)
+STATIC  := -s -w $(LDFLAGS)
+
 .PHONY: all build test vet fmt clean fetch java sumatra bench restcheck
 
 all: build
 
 build:
-	$(GO) build -o bin/ ./cmd/...
+	$(GO) build -ldflags '$(LDFLAGS)' -o bin/ ./cmd/...
 
 # binary statis (CGO_ENABLED=0) untuk image alpine/distroless
 static:
 	mkdir -p bin/static
-	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/static/rid-server ./cmd/rid-server
-	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/static/rid-extract ./cmd/rid-extract
-	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/static/rid-route ./cmd/rid-route
-	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/static/rid-graphinfo ./cmd/rid-graphinfo
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-server ./cmd/rid-server
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-extract ./cmd/rid-extract
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-route ./cmd/rid-route
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-graphinfo ./cmd/rid-graphinfo
 
 test: vet
 	$(GO) test ./...

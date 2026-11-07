@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,13 @@ import (
 	"time"
 
 	"routeid/internal/graph"
+)
+
+// Build information, injected with
+// -ldflags "-X main.commit=... -X main.buildTime=...".
+var (
+	commit    = "dev"
+	buildTime = "unknown"
 )
 
 // region is one graph file plus the box it covers.
@@ -89,6 +97,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/version", handleVersion)
 	mux.HandleFunc("/route", s.handleRoute)
 
 	srv := &http.Server{
@@ -175,17 +184,45 @@ func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Bans   int     `json:"bans"`
 		Only   int     `json:"only_rules"`
 		Skip   uint32  `json:"restrictions_skipped"`
+
+		Format    uint32 `json:"format"`
+		PBFHash   string `json:"pbf_sha256,omitempty"`
+		BuiltAt   string `json:"built_at,omitempty"`
+		Source    string `json:"source,omitempty"`
+		Extractor string `json:"extractor,omitempty"`
+		Profile   string `json:"profile_sha256,omitempty"`
 	}
 	out := struct {
 		OK      bool   `json:"ok"`
+		Version string `json:"version"`
+		Commit  string `json:"commit"`
 		Regions []info `json:"regions"`
-	}{OK: true}
+	}{OK: true, Version: versionString(), Commit: commit}
 	for _, rg := range s.regions {
 		rs := rg.g.Restrictions()
+		prov := rg.g.Provenance()
 		out.Regions = append(out.Regions, info{rg.name, rg.g.NodeCount, rg.g.EdgeCount, rg.minLat, rg.minLon, rg.maxLat, rg.maxLon,
-			rs.Ban, rs.Only, rs.Skipped})
+			rs.Ban, rs.Only, rs.Skipped,
+			prov.Format, prov.PBFHash, prov.BuiltAt, rg.g.MetaValue("source"), rg.g.MetaValue("extractor"), rg.g.MetaValue("profile_sha256")})
 	}
 	writeJSON(w, out)
+}
+
+func versionString() string {
+	if buildTime == "unknown" {
+		return commit
+	}
+	return commit + " (" + buildTime + ")"
+}
+
+func handleVersion(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, struct {
+		Commit    string `json:"commit"`
+		BuiltAt   string `json:"built_at"`
+		GoVersion string `json:"go_version"`
+		GOOS      string `json:"goos"`
+		GOARCH    string `json:"goarch"`
+	}{commit, buildTime, runtime.Version(), runtime.GOOS, runtime.GOARCH})
 }
 
 type routeParams struct {

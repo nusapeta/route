@@ -89,7 +89,7 @@ Dua jalur:
 Yang dilaporkan: apakah graph nasional ≈ 2× Java (node/edge/disk) dan apakah
 p50/p95 latency tidak berubah (search terbatas radius, jadi seharusnya tidak).
 
-## E6. Statistik & reproduksibilitas
+## E6. Statistik & reproduksibilitas — SELESAI (format v3 + golden test)
 
 Metadata graph + golden test: `docs/BACKLOG.md` item 1-3 (milestone M1).
 

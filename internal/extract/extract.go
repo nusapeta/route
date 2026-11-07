@@ -9,16 +9,82 @@ package extract
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
+	"time"
 
 	"github.com/paulmach/osm"
 	"github.com/paulmach/osm/osmpbf"
 
 	"routeid/internal/graph"
 )
+
+// Version is the extractor version stamped into every graph's provenance. It is
+// overridable at link time: -X routeid/internal/extract.Version=<git describe>.
+var Version = "0.1.0"
+
+// ProfileHash is a stable digest of the routing profile (per-class fallback
+// speeds plus skipped classes). Two graphs with the same PBF hash but different
+// profile hashes produce different routes, so both are recorded.
+func ProfileHash() string {
+	keys := make([]string, 0, len(defaultSpeedKMH))
+	for k := range defaultSpeedKMH {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	skip := make([]string, 0, len(skipHighway))
+	for k := range skipHighway {
+		skip = append(skip, k)
+	}
+	sort.Strings(skip)
+	h := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(h, "speed %s %.3f\n", k, defaultSpeedKMH[k])
+	}
+	for _, k := range skip {
+		fmt.Fprintf(h, "skip %s\n", k)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// fileSHA256 streams the whole file through SHA-256.
+func fileSHA256(ctx context.Context, path string, progress func(string, int64)) ([]byte, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	buf := make([]byte, 1<<20)
+	var n int64
+	for {
+		if ctx.Err() != nil {
+			return nil, n, ctx.Err()
+		}
+		k, err := f.Read(buf)
+		if k > 0 {
+			h.Write(buf[:k])
+			n += int64(k)
+			if n%(256<<20) < int64(k) {
+				progress("sha256", n)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, n, err
+		}
+	}
+	return h.Sum(nil), n, nil
+}
 
 // Options tunes the extraction.
 type Options struct {
@@ -81,6 +147,13 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 		return err
 	}
 	defer f.Close()
+
+	// provenance: hash the source so the artefact can be audited later
+	progress("sha256", 0)
+	pbfHash, pbfBytes, err := fileSHA256(ctx, pbfPath, progress)
+	if err != nil {
+		return err
+	}
 
 	// pass 1: ways
 	flat, wayOff, speeds, dirs, wayIDs, err := readWays(ctx, f, opt.Workers, progress)
@@ -218,10 +291,37 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 		}
 	}
 
+	b.PBFHash = pbfHash
+	b.BuildUnix = uint32(time.Now().Unix())
+	b.Meta = map[string]string{
+		"source":         filepath.Base(pbfPath),
+		"pbf_bytes":      strconv.FormatInt(pbfBytes, 10),
+		"pbf_sha256":     hex.EncodeToString(pbfHash),
+		"extractor":      Version,
+		"profile_sha256": ProfileHash(),
+		"order":          orderName(opt.Order),
+		"grid_step":      strconv.FormatFloat(opt.GridStep, 'f', 4, 64),
+		"restrictions":   boolName(!opt.NoRestrictions),
+		"tool":           "rid-extract",
+	}
 	if err := b.Write(outPath); err != nil {
 		return err
 	}
 	return nil
+}
+
+func orderName(v string) string {
+	if v == "osm" {
+		return "osm"
+	}
+	return "hilbert"
+}
+
+func boolName(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
 }
 
 func readWays(ctx context.Context, f *os.File, workers int, progress func(string, int64)) (flat []int64, wayOff []int, speeds []float64, dirs []int8, wayIDs []int64, err error) {

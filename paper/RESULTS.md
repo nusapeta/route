@@ -222,3 +222,42 @@ puncak; VmHWM adalah angka yang benar.
 ./bin/rid-restcheck -graph data/java.graph -json paper/restrcheck-java.json
 ./bin/rid-bench -graph data/java.graph -no-restrictions   # baseline A/B
 ```
+
+## 8. Provenance & regresi (format v3)
+
+Rebuild Sumatra dengan `rid-extract` v3 (`GOMEMLIMIT=1800MiB`), diukur di mesin
+yang sama:
+
+| metrik | v2 (sebelum) | v3 (sesudah) |
+|---|---|---|
+| wall ekstraksi | 23,1 s | **21,2 s** |
+| peak RSS | 1.683 MB | 1.661 MB |
+| ukuran graph | 533.012.816 B | 533.013.104 B (+288 B blob) |
+| nodes / edges | 11.881.669 / 24.326.797 | identik |
+
+Hash pass (SHA-256 atas 283 MB pbf) berada di dalam noise pengukuran; biayanya
+jauh di bawah satu persen waktu build. Artefak sekarang menyebut dirinya sendiri:
+
+```
+$ bin/rid-graphinfo -graph data/sumatra.graph
+format     : v3
+pbf sha256 : dcbc563fb5433d714faecef21359ef3be80bb1abb69d9a65d346b72d58339831
+built at   : 2026-11-07T01:18:49Z
+source     : sumatra-latest.osm.pbf
+pbf_bytes  : 283307196
+extractor  : 16de793
+profile_sha256 : 62c6c8adad06d546357e1c9126e2a13746444c2096f6d7df880a632100908aa9
+order      : hilbert
+restrictions : on
+```
+
+`/healthz` mengulang field yang sama per region dan `/version` menyebut commit +
+waktu build binary, sehingga pertanyaan "binary dan graph mana yang jalan di box
+itu" bisa dijawab tanpa masuk ke dalam container.
+
+**Harness regresi.** Kota sintetis 30x30 (1.800 node, 3.480 edge, kecepatan
+per-baris 5/8 m/s) dibangun di dalam test, ditulis ke disk, di-`mmap`, lalu 48
+pasangan di-snap dan dirutekan; hasilnya dipin per pasangan (`dist_m`, `time_ds`,
+jumlah node, hash FNV). Eksperimen kontrol: mengubah satu kecepatan dari 8,0 ke
+8,5 m/s menggagalkan 3 dari 48 pasangan, jadi test ini benar-benar menjaga
+perilaku, bukan sekadar lulus.

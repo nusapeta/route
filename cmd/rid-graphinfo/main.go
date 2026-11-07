@@ -81,6 +81,19 @@ func main() {
 	fmt.Printf("bbox       : %.6f,%.6f .. %.6f,%.6f\n", minLat, minLon, maxLat, maxLon)
 	fmt.Printf("grid       : %dx%d cells, step %.4f, origin %.4f,%.4f, entries %d\n",
 		g.GridNLat, g.GridNLon, g.GridStep, g.GridLat0, g.GridLon0, g.GridCount)
+	prov := g.Provenance()
+	fmt.Printf("format     : v%d\n", prov.Format)
+	if prov.PBFHash == "" {
+		fmt.Printf("provenance : none (format < 3) — rebuild to record source/profile\n")
+	} else {
+		fmt.Printf("pbf sha256 : %s\n", prov.PBFHash)
+		fmt.Printf("built at   : %s\n", prov.BuiltAt)
+		for _, k := range []string{"source", "pbf_bytes", "extractor", "profile_sha256", "order", "grid_step", "restrictions"} {
+			if v := g.MetaValue(k); v != "" {
+				fmt.Printf("%-10s : %s\n", k, v)
+			}
+		}
+	}
 	if *scan != "" {
 		runScan(g, *scan)
 		return

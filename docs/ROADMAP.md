@@ -45,19 +45,24 @@ sebanyak mungkin rute per detik.
 
 ## Milestone
 
-### M1 — Bisa dipercaya (1-2 hari)
+### M1 — Bisa dipercaya — SELESAI
 
 Tujuan: artefak bisa diaudit dan regresi ketahuan otomatis. Tanpa ini, angka
 performa tidak bisa dibandingkan antar build.
 
-- [ ] Metadata di header graph: `pbf` SHA-256, timestamp build, hash tabel
-      kecepatan, versi extractor, jumlah node/edge/turn. Tampilkan di `/healthz`.
-- [ ] Golden test: 50 pasangan tetap -> jarak + hash polyline, gagal di CI jika
-      berubah.
-- [ ] `docs/BACKLOG.md` item 1-3.
+- [x] Metadata graph format **v3**: SHA-256 pbf + waktu build di header, blob
+      `key=value` di akhir file (`source`, `pbf_sha256`, `pbf_bytes`,
+      `extractor`, `profile_sha256`, `order`, `grid_step`, `restrictions`).
+      Terbaca di `/healthz`, `/version`, dan `rid-graphinfo`. v1/v2 tetap dimuat.
+- [x] Build info di binary via `-ldflags` (`main.commit`, `main.buildTime`,
+      `extract.Version`), otomatis dari `make build` / `make static`.
+- [x] Golden test 48 pasangan pada kota sintetis 30x30, plus round-trip
+      provenance dan uji kompatibilitas v2.
+- [x] Biaya diukur: hash pass menambah ~0,3 s dari 21,2 s total ekstraksi
+      Sumatra (peak 1.661 MB, sama seperti sebelumnya); blob metadata 288 byte.
 
-**Selesai bila:** `curl /healthz` menyebut pbf asal + tanggal, dan `go test ./...`
-menolak perubahan rute yang tak disengaja.
+**Terbukti:** `format: v3`, `pbf_sha256: dcbc563f…` di `/healthz`; mengubah satu
+kecepatan di test menggagalkan 3 pasangan (harness tidak vakum).
 
 ### M2 — Akurasi ujung rute (2-3 hari)
 

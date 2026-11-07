@@ -12,7 +12,19 @@
         "header": [],
         "url": "http://127.0.0.1:8080/healthz",
         "description": ""
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json().regions[0];",
+              "pm.test('provenance v3', () => pm.expect(r.format).to.be.at.least(3));"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "2. route points (aman, tanpa decode)",

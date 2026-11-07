@@ -21,12 +21,17 @@ package graph
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"os"
+	"sort"
+	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -35,14 +40,23 @@ const (
 	//
 	// v2 adds sparse turn restriction sections (sTurnOff = banned
 	// (from,to) edge pairs, sTurnTo = allowed pairs for only_* rules) plus
-	// header counters. v1 files still load, with restrictions disabled.
-	Version = 2
+	// header counters. v3 adds provenance: SHA-256 of the source extract,
+	// build time, and a key=value metadata blob appended after the last
+	// section. v1/v2 files still load, with restrictions disabled (v1) and
+	// no provenance (v1, v2).
+	Version = 3
 	// VersionMin is the oldest readable format version.
 	VersionMin = 1
 
 	magicLE     = 0x47444952 // "RIDG"
 	headerSize  = 256
 	numSections = 14
+
+	// Header offsets of the v3 provenance fields. The slice 212..256 was
+	// unused in v1/v2, so older readers simply ignore them.
+	hPBFHash   = 212 // [32]byte SHA-256 of the source .osm.pbf
+	hBuildUnix = 244 // uint32   seconds since Unix epoch (UTC), 0 = unknown
+	hMetaOff   = 248 // uint64   file offset of the metadata blob, 0 = none
 )
 
 const (
@@ -97,6 +111,11 @@ type Graph struct {
 	Ban     []uint64
 	Only    []uint64
 	Skipped uint32 // restrictions dropped at build time
+
+	// provenance (v3+)
+	pbfHash   [32]byte
+	buildUnix uint32
+	meta      map[string]string
 }
 
 // Open memory maps a graph file.
@@ -136,6 +155,13 @@ func Open(path string) (*Graph, error) {
 		banCount = be.Uint32(data[200:])
 		onlyCount = be.Uint32(data[204:])
 		g.Skipped = be.Uint32(data[208:])
+	}
+	if ver >= 3 {
+		copy(g.pbfHash[:], data[hPBFHash:hPBFHash+32])
+		g.buildUnix = be.Uint32(data[hBuildUnix:])
+		if off := be.Uint64(data[hMetaOff:]); off > 0 && off < uint64(len(data)) {
+			g.meta = parseMeta(data[off:])
+		}
 	}
 
 	g.NodeCount = be.Uint32(data[8:])
@@ -249,6 +275,14 @@ type Builder struct {
 	RestSkipped        uint32
 	MinLat, MinLon     float64
 	MaxLat, MaxLon     float64
+
+	// Provenance (written as format v3). PBFHash is the SHA-256 of the
+	// source extract; BuildUnix the build timestamp; Meta is a free-form
+	// key=value blob stored after the last section (source, profile hash,
+	// extractor version, order, grid step, ...).
+	PBFHash   []byte
+	BuildUnix uint32
+	Meta      map[string]string
 }
 
 // BuildGrid creates the uniform grid used for snapping.
@@ -360,6 +394,28 @@ func (b *Builder) Write(path string) error {
 		cur = align8(cur + sizes[i])
 	}
 
+	// Build the metadata blob up front: sorted key=value lines, appended
+	// after the last section and pointed to by the header.
+	metaOff := uint64(0)
+	var metaBlob []byte
+	if len(b.Meta) > 0 {
+		keys := make([]string, 0, len(b.Meta))
+		for k := range b.Meta {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var mb bytes.Buffer
+		for _, k := range keys {
+			v := b.Meta[k]
+			if strings.ContainsAny(k, "=\n") || strings.Contains(v, "\n") {
+				return fmt.Errorf("graph: bad metadata %q=%q", k, v)
+			}
+			fmt.Fprintf(&mb, "%s=%s\n", k, v)
+		}
+		metaBlob = mb.Bytes()
+		metaOff = align8(cur)
+	}
+
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -380,6 +436,9 @@ func (b *Builder) Write(path string) error {
 	be.PutUint32(hdr[200:], uint32(len(b.Ban)))
 	be.PutUint32(hdr[204:], uint32(len(b.Only)))
 	be.PutUint32(hdr[208:], b.RestSkipped)
+	copy(hdr[hPBFHash:], b.PBFHash)
+	be.PutUint32(hdr[hBuildUnix:], b.BuildUnix)
+	be.PutUint64(hdr[hMetaOff:], metaOff)
 	c := uint64(32)
 	hdrF64(hdr, &c, b.GridLat0)
 	hdrF64(hdr, &c, b.GridLon0)
@@ -491,10 +550,91 @@ func (b *Builder) Write(path string) error {
 			return err
 		}
 	}
+	if len(metaBlob) > 0 {
+		if err := pad(metaOff); err != nil {
+			return err
+		}
+		if _, err := bw.Write(metaBlob); err != nil {
+			return err
+		}
+	}
 	if err := bw.Flush(); err != nil {
 		return err
 	}
 	return f.Sync()
+}
+
+// parseMeta decodes the key=value metadata blob.
+func parseMeta(b []byte) map[string]string {
+	m := make(map[string]string, 16)
+	for len(b) > 0 {
+		nl := bytes.IndexByte(b, '\n')
+		if nl < 0 {
+			nl = len(b)
+		}
+		line := b[:nl]
+		b = b[nl:]
+		if len(b) > 0 {
+			b = b[1:]
+		}
+		if eq := bytes.IndexByte(line, '='); eq > 0 {
+			m[string(line[:eq])] = string(line[eq+1:])
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// PBFHashHex returns the hex SHA-256 of the source extract, or "" for graphs
+// built before format v3.
+func (g *Graph) PBFHashHex() string {
+	var zero [32]byte
+	if g.pbfHash == zero {
+		return ""
+	}
+	return hex.EncodeToString(g.pbfHash[:])
+}
+
+// BuildTime returns the build timestamp of the graph, or the zero time when the
+// file predates format v3.
+func (g *Graph) BuildTime() time.Time {
+	if g.buildUnix == 0 {
+		return time.Time{}
+	}
+	return time.Unix(int64(g.buildUnix), 0).UTC()
+}
+
+// Meta returns the free-form provenance map (nil for v1/v2 files).
+func (g *Graph) Meta() map[string]string { return g.meta }
+
+// MetaValue returns one metadata field, or "" if absent.
+func (g *Graph) MetaValue(k string) string { return g.meta[k] }
+
+// Provenance is a JSON-friendly view of how a graph file was produced.
+type Provenance struct {
+	PBFHash   string            `json:"pbf_sha256,omitempty"`
+	BuiltAt   string            `json:"built_at,omitempty"`
+	Fields    map[string]string `json:"fields,omitempty"`
+	Format    uint32            `json:"format"`
+	Canonical string            `json:"canonical,omitempty"`
+}
+
+// Provenance summarises the metadata needed to audit a graph file.
+func (g *Graph) Provenance() Provenance {
+	p := Provenance{PBFHash: g.PBFHashHex(), Fields: g.meta}
+	if t := g.BuildTime(); !t.IsZero() {
+		p.BuiltAt = t.Format(time.RFC3339)
+	}
+	if g.d != nil {
+		p.Format = binary.LittleEndian.Uint32(g.d[4:])
+	}
+	p.Canonical = p.PBFHash
+	if len(p.Canonical) > 12 {
+		p.Canonical = p.Canonical[:12]
+	}
+	return p
 }
 
 func hdrF64(d []byte, c *uint64, v float64) {

@@ -22,7 +22,47 @@
               "pm.test('200', () => pm.response.to.have.status(200));",
               "const j = pm.response.json();",
               "pm.test('dua region', () => pm.expect(j.regions.map(r => r.name)).to.eql(['java','sumatra']));",
-              "console.log(j.regions.map(r => r.name + ':' + r.nodes).join(', '));"
+              "console.log(j.regions.map(r => r.name + ':' + r.nodes).join(', '));",
+              "const r = pm.response.json().regions[0];",
+              "pm.test('format >= 3 (provenance ada)', () => pm.expect(r.format).to.be.at.least(3));",
+              "pm.test('pbf_sha256 64 hex', () => pm.expect(r.pbf_sha256).to.match(/^[0-9a-f]{64}$/));",
+              "pm.test('built_at terisi', () => pm.expect(r.built_at).to.be.a('string').and.not.empty);",
+              "pm.test('profile_sha256 terisi', () => pm.expect(r.profile_sha256).to.be.a('string').and.not.empty);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1b. version (commit + build time)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://192.168.1.219:8080/version",
+          "protocol": "http",
+          "host": [
+            "192",
+            "168",
+            "1",
+            "219"
+          ],
+          "port": "8080",
+          "path": [
+            "version"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "const v = pm.response.json();",
+              "pm.test('commit terisi', () => pm.expect(v.commit).to.be.a('string').and.not.empty);",
+              "pm.test('built_at terisi', () => pm.expect(v.built_at).to.be.a('string').and.not.empty);"
             ]
           }
         }
