@@ -160,6 +160,16 @@ menampilkan RPS/p95/fallback.
 | request pendek saat 2 slot penuh, `-timeout 1s` | selesai 813 ms |
 | request pendek saat 2 slot penuh, `-timeout 20s` | selesai 2.596 ms |
 | 10 request cepat, `-rate 15 -burst 5` | 5x `200`, lalu `429` + `Retry-After: 4` |
+| 1 rute + 7 revalidasi (`-burst 3`) | `200 304 304 304 304 304 304 304` |
+| 6 rute penuh, tag basi (`-burst 3`) | `200 200 200 429 429 429` |
+
+Di homelab (setelah deploy `49e5279`): 304 p50 **0,6 ms** vs rute penuh 93 ms,
+`Cache-Control: public, max-age=3600`, `/metrics` 48 baris.
+
+**Temuan yang mengubah implementasi:** rate limiter semula dipasang sebelum
+pengecekan `ETag`, sehingga revalidasi ikut memakai token. Sekarang limiter
+dipanggil *setelah* `ETag`: hit cache tidak memakai budget rute, karena ia juga
+tidak menyentuh workspace.
 
 Artinya deadline bukan cuma mengubah status: ia mengembalikan slot ke antrean,
 jadi satu klien yang meminta rute 148 km tidak lagi "menyandera" server selama
