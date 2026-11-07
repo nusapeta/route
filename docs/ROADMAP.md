@@ -28,14 +28,15 @@ butuh argumen eksplisit dan milestone sendiri.
 
 | metrik | sekarang (terukur) | target M3 | batas keras |
 |---|---|---|---|
-| RSS idle (2 region termuat) | 15 MB | <= 20 MB | 32 MB |
+| RSS idle (3 region termuat, v4) | **14,9 MB** | <= 20 MB | 32 MB |
 | Binary statis | 6,6 MB | <= 8 MB | 12 MB |
 | Image container | 23 MB | <= 25 MB | 40 MB |
 | Start sampai `/healthz` 200 | 10 ms | <= 25 ms | 100 ms |
 | Preprocess per pulau | 58 s | <= 90 s | 5 menit |
 | RSS @ beban 42 km, `-conc 4` | 558 MB | <= 350 MB | 700 MB |
 | Throughput 42 km (i3-6100T) | 10,9 RPS | >= 20 RPS | - |
-| Densitas | 19,5 RPS/GB | >= 45 RPS/GB | - |
+| Densitas | 19,5 RPS/GB (v3) -> **~240 RPS/GB** (v4: 15 RPS / 64 MB) | >= 45 RPS/GB | - |
+| Artefak graph per pulau | **693 MB** (Java, v4; -32 %) | <= 800 MB | 1 GB |
 | p95 klien 42 km, `-conc 4` | 439 ms | <= 400 ms | 800 ms |
 | Galat ujung rute (snap) | **p50 16 m, p95 36 m** (offset uji <=40 m) | p50 <= 20 m, p95 <= 60 m | p95 150 m |
 | Pelanggaran turn restriction | 0 (3,17% fallback) | 0 (fallback <= 1%) | 0 |
@@ -175,7 +176,7 @@ Artinya deadline bukan cuma mengubah status: ia mengembalikan slot ke antrean,
 jadi satu klien yang meminta rute 148 km tidak lagi "menyandera" server selama
 beberapa detik.
 
-### M5 — Cakupan (3-4 hari)
+### M5 — Cakupan — SELESAI (kecuali stitching antar-file, BACKLOG 17b)
 
 - [x] Profil motor (`-profile motor`): tabel kecepatan sendiri, `motorcycle=no`
       menang atas apa pun, `motor_vehicle=no` **tidak** memblokir motor (motor

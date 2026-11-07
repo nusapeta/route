@@ -369,6 +369,12 @@ Selisih RPS "sebelum" dengan baris tabel di atas berasal dari rute yang berbeda
 bergantian pada mesin dan graph yang sama: **~2x RPS, 1,9x p50, -25% memori**
 (lihat `paper/RESULTS.md` §10-10b).
 
+Sesudah format v4 (M5) di box yang sama: ekspansi tiap rute identik, CPU per
+query turun **1,6-2x**, jadi RPS naik 1,4-1,5x dan p50 turun ~30 % (rasio A/B
+bergantian: v3 9,97-10,58 RPS / p50 361-376 ms vs v4 13,79-16,02 RPS / p50
+223-283 ms pada rute 42 km, `-conc 4`, `paper/RESULTS.md` §12b). Artifak graph
+mengecil 32 % (Java 693 MB) dan RSS diam 64 MiB.
+
 Sebelum M3, saturasi ada di ~11-12 RPS: pada `-conc 4` CPU terpakai ~3,5
 core-ekuivalen (10,9 query x 0,33 s), jadi menambah container tidak menambah RPS
 selama core fisiknya tetap 2. Sesudah M3 titik jenuhnya naik ke ~4 core lagi

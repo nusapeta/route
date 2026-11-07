@@ -499,3 +499,88 @@ Catatan operasional: dengan `-rate 15/60` sebuah app yang menghitung ulang rute
 sambil menggeser peta akan kena `429` setelah burst. Naikkan `-rate`/`-burst` di
 compose kalau app butuh lebih, atau kirim `If-None-Match` supaya query yang sama
 tidak dihitung.
+
+## 12. Format v4, ferry, profil motor, tangga ε (M5)
+
+Semua angka bab ini diukur 2026-11-07 di box uji 4 core yang **dipakai
+bersama** (load 3-5), jadi absolutnya tidak sebanding dengan §2-§11 di box
+khusus. Yang dilaporkan adalah rasio A/B bergantian pada mesin dan graph yang
+sama.
+
+### 12a. Ukuran artefak (format v4)
+
+`Off` uint32, `Len` uint16 (satuan 4 m), `Cls` uint8 (km/h x 2), section `Time`
+dihapus; waktu tempuh dihitung saat load. Provenance v3 dan daftar ferry
+(sparse) tetap ada.
+
+| graph | v3 (MB) | v4 (MB) | delta |
+|---|---|---|---|
+| java | 1.019 | **693** | -32,0 % |
+| sumatra | 533 | **364** | -31,7 % |
+| tujuh region (nasional) | — | **1.650** | 53,9 M node / 110,2 M edge |
+| java, profil motor | — | 714 | 23,4 M node / 48,2 M edge |
+
+Waktu build (4 worker, `GOMEMLIMIT=4GiB` di box 7 GB): java 3m53s, sumatra
+1m09s, nasional 8m08s.
+
+### 12b. Biaya per query: v3 vs v4
+
+Ekspansi **identik** (rute dan ε sama): Jakarta-Bandung 148 km = 5.586.589
+ekspansi di kedua versi. Yang berubah hanya biaya per ekspansi (node record 20 ->
+12 B, tanpa `Time` 4 B/edge), jadi ini murni cache/bandwidth.
+
+CPU (user) per query, 3 ronde bergantian:
+
+| rute | v3 | v4 | rasio |
+|---|---|---|---|
+| Jakarta-Bandung 148 km | 18,6-22,1 s | 11,7-13,7 s | **1,55-1,66x** |
+| Jakarta-Cikarang 42 km | 2,18-2,39 s | 0,95-1,54 s | **1,6-2,5x** |
+
+Throughput di homelab (i3-6100T, 4 core, `-conc 4`, 42,4 km
+Jakarta-Cikarang, 40 request, 2 ronde, container 1,5 GiB, `-rate 0`):
+
+| | v3 (pre-m5) | v4 | rasio |
+|---|---|---|---|
+| RPS | 9,97-10,58 | **13,79-16,02** | 1,4-1,5x |
+| server p50 | 361-376 ms | **223-283 ms** | -30 % |
+| RSS diam | 79 MiB | **64 MiB** | -19 % |
+
+Catatan: box homelab saat ini menjalankan ~28 container lain, jadi absolutnya
+jauh di bawah §10 (36-40 RPS di box yang sama ketika sepi). Rasionya yang stabil.
+
+### 12c. Ferry dan lintas selat
+
+| query | hasil |
+|---|---|
+| Ketapang -> Gilimanuk (`java.graph`) | 15,1 km / 1436 s, `ferry_m=4284`, `ferry_spans=[[321,329]]` |
+| Denpasar -> Mataram (`nusa-tenggara.graph`) | 134,2 km / 17846 s, `ferry_m=68304` |
+| Merak -> Bakauheni (`indonesia.graph`) | 29,2 km / 5226 s, `ferry_m=28535` |
+| Jakarta -> Medan (`indonesia.graph`) | **2004,5 km / 92963 s**, `ferry_m=29072`, `relaxed=true` |
+
+Waktu ferry diambil dari tag `duration` (jatuh ke 20 km/jam kalau tidak ada):
+Merak-Bakauheni 1,45 jam, Denpasar-Mataram 19 jam termasuk lintasan Lembar.
+
+### 12d. Tangga ε saat budget habis
+
+Koridor >800 km melebihi `maxExpansions` (6 jt) pada ε 1,5. Sebelum menyerah,
+router mencoba ε 2,0 lalu 3,0 dan menandai `relaxed=true` + `epsilon`.
+
+Jakarta-Bandung (148,67 km pada ε 1,5):
+
+| ε | jarak | waktu | ekspansi |
+|---|---|---|---|
+| 1,5 | 148,67 km | 6428 s | 5.586.589 (gagal budget) |
+| 2,0 | 148,62 km (+0,07 %) | 6545 s (+1,8 %) | 103.077 |
+| 2,5 | 155,30 km (+4,4 %) | — | — |
+
+Jadi ε 2,0 praktis gratis untuk rute yang gagal, ε 3,0 hanya dipakai lintas
+pulau (Jakarta -> Medan: 4,81 jt ekspansi, 19,3 s di server dengan `-timeout
+60s`).
+
+### 12e. Multi-region overlap
+
+File Java memuat Bali, file Nusa Tenggara juga. Titik ujung bisa jadi "terdekat
+ke file lain" walau satu file memuat keduanya, yang dulu berakhir `422`. Sekarang
+server mengulang snap di kedua kandidat region dan menghitung
+`route_cross_region_resnapped_total`. Ketapang -> Gilimanuk: `200` dari
+`java.graph` (15,2 km, `ferry_m=4284`).

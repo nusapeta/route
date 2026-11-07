@@ -188,6 +188,18 @@ func (s *server) pickSnap(lat, lon float64) (*region, graph.Snap, bool) {
 	return bestRg, best, true
 }
 
+// snapBoth attaches both endpoints inside one region, which is how a route
+// whose endpoints happen to sit nearest to two overlapping extracts still gets
+// served from a single file.
+func (s *server) snapBoth(rg *region, fLat, fLon, tLat, tLon float64) (graph.Snap, graph.Snap, bool) {
+	a, ok1 := rg.g.SnapEdge(fLat, fLon, s.maxSnapM)
+	b, ok2 := rg.g.SnapEdge(tLat, tLon, s.maxSnapM)
+	if !ok1 || !ok2 {
+		return graph.Snap{}, graph.Snap{}, false
+	}
+	return a, b, true
+}
+
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	type info struct {
 		Name   string  `json:"name"`
@@ -302,12 +314,23 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		httpErr(w, 422, "no road within snap distance (region not loaded?)")
 		return
 	}
-	if rgF != rgT {
-		s.m.errCrossRegion.Add(1)
-		httpErr(w, 422, "cross-region route not supported ("+rgF.name+" -> "+rgT.name+")")
-		return
-	}
 	rg := rgF
+	if rgF != rgT {
+		// Region extracts overlap (the Java file carries Bali, the Nusa Tenggara
+		// file starts there), so the nearest region per endpoint can differ even
+		// when one file holds both ends. Retry inside each candidate before
+		// declaring the route cross-region.
+		if sa, sb, ok := s.snapBoth(rgF, fLat, fLon, tLat, tLon); ok {
+			rg, snapF, snapT = rgF, sa, sb
+		} else if sa, sb, ok := s.snapBoth(rgT, fLat, fLon, tLat, tLon); ok {
+			rg, snapF, snapT = rgT, sa, sb
+		} else {
+			s.m.errCrossRegion.Add(1)
+			httpErr(w, 422, "cross-region route not supported ("+rgF.name+" -> "+rgT.name+")")
+			return
+		}
+		s.m.crossRegionFixed.Add(1)
+	}
 
 	// The deadline follows the client: if it disconnects, req.Context() ends and
 	// the search stops at the next check instead of burning a workspace slot.
