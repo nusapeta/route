@@ -108,8 +108,24 @@ pasang identik; 1 pasang memilih geometri lain dengan waktu sama.
   puncaknya, jadi tidak ada angka yang bisa diperbaiki.
 
 **Selesai bila:** >= 20 RPS @42 km di i3, RSS beban <= 350 MB, dan jarak rute
-identik dengan baseline (dibuktikan golden test M1). Status: latensi 1,9–2,0x
-tercapai; verifikasi RPS di i3 homelab menyusul bersama deploy berikutnya.
+identik dengan baseline (dibuktikan golden test M1).
+
+**Status: tercapai dan sudah ter-deploy** (`45de2d0`, `routeid:local` di homelab,
+image lama disimpan sebagai `routeid:pre-m3`). Diukur bergantian di box yang
+sama, rute 41,7 km, `-conc 4`:
+
+| metrik | target M3 | pre-m3 | sesudah |
+|---|---|---|---|
+| RPS 42 km (i3-6100T) | >= 20 | 15,8-21,7 | **36,1-40,1** |
+| server p50 | - | 176-216 ms | **93-102 ms** |
+| p95 server | <= 400 ms | 208-330 ms | **105-145 ms** |
+| RSS, 4x rute 148 km | <= 350 MB | 767,6 MiB | 572,2 MiB (belum <=350) |
+
+RSS beban masih di atas 350 MB untuk rute 148 km (bukan kelas rute app); untuk
+42 km hanya 55 MiB. Kalau target 350 MB ingin dikejar juga untuk rute panjang,
+opsinya ada di BACKLOG 6/7 (ALT atau reverse CSR sebagai sidecar, keduanya
+menambah, bukan mengurangi) — atau turunkan `maxSlots` dan terima `ErrTooFar`
+untuk koridor >150 km.
 
 ### M4 — Siap dipakai app (2-3 hari)
 

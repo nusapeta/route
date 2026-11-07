@@ -371,3 +371,46 @@ suboptimal).
 
 Puncak memori workspace ikut turun: tabel maksimum 2^25 slot, 12 B/slot =
 **403 MB/query** (sebelumnya 537 MB/query).
+
+### 10b. Konfirmasi di homelab (i3-6100T, 4 thread, container 1,5 GiB)
+
+Deploy nyata: `routeid:local` diganti build `45de2d0` (commit tercatat di
+`/version`), `-conc 4`, `GOMEMLIMIT=1GiB`. Image lama disimpan sebagai
+`routeid:pre-m3` dan dijalankan berdampingan di port lain supaya A/B-nya
+sekaligus mesin, graph, dan page cache.
+
+Rute 41,7 km (`-7.685807,111.504115` -> `-7.968214,111.468762`),
+`scripts/loadtest.py -c 4 -n 20`, dua binary diukur bergantian:
+
+| ronde | pre-m3 RPS | m3 RPS | pre-m3 p50 | m3 p50 |
+|---|---|---|---|---|
+| 1 | 15,84 | 35,73 | 216 ms | 99 ms |
+| 2 | 18,79 | 40,08 | 181 ms | 93 ms |
+| 3 | 21,70 | 39,89 | 176 ms | 95 ms |
+
+Sesudah promosi (container hidup, tiga ronde lagi): **36,1 / 38,9 / 38,6 RPS**,
+p50 96-102 ms, p95 105-123 ms — naik **~2,05x** dari median pre-m3 (18,8 RPS).
+p95 400 ms yang jadi target M4 sudah lewat jauh di angka ini.
+
+Memori terukur (`docker stats`, setelah beban yang sama):
+
+| beban | pre-m3 | m3 | delta |
+|---|---|---|---|
+| 4x rute 148 km Jakarta-Bandung, `-conc 4` | 767,6 MiB | **572,2 MiB** | -25,5% |
+| 4x rute 41,7 km, `-conc 4` | 70,9 MiB | 54,8 MiB | -22,8% |
+
+Penghematan 25% itu persis rasio slot 12/16 B; puncak 148 km turun dari 75%
+limit 1,5 GiB ke 56%, jadi ada ruang untuk `-conc` lebih tinggi atau graph
+ketiga.
+
+Cek jawaban lintas-versi di box yang sama (rute berbeda, satu request):
+
+| rute | pre-m3 | m3 | selisih |
+|---|---|---|---|
+| Medan-Binjai | 22.684 m / 1215,6 s | 22.656 m / 1212,5 s | -28 m / -0,26% |
+| Palembang 4,6 km | 4.564 m / 233,5 s | 4.560 m / 232,7 s | -4 m / -0,34% |
+| Jakarta-Cikarang | 40.659 m / 1940,8 s | 40.646 m / 1934,7 s | -13 m / -0,31% |
+| Jakarta-Bandung | 148.518 m / 6423,7 s | 148.523 m / 6424,0 s | +5 m / +0,00% |
+
+Rute 148 km (Jakarta-Bandung) juga ikut membaik: p50 5.038 -> 3.657 ms (1,38x),
+karena biaya per ekspansi yang turun tetap terasa walau frontier-nya besar.

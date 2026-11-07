@@ -319,16 +319,26 @@ Load test: `scripts/loadtest.py`.
 Kalau rute dibatasi maksimum 40 km (batas desain aplikasi), acuan yang dipakai
 adalah baris 42 km (Jakarta -> Cikarang), bukan 148 km:
 
-| `-conc` | RPS | server p50 | p95 klien |
-|---|---|---|---|
-| 1 | 4,97 | 191 ms | 224 ms |
-| 2 | 8,72 | 219 ms | 251 ms |
-| 4 | 10,93 | 326 ms | 439 ms |
-| 8 | 11,76 | 628 ms | 744 ms (antre) |
+Angka sebelum M3 (baris 42 km Jakarta -> Cikarang, `-conc 4`): RPS puncak
+**10,9**, server p50 326 ms. Sesudah M3, di box yang sama, rute 41,7 km dengan
+`-conc 4` dan `scripts/loadtest.py`:
 
-Saturasi di ~11–12 RPS: pada `-conc 4`, CPU terpakai ~3,5 core-ekuivalen
-(rata-rata 10,9 query x 0,33 s), jadi menambah container tidak menambah RPS
-selama core fisiknya tetap 2.
+| | sebelum | sesudah |
+|---|---|---|
+| RPS | 15,8-21,7 | **36,1-40,1** |
+| server p50 | 176-216 ms | **93-102 ms** |
+| p95 server | 208-330 ms | **105-145 ms** |
+| RSS beban (4x 148 km) | 767,6 MiB | **572,2 MiB** |
+
+Selisih RPS "sebelum" dengan baris tabel di atas berasal dari rute yang berbeda
+(Jakarta -> Cikarang 40,7 km vs 41,7 km Surabaya); yang penting rasionya, diukur
+bergantian pada mesin dan graph yang sama: **~2x RPS, 1,9x p50, -25% memori**
+(lihat `paper/RESULTS.md` §10-10b).
+
+Sebelum M3, saturasi ada di ~11-12 RPS: pada `-conc 4` CPU terpakai ~3,5
+core-ekuivalen (10,9 query x 0,33 s), jadi menambah container tidak menambah RPS
+selama core fisiknya tetap 2. Sesudah M3 titik jenuhnya naik ke ~4 core lagi
+(38,6 query x 0,1 s = 3,9 core-ekuivalen).
 
 Catatan penting:
 
