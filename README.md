@@ -42,18 +42,25 @@ dan preprocess, bukan latency.
 1. **Footprint kecil & deterministik.** Idle **12,8 MB** dengan Java + Sumatra
    termuat (v4; **17 MB** untuk Java saja di E1), image 24 MB, start sampai
    `/healthz` 200 dalam **10 ms**; OSRM idle 2,36 GiB. Cocok untuk homelab atau
-   sidecar — Java setelah 600 query campuran naik ke 815 MB, jadi box 1 GB
-   terlalu mepet untuk beban itu.
+   sidecar — setelah 600 query campuran di E1 RSS naik ke 815 MB, jadi box
+   1 GB terlalu mepet untuk beban itu. Kenaikan itu **bukan** halaman graf:
+   tabel workspace 12 B/slot tumbuh mengikuti edge unik yang dikunjungi rute
+   terpanjang dan tidak mengecil sampai proses restart (lihat butir 4).
 2. **Pipeline sesederhana tuntutan:** satu binary statis (6,6 MB), tanpa
    dependency runtime, tanpa profile Lua. `osm.pbf -> map.graph` **28 s untuk
    Jawa** (E1) vs 250 s pipeline OSRM, jadi rebuild bulanan itu sepele.
 3. **Multi-region satu proses.** Java + Sumatra + Bali/Nusra termuat bersama,
    region dipilih dari snap terdekat (bukan dari bbox request), dan dua file yang
    tumpang tindih diresnap ke satu file yang memuat kedua ujungnya.
-4. **Memori mengikuti halaman tersentuh, bukan ukuran file.** Graph 1,06 GB
-   (Java 693 MB + Sumatra 364 MB) di-`mmap`; idle 12,8 MB, puncak **399 MB**
-   pada 4 rute 148 km paralel (`-conc 4`), **815 MB** setelah 600 pasangan
-   campuran di E1 — OSRM 2,45 GiB untuk beban yang sama.
+4. **Idle kecil karena graf `mmap` belum tersentuh; biaya sebenarnya tabel
+   pencarian.** Graph 1,06 GB (Java 693 MB + Sumatra 364 MB) di-`mmap`, jadi
+   idle 12,8 MB dan puncak **399 MB** pada 4 rute 148 km paralel (`-conc 4`),
+   **815 MB** setelah 600 pasangan campuran di E1 — OSRM 2,45 GiB untuk beban
+   yang sama. Pengukuran ulang (3 region, `-conc 4`): halaman file/mmap yang
+   resident hanya ~45 MB; sisa RSS adalah tabel workspace `keys`/`gs`/`came`
+   12 B/slot per slot konkurensi **per region**, yang dobel saat load 80%
+   (rute 148 km, 3,16 jt ekspansi → 4 M slot = 48 MB/slot) dan kapasitasnya
+   bertahan di pool sampai restart. Frontier heap A* cuma ~25 ribu item.
 5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
    dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
    hanya 3,17% pada data uji.

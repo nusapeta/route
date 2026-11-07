@@ -680,6 +680,18 @@ Angka OSRM dari `docker stats --no-stream`; keduanya memakai mmap sehingga RSS
 ikut menghitung halaman file yang tersentuh, bukan hanya heap. RSS routeid
 setelah start diukur dari proses terpisah (`-addr :8081`), lalu dimatikan.
 
+Instrumentasi 2026-11-08 (server 3 region, `-conc 4`, `GOMEMLIMIT=1GiB`; rute
+Jakarta-Bandung 148 km dan Banda Aceh-Medan 579 km) menunjukkan komposisi RSS
+routeid: cgroup `anon` 612 MB + `file` 45 MB + kernel 3 MB = 629 MiB, sementara
+halaman graf yang resident hanya ~45 MB. Sumber `anon` adalah tabel workspace
+(`keys`/`gs`/`came`, 12 B/slot): tabel dobel saat load 80% dan tidak mengecil
+sampai restart, jadi satu slot menahan 4 M slot = 48 MB setelah rute 148 km
+(3,16 jt ekspansi) atau 579 km (1,93 jt ekspansi). Frontier heap A* maksimum
+hanya 25.621 item (~0,2 MB), jadi frontier bukan penyebabnya. `NewRouter`
+dipanggil per region, sehingga batas memori = jumlah region x `-conc` x tabel
+terbesar; `maxSlots` 1<<25 berarti 384 MiB/slot pada kasus terburuk. Efek
+`GOMEMLIMIT` kecil: 1 GiB -> `anon` 516 MB, 512 MiB -> 459 MB.
+
 ### 13e. Reproduksi
 
 ```bash

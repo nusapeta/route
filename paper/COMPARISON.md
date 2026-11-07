@@ -45,9 +45,9 @@ tetap menunggu E2.
 |---|---|
 | "lebih cepat dari OSRM" | E1 sudah jalan: OSRM menang latency (p50 1,4 ms vs 35 ms; p95 3,4 ms vs 522 ms) |
 | "lebih akurat" | E2 belum ada ground truth. E1 hanya perbandingan antar-engine; p95 selisih jarak 21% (gerbang 12% gagal) |
-| "RSS lebih kecil dari OSRM" tanpa angka | terukur (17 MB vs 2,36 GiB idle; 815 MB vs 2,45 GiB setelah 600 pasangan), tetapi harus menyebut mesin, beban, dan bahwa RSS memuat halaman mmap |
+| "RSS lebih kecil dari OSRM" tanpa angka | terukur (17 MB vs 2,36 GiB idle; 815 MB vs 2,45 GiB setelah 600 pasangan), tetapi harus menyebut mesin, beban, dan bahwa RSS memuat halaman mmap plus tabel workspace yang tidak mengecil |
 | "siap untuk seluruh Indonesia" | tujuh pulau sudah terbangun, tapi rute antar-file masih ditolak (`422`) kecuali satu graph nasional 1.650 MB dipakai |
-| "hemat memori" tanpa kualifikasi | heap tumbuh mengikuti rute terpanjang x `-conc`; E1: 815 MB setelah 600 pasangan campuran |
+| "hemat memori" tanpa kualifikasi | tabel workspace 12 B/slot tumbuh mengikuti edge unik rute terpanjang, dikali region x `-conc`, dan bertahan sampai restart; E1: 815 MB setelah 600 pasangan campuran |
 
 ## 3. Worksheet E1 (OSRM MLD, mesin sama) — terisi
 
@@ -63,7 +63,7 @@ kedua engine <=50 m di kedua ujung. Rincian: `RESULTS.md` §13.
 | total preprocess | **28 s** | **250 s** | | ~9x |
 | ukuran artefak | **693.111.912 B** (693 MB) | **5.082.571.256 B** (4,73 GiB) | | 7,3x; `.osrm*` banyak file |
 | RSS sebelum query | 17.280 kB | 2,362 GiB | | `docker stats`; mmap ikut terhitung |
-| RSS setelah 600 pasangan | 815.312 kB | 2,451 GiB | | puncak bukan diukur serentak |
+| RSS setelah 600 pasangan | 815.312 kB | 2,451 GiB | | puncak bukan diukur serentak; didominasi tabel workspace, bukan halaman graf |
 | p50 0-5 km | 3,6 ms | 0,7 ms | | 86 pasang |
 | p50 5-15 km | 19,7 ms | 1,1 ms | | 73 pasang |
 | p50 15-30 km | 54,7 ms | 1,7 ms | | 67 pasang |
