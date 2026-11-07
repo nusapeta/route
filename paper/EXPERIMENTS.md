@@ -7,6 +7,12 @@ Urut berdasarkan dampak ke kredibilitas.
 Paper sekarang **tidak** punya pembanding terkontrol. Tanpa ini, klaim
 "lebih ringan" hanya sebanding dengan angka yang dilaporkan orang lain.
 
+**Status (2026-11-07):** belum dijalankan. Sudah dibungkus jadi skrip yang bisa
+dijalankan di mesin lain: `scripts/m6-osrm.sh` (build + peak RSS + ukuran
+artefak) dan `scripts/m6-compare.py` (601 pasangan identik, routeid vs OSRM
+bergantian). Kebutuhan RAM/disk, resep, dan definisi selesai: **`docs/M6.md`**.
+Perintah manual di bawah tetap sah sebagai acuan.
+
 ```bash
 # perlu user masuk grup docker (atau sudo)
 sudo usermod -aG docker $USER   # logout/login
@@ -45,6 +51,10 @@ identik, dengan jumlah query sukses yang sama.
 ## E2. Validasi akurasi terhadap referensi (WAJIB untuk klaim "akurat")
 
 Butuh Google Routes API key + billing (atau Mapbox/HERE sebagai pembanding kedua).
+Status: **belum**, dan tidak bisa digantikan E1 (OSRM memakai graf OSM yang sama).
+Kalau key tidak tersedia, opsi jujur: 60 pasang manual lewat Google Maps, atau
+nyatakan E2 di luar cakupan dan jaga abstrak tetap tanpa kata "akurat" (kondisi
+paper saat ini). Lihat `docs/M6.md` §E2.
 
 Rencana:
 1. Ambil 300–500 pasangan dari `pairs-java.csv` (semua bucket ≤50 km).

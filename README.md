@@ -32,17 +32,19 @@ tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
 
 ### Keunggulan yang bisa dipertahankan
 
-1. **Footprint kecil & deterministik.** Idle 15 MB (`RssAnon` 7 MB), image 23 MB,
-   start sampai `/healthz` 200 dalam **10 ms** — cocok untuk homelab, sidecar,
-   atau box RAM 1 GB.
+1. **Footprint kecil & deterministik.** Idle **12,8 MB** dengan Java + Sumatra
+   termuat (14,9 MB untuk tiga region), image 24 MB, start sampai `/healthz` 200
+   dalam **10 ms** — cocok untuk homelab, sidecar, atau box RAM 1 GB.
 2. **Pipeline sesederhana tuntutan:** satu binary statis (6,6 MB), tanpa
    dependency runtime, tanpa profile Lua. `osm.pbf -> map.graph` dalam ~1 menit
    per pulau, jadi rebuild bulanan itu sepele.
-3. **Multi-region satu proses.** Java + Sumatra termuat bersama (357 MB RSS),
-   region dipilih dari snap terdekat, bukan dari bbox request.
-4. **Memori mengikuti beban, bukan ukuran data.** Graph 1,48 GB di-`mmap` dan
-   hanya halaman yang tersentuh yang masuk RSS; setelah 29 rute panjang 1,04 GB
-   (876 MB heap workspace A*, bisa dibatasi `-conc` dan `GOMEMLIMIT`).
+3. **Multi-region satu proses.** Java + Sumatra + Bali/Nusra termuat bersama,
+   region dipilih dari snap terdekat (bukan dari bbox request), dan dua file yang
+   tumpang tindih diresnap ke satu file yang memuat kedua ujungnya.
+4. **Memori mengikuti beban, bukan ukuran data.** Graph 1,06 GB
+   (Java 693 MB + Sumatra 364 MB) di-`mmap`, dan hanya halaman yang tersentuh
+   masuk RSS: idle 12,8 MB, puncak **399 MB** pada 4 rute 148 km paralel
+   (`-conc 4`; heap workspace A* bisa dibatasi `-conc` dan `GOMEMLIMIT`).
 5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
    dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
    hanya 3,17% pada data uji.
@@ -50,7 +52,9 @@ tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
    metropolitan 1.225 -> 675 MB (1,8x) dan p50 7-20% lebih cepat; weighted A*
    `eps=1.5` 28% lebih cepat dari `eps=1.0` dengan 526/526 panjang rute identik.
 7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 67 RPS @7 km,
-   17 RPS @15 km, 11 RPS @42 km, saturasi di 4 query paralel.
+   17 RPS @15 km, dan 42 km **13,8-16,0 RPS** pada pengukuran v4 terakhir
+   (sebelumnya 11 RPS), saturasi di 4 query paralel. Angka-angka ini
+   perbandingan antar-versi routeid, **belum** head-to-head dengan OSRM (M6).
 
 ### Batasan (jangan diklaim lebih)
 
@@ -62,8 +66,11 @@ tanpa CH/MLD rute jauh melambat (148 km = 4,2 s; 579 km = 2,2 s), jadi batas
   satu graph (mis. ferry Ketapang-Gilimanuk di `java.graph`); rute antar-file
   (Merak -> Bakauheni dengan `java.graph` + `sumatra.graph`) masih `422`.
 - `restriction:conditional` dan vehicle-class dihitung tapi belum diterapkan.
-- **Belum ada validasi akurasi terhadap referensi independen** (E2). Jarak sudah
-  dicek terhadap itineari yang dikenal, bukan uji statistik.
+- **Belum ada head-to-head dengan OSRM** (E1) **dan belum ada validasi akurasi
+  terhadap referensi independen** (E2). Jadi README ini tidak mengklaim
+  "tercepat" maupun "paling akurat": yang terukur baru biaya per rute. Resep
+  menjalankan kedua uji itu (dan apa yang harus diterima kalau OSRM ternyata
+  lebih cepat) ada di `docs/M6.md`.
 - Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
 
 ## Roadmap
@@ -79,6 +86,8 @@ p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
 | M2 | snap ke ruas (bukan node) | galat ujung p50 <= 20 m, p95 <= 60 m |
 | M3 | biaya per ekspansi (heuristik, workspace 12 B/slot, heap 4-ary); ALT ditunda karena memori | latensi 1,9-2,0x, dalam box uji; RPS i3 menyusul deploy |
 | M4 | timeout, rate limit, `/metrics`, ETag | tak ada request menahan slot >10 s |
+| M5 ✅ | format v4 (Java 693 MB), ferry, profil motor, tangga ε, 7 region | rute lintas pulau `200` dengan penanda ferry |
+| M6 ⬜ | baseline OSRM + ground truth di mesin lain | tiap klaim di README punya angka pendukung |
 | M5 | profil motor, semua pulau, ferry, artefak <= 800 MB | 7 region terbangun, ferry ditandai, Java 693 MB |
 | M6 | E1 baseline OSRM, E2 ground truth | tabel komparasi terisi angka nyata |
 
@@ -419,16 +428,18 @@ Ketujuh region Geofabrik terbangun (format v4, profil mobil; disk = artefak):
 | region | node | edge | disk | build (4 worker) |
 |---|---|---|---|---|
 | java | 22,7 M | 46,7 M | **693 MB** | 3m53s |
-| sumatra | 11,9 M | 24,3 M | **364 MB** | 1m09s |
-| kalimantan | 7,1 M | 14,2 M | **215 MB** | 51s |
+| sumatra | 11,9 M | 24,3 M | **364 MB** | 1m54s |
+| kalimantan | 7,1 M | 14,2 M | **215 MB** | 56s |
 | sulawesi | 5,9 M | 11,7 M | **173 MB** | 45s |
 | nusa-tenggara (Bali-Nusra) | 5,2 M | 10,3 M | **153 MB** | 51s |
 | maluku | 0,8 M | 1,6 M | **25 MB** | 8s |
 | papua | 1,1 M | 2,2 M | **34 MB** | 8s |
 | nasional (7 region, satu file) | 53,9 M | 110,2 M | **1.650 MB** | 8m08s |
 
+Diukur di box 4 core yang dipakai bersama (4 worker, `GOMEMLIMIT=4GiB`), jadi
+angka build ini lebih lambat daripada satu region sendirian di mesin sepi.
 Profil motor membesar sedikit karena gang/`path` yang boleh dilalui motor ikut
-masuk: `java-motor` 714 MB (23,4 M node / 48,2 M edge).
+masuk: `java-motor` 682 MB (23,4 M node / 48,2 M edge, 4m01s).
 
 Cek sehat graph per region sebelum dipakai (snap per titik + peta lubang):
 
@@ -481,7 +492,8 @@ cmd/rid-snapcheck    ukur galat snapping (node vs ruas)
 internal/extract     parsing OSM, profil mobil, restriction, urutan Hilbert
 internal/graph       format biner, mmap, snapping, A*
 paper/               draf ACM + RESULTS.md (semua angka) + EXPERIMENTS.md
-scripts/             fetch.sh, build-national.sh, smoke.sh
+scripts/             fetch.sh, build-national.sh, smoke.sh, loadtest.py,
+                     m6-osrm.sh + m6-compare.py (baseline OSRM, lihat docs/M6.md)
 ```
 
 ## Test

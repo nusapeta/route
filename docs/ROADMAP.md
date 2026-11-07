@@ -248,14 +248,34 @@ angka absolutnya lebih lambat dari §2/RESULTS. Yang diukur adalah rasio A/B
 bergantian: ekspansi identik, CPU per query turun **1,6-2x** (Jakarta-Bandung
 18,6-22,1 s -> 11,7-13,7 s; Jakarta-Cikarang 2,2-2,4 s -> 0,95-1,54 s).
 
-### M6 — Bukti (paper)
+### M6 — Bukti (paper) — BELUM, handoff ke mesin lain
 
-- [ ] E1 baseline OSRM di mesin sama (`paper/EXPERIMENTS.md`).
-- [ ] E2 ground truth 60-200 pasangan (`paper/COMPARISON.md` §4).
+Resep lengkap: **`docs/M6.md`** (kebutuhan mesin, langkah copy-paste, apa yang
+dicatat, definisi selesai). Skripnya sudah ada dan sudah dicoba:
+`scripts/m6-osrm.sh` (extract/partition/customize/serve + peak RSS) dan
+`scripts/m6-compare.py` (601 pasangan identik, routeid vs OSRM bergantian,
+keluaran per bucket + CSV).
+
+Kenapa belum dijalankan: `osrm-extract` Jawa butuh ~4-6 GB RSS; laptop
+pengembangan (i5-7360U, 7,8 GB, swap 15 GB) akan swapping sehingga waktu tidak
+bermakna, dan homelab (8 GB, 28 container lain) membuat latency bising — A/B M5
+di sana turun 36 -> 10 RPS hanya karena beban tetangga.
+
+- [ ] E1 baseline OSRM MLD di mesin sama (`docs/M6.md`).
+- [ ] E2 ground truth 60-200 pasangan (butuh API key Google/Mapbox/HERE, atau 60
+      pasang manual; OSRM bukan ground truth).
 - [ ] Tabel positioning diisi angka nyata, bukan "documented".
 
+**Ekspektasi yang harus diterima sebelum mulai:** OSRM MLD hampir pasti menang
+latency (5-30 ms vs 16-388 ms per bucket). Kemenangan routeid ada di artefak
+(693 MB vs ±1,5-2 GB), RSS di bawah beban, dan kesederhanaan deploy. Kalau hasil
+itu tidak ingin dipublikasikan, alternatifnya bukan membatalkan M6 melainkan
+memindahkannya ke bab "batas yang diketahui" dan menghapus klaim "tercepat" dari
+README.
+
 **Selesai bila:** `paper/COMPARISON.md` tidak lagi punya baris berstatus
-"belum diukur" untuk metrik inti.
+"belum diukur" untuk metrik inti, dan setiap klaim di README punya angka
+pendukungnya.
 
 ## Urutan & ketergantungan
 
