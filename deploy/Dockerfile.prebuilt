@@ -4,6 +4,7 @@
 FROM alpine:3.22
 RUN adduser -D -H -u 65532 routeid && apk add --no-cache ca-certificates
 COPY bin/rid-server /usr/local/bin/rid-server
+COPY bin/rid-gateway /usr/local/bin/rid-gateway
 USER 65532:65532
 EXPOSE 8080
 ENV GOMEMLIMIT=768MiB

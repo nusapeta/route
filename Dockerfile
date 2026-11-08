@@ -12,11 +12,13 @@ COPY . .
 ENV CGO_ENABLED=0
 RUN go build -trimpath \
       -ldflags="-s -w -X main.commit=${COMMIT} -X main.buildTime=${BUILT} -X routeid/internal/extract.Version=${COMMIT}" \
-      -o /out/rid-server ./cmd/rid-server
+      -o /out/rid-server ./cmd/rid-server \
+ && go build -trimpath -ldflags="-s -w" -o /out/rid-gateway ./cmd/rid-gateway
 
 FROM alpine:3.22
 RUN adduser -D -H -u 65532 routeid && apk add --no-cache ca-certificates
 COPY --from=build /out/rid-server /usr/local/bin/rid-server
+COPY --from=build /out/rid-gateway /usr/local/bin/rid-gateway
 USER 65532:65532
 EXPOSE 8080
 # heap ceiling; lower it if the box is small, raise it if you serve very long routes
