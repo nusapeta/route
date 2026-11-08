@@ -198,7 +198,7 @@ respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
 | `GET /route?from=lat,lng&to=lat,lng` | rute. Opsional: `format=json\|points\|geojson\|polyline`, `simplify=<m>`, `pin=1`, `restrictions=0` |
 | `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan provenance (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile_sha256`) |
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
-| `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
+| `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
 
 `/healthz` dan `/version` menjawab "graph dan binary mana yang sedang jalan",
 jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
@@ -207,6 +207,17 @@ jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
 `ferry_m`, `has_ferry`, `ferry_spans` (rentang indeks ke `points`/polyline yang
 bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
 `X-Route-Region`, `X-Route-Trim`.
+
+**Snap cadangan saat ruas terdekat buntu.** Snap hanya melihat geometri, jadi
+pin di taman, halaman berpagar, atau jalan buntu bisa mendarat di ujung yang
+tidak mengarah ke mana pun dan A* langsung menjawab `422 no route`. Untuk itu
+handler mencoba ulang dari ruas terdekat berikutnya: 32 kandidat, melebar ke 512
+kalau semuanya buntu, dan kandidat awal yang hanya menjangkau <= 512 node
+(termasuk dirinya) dilewati karena pencarian dari situ tidak akan pernah sampai.
+Paling banyak 4 pasangan awal-tujuan dicari, sekali, hanya setelah percobaan
+pertama gagal, jadi jalur normal tidak berubah. Keberhasilannya dihitung di
+`route_snap_retry_total`. Sisi tujuan belum bisa diperiksa dengan cara yang sama
+(graf hanya punya CSR maju), jadi pin tujuan di dalam pocket tetap `422`.
 
 ### Cache, batas waktu, batas laju (M4)
 

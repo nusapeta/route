@@ -82,20 +82,40 @@ Tidak ada perubahan format file.
 satu arah), offset ditambahkan sebagai spur lurus, masih garis menyeberang
 bangunan sepanjang `Along`. Menghilangkan ini butuh pseudo-node (opsi 2).
 
-**Sisa keterbatasan kedua (terukur 2026-11-08).** `SnapEdge` memilih ruas
-terdekat tanpa melihat keterhubungan, jadi titik yang jatuh di ujung buntu bisa
-menghasilkan `422 no route` padahal ada jalan lain beberapa ratus meter lagi.
-Di graf Jawa: 3606 komponen / 2290 node tanpa ruas keluar / komponen terbesar
-99,60% node (mobil: 5170 / 2312 / 99,56%). Sampel 200 pasangan koordinat acak di
-bbox Jakarta: mobil
-164 ok / 16 `no route` / 20 anggaran ekspansi habis, motor 174 / 9 / 17; pasangan
-yang sama gagal di kedua profil, jadi bukan soal profil. Contoh: Monas
-(-6.1754,106.8272) di graf motor, node hasil snap tidak punya ruas keluar karena
-ruas lanjutannya ditolak profil motor (alasan di kode hanya bisa salah satu dari:
-`motorcycle`/`access` terlarang, atau `motorway`/`motorway_link`). Perbaikan yang
-masuk akal:
-`SnapEdge` mengembalikan k kandidat, dan handler mencoba kandidat berikutnya bila
-A* mengembalikan `ErrNoRoute`; belum dikerjakan.
+**Sisa keterbatasan kedua (SELESAI sebagian, terukur 2026-11-08).** `SnapEdge`
+memilih ruas terdekat tanpa melihat keterhubungan, jadi titik yang jatuh di ujung
+buntu bisa menghasilkan `422 no route` padahal ada jalan lain beberapa ratus
+meter lagi. Di graf Jawa: 3606 komponen / 2290 node tanpa ruas keluar / komponen
+terbesar 99,60% node (mobil: 5170 / 2312 / 99,56%). Contoh: Monas (-6.1754,106.8272)
+di graf motor. Node hasil snap `16405111` hanya menjangkau 3 node ke depan
+(seluruh komponen lemahnya 62 node, tapi sisanya baru tercapai lewat ruas yang
+mengarah masuk), dan node di luar pocket terdekat ada di 338 m.
+
+**Perbaikan.** `SnapEdges` mengembalikan k kandidat terurut jarak (satu per node,
+kandidat lebih dekat menggantikan yang lebih jauh), `ForwardSize(node, 512)`
+mengukur keterjangkauan maju, dan handler mencoba 4 pasangan kandidat saat A*
+mengembalikan `ErrNoRoute`. Kandidat awal yang hanya menjangkau <= 512 node
+dilewati; kalau seluruh 32 kandidat terdekat begitu (pocket lebih lebar dari
+daftar kandidat), scan diulang sekali dengan 512 kandidat. Kalau tetap kosong,
+urutan jarak murni dipakai supaya jaringan kecil yang sah (pulau) tetap dicoba.
+Percobaan ulang hanya berjalan setelah percobaan pertama gagal, jadi jalur
+normal tidak berubah, dan keberhasilannya dihitung di `route_snap_retry_total`.
+
+**Hasil (200 pasangan acak bbox Jakarta, seed 42, kedua profil).**
+
+| profil | sebelum | sesudah |
+|---|---|---|
+| motor | 190 ok / 6 `no_route` / 4 anggaran habis | 196 / 0 / 4 |
+| mobil | 184 ok / 10 `no_route` / 6 anggaran habis | 193 / 0 / 7 |
+
+Monas di `/route` motor: `422` → `200` (3806 m, snap 338 m). Satu pasangan mobil
+yang sebelumnya `no_route` sekarang berakhir di `too_far` (rute nyata melewati
+batas `-max-route-km` 40 km), jadi `422` anggaran ekspansi tetap 4-7 dan itu
+batasan anggaran, bukan snap.
+
+**Batasan sisa.** Pemeriksaan hanya di sisi awal: graf hanya punya CSR maju, jadi
+"ada yang bisa mencapai tujuan" butuh indeks masuk terbalik (memori atau format
+baru). Pin tujuan di dalam pocket karena itu masih bisa `422 no_route`.
 
 ### 5. Ukur galat snap terhadap oracle (SELESAI, S)
 

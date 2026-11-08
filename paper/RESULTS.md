@@ -455,9 +455,10 @@ dinaikkan untuk melindungi ekor latency.
 IP lain tidak terpengaruh (diuji di `TestLimiterWrap`), dan `X-Forwarded-For`
 hanya dipercaya kalau `-trust-proxy` diberikan.
 
-**/metrics.** 48 baris, tanpa dependensi: jumlah request per kode, histogram
+**/metrics.** 69 baris, tanpa dependensi: jumlah request per kode, histogram
 latency (bucket 10 ms..10 s + `+Inf`), `route_inflight`, `route_expansions_total`,
-`route_fallback_total`, `route_rate_limited_total`, `route_canceled_total`,
+`route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`,
+`route_canceled_total`,
 `route_errors_total{reason=too_far|no_route|snap|cross_region}`, dan
 `routeid_build_info`.
 
