@@ -31,21 +31,20 @@ import (
 // overridable at link time: -X routeid/internal/extract.Version=<git describe>.
 var Version = "0.1.0"
 
-// ProfileHash is a stable digest of the routing profile (per-class fallback
-// speeds plus skipped classes). Two graphs with the same PBF hash but different
-// profile hashes produce different routes, so both are recorded.
-func ProfileHash() string {
+// ProfileHash is a stable digest of one routing profile (name, per-class
+// fallback speeds and skipped classes). Two graphs with the same PBF hash but
+// different profile hashes produce different routes, so both are recorded.
+func ProfileHash(p Profile) string {
 	h := sha256.New()
-	for _, name := range []string{string(ProfileCar), string(ProfileMotor)} {
-		speeds := speedTable(Profile(name))
-		keys := make([]string, 0, len(speeds))
-		for k := range speeds {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			fmt.Fprintf(h, "speed %s %s %.3f\n", name, k, speeds[k])
-		}
+	fmt.Fprintf(h, "profile %s\n", p)
+	speeds := speedTable(p)
+	keys := make([]string, 0, len(speeds))
+	for k := range speeds {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Fprintf(h, "speed %s %.3f\n", k, speeds[k])
 	}
 	skip := make([]string, 0, len(skipHighway))
 	for k := range skipHighway {
@@ -430,7 +429,7 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 		"pbf_bytes":      strconv.FormatInt(pbfBytes, 10),
 		"pbf_sha256":     hex.EncodeToString(pbfHash),
 		"extractor":      Version,
-		"profile_sha256": ProfileHash(),
+		"profile_sha256": ProfileHash(prof),
 		"profile":        string(prof),
 		"max_speed_kmh":  strconv.FormatFloat(float64(maxCls)/graph.SpeedClassScale, 'f', 1, 64),
 		"order":          orderName(opt.Order),
@@ -581,14 +580,48 @@ func uniqueSorted(in []int64) []int64 {
 	return out[:k]
 }
 
+// wayTags is the subset of OSM tags wayProfile reads, filled in one pass so a
+// way costs one scan instead of ten.
+type wayTags struct {
+	access, highway, route     string
+	motorcycle, motorVehicle   string
+	motorcar                   string
+	maxspeed, oneway, junction string
+}
+
+func readWayTags(t osm.Tags) wayTags {
+	var w wayTags
+	for _, kv := range t {
+		switch kv.Key {
+		case "access":
+			w.access = kv.Value
+		case "highway":
+			w.highway = kv.Value
+		case "route":
+			w.route = kv.Value
+		case "motorcycle":
+			w.motorcycle = kv.Value
+		case "motor_vehicle":
+			w.motorVehicle = kv.Value
+		case "motorcar":
+			w.motorcar = kv.Value
+		case "maxspeed":
+			w.maxspeed = kv.Value
+		case "oneway":
+			w.oneway = kv.Value
+		case "junction":
+			w.junction = kv.Value
+		}
+	}
+	return w
+}
+
 // wayProfile decides whether a way is routable for p, at what speed and in
 // which direction.
 func wayProfile(p Profile, tags osm.Tags) (wayInfo, bool) {
-	acc := string(tags.Find("access"))
-	hw := string(tags.Find("highway"))
-	ferry := string(tags.Find("route")) == "ferry"
-	mc := string(tags.Find("motorcycle"))
-	mcOK := permitted(mc)
+	t := readWayTags(tags)
+	ferry := t.route == "ferry"
+	mcOK := permitted(t.motorcycle)
 
 	if p == ProfileMotor {
 		// A motorcycle tag is the most specific statement about this way, so
@@ -596,56 +629,48 @@ func wayProfile(p Profile, tags osm.Tags) (wayInfo, bool) {
 		// case: bikes are banned there, but OSM only tags some sections, so
 		// require an explicit motorcycle=yes instead of trusting silence.
 		switch {
-		case banned(mc):
+		case banned(t.motorcycle):
 			return wayInfo{}, false
 		case mcOK:
 			// allowed regardless of access=no / motor_vehicle=no
-		case banned(acc):
+		case banned(t.access):
 			// access covers every vehicle, a motorcycle included;
 			// motor_vehicle=no does not, bikes are not motor vehicles.
-			if acc != "destination" {
-				return wayInfo{}, false
-			}
-		case hw == "motorway" || hw == "motorway_link":
+			return wayInfo{}, false
+		case t.highway == "motorway" || t.highway == "motorway_link":
 			return wayInfo{}, false
 		}
 	} else {
-		mv := string(tags.Find("motor_vehicle"))
-		mcar := string(tags.Find("motorcar"))
-		if banned(acc) || banned(mv) || banned(mcar) {
-			if !permitted(mv) && !permitted(mcar) && acc != "destination" {
+		if banned(t.access) || banned(t.motorVehicle) || banned(t.motorcar) {
+			if !permitted(t.motorVehicle) && !permitted(t.motorcar) && t.access != "destination" {
 				return wayInfo{}, false
 			}
 		}
 	}
 
-	kmh, isRoad := speedTable(p)[hw]
+	kmh, isRoad := speedTable(p)[t.highway]
 	if !isRoad {
 		switch {
 		case ferry:
 			kmh = 20
-		case p == ProfileMotor && mcOK && !banned(hw):
+		case p == ProfileMotor && mcOK:
 			// motorbike shortcut through a kampung alley / footpath
-			kmh = motorExtraKMH[hw]
+			kmh = motorExtraKMH[t.highway]
 			if kmh == 0 {
 				kmh = 10
 			}
-		case skipHighway[hw]:
-			return wayInfo{}, false
 		default:
 			return wayInfo{}, false
 		}
 	}
 
-	if ms := string(tags.Find("maxspeed")); ms != "" {
-		if v, good := parseSpeedKMH(ms); good {
-			kmh = v
-		}
+	if v, good := parseSpeedKMH(t.maxspeed); good {
+		kmh = v
 	}
 
 	return wayInfo{
 		speed:  kmh,
-		dir:    direction(tags),
+		dir:    direction(t),
 		durSec: ferryDuration(ferry, tags),
 		ferry:  ferry,
 	}, true
@@ -668,8 +693,8 @@ func banned(v string) bool {
 	return false
 }
 
-func direction(tags osm.Tags) int8 {
-	switch one := string(tags.Find("oneway")); one {
+func direction(t wayTags) int8 {
+	switch t.oneway {
 	case "yes", "true", "1":
 		return 1
 	case "-1", "reverse":
@@ -677,7 +702,7 @@ func direction(tags osm.Tags) int8 {
 	case "no", "false", "0":
 		return 0
 	}
-	if j := string(tags.Find("junction")); j == "roundabout" || j == "circular" {
+	if t.junction == "roundabout" || t.junction == "circular" {
 		return 1
 	}
 	return 0
@@ -720,16 +745,29 @@ func ferryDuration(ferry bool, tags osm.Tags) float64 {
 	return sec
 }
 
+// parseSpeedKMH returns an OSM maxspeed value in km/h. The leading number is
+// required; a trailing unit converts it ("mph" only). Any other suffix is
+// rejected, as is a result above 200 km/h, and the caller keeps the class
+// fallback speed.
 func parseSpeedKMH(s string) (float64, bool) {
-	var v float64
+	s = strings.TrimSpace(s)
 	n := 0
-	for n < len(s) && s[n] >= '0' && s[n] <= '9' {
-		v = v*10 + float64(s[n]-'0')
+	for n < len(s) && (s[n] >= '0' && s[n] <= '9' || s[n] == '.') {
 		n++
 	}
-	if n == 0 || v <= 0 || v > 200 {
+	v, err := strconv.ParseFloat(s[:n], 64)
+	if err != nil || v <= 0 {
 		return 0, false
 	}
-	// "mph" suffixes are not used in Indonesia; treat everything as km/h
+	switch strings.ToLower(strings.TrimSpace(s[n:])) {
+	case "", "km/h", "kmh", "kph":
+	case "mph":
+		v *= 1.609344
+	default:
+		return 0, false
+	}
+	if v > 200 {
+		return 0, false
+	}
 	return v, true
 }

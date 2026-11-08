@@ -33,10 +33,35 @@ func TestChainViaGapFails(t *testing.T) {
 }
 
 func TestStatsString(t *testing.T) {
-	s := RestrictionStats{Relations: 10, Usable: 9, ViaNode: 5, Ban: 7, Only: 2}
-	got := s.String()
-	if got == "" || s.Skipped() != 0 {
-		t.Fatalf("unexpected stats %q skipped=%d", got, s.Skipped())
+	cases := []struct {
+		name string
+		s    RestrictionStats
+		want string
+	}{
+		{
+			"no skips",
+			RestrictionStats{Relations: 10, Usable: 9, Missing: 1, ViaNode: 5, Ban: 7, Only: 2},
+			"restrictions: seen=10 usable=9 via_node=5 via_way=0 ban=7 only=2 " +
+				"skipped{not_car=0 not_class=0 missing=1 conditional=0 except=0 bad_type=0 " +
+				"unresolved=0 chain=0 via_way_missing=0 " +
+				"why{no_node=0 not_on_way=0 no_in=0 no_out=0}}",
+		},
+		{
+			"skip counters",
+			RestrictionStats{Relations: 3, Missing: 2, ViaWayMissing: 1},
+			"restrictions: seen=3 usable=0 via_node=0 via_way=0 ban=0 only=0 " +
+				"skipped{not_car=0 not_class=0 missing=2 conditional=0 except=0 bad_type=0 " +
+				"unresolved=0 chain=0 via_way_missing=1 " +
+				"why{no_node=0 not_on_way=0 no_in=0 no_out=0}}",
+		},
+	}
+	for _, c := range cases {
+		if got := c.s.String(); got != c.want {
+			t.Errorf("%s: String() = %q, want %q", c.name, got, c.want)
+		}
+		if got := c.s.Usable + c.s.Skipped(); got != c.s.Relations {
+			t.Errorf("%s: usable+skipped = %d, want Relations %d", c.name, got, c.s.Relations)
+		}
 	}
 }
 

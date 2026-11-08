@@ -3,6 +3,7 @@ package extract
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/paulmach/osm"
@@ -12,21 +13,24 @@ import (
 )
 
 // RestrictionStats counts how the OSM restriction relations were handled.
+// Usable counts stored rules only, and every other counter is a skip reason,
+// so Usable + Skipped() == Relations.
 type RestrictionStats struct {
-	Relations   uint32 // type=restriction relations seen
-	Usable      uint32 // from+to both in the car graph
-	ViaNode     uint32 // resolved through a single via node
-	ViaWay      uint32 // resolved through one or more via ways
-	Only        uint32 // only_* rules stored in the allow list
-	Ban         uint32 // no_* pairs stored in the ban list
-	NotCar      uint32 // relation type or from/to way not usable by this profile
-	NotClass    uint32 // only restriction:<other vehicle class> tags present
-	Missing     uint32 // relation lacks from/to members
-	Conditional uint32 // restriction:conditional (time dependent, not modelled)
-	Except      uint32 // except=motorcar/motor_vehicle/vehicle
-	BadType     uint32 // no usable restriction= or unknown restriction value
-	Unresolved  uint32 // via node not present in the graph / no matching edge
-	ChainFail   uint32 // multi via-way chain could not be ordered
+	Relations     uint32 // type=restriction relations seen
+	Usable        uint32 // from+to resolved and the rule stored in ban/only list
+	ViaNode       uint32 // resolved through a single via node
+	ViaWay        uint32 // resolved through one or more via ways
+	Only          uint32 // only_* rules stored in the allow list
+	Ban           uint32 // no_* pairs stored in the ban list
+	NotCar        uint32 // relation type or from/to way not usable by this profile
+	NotClass      uint32 // only restriction:<other vehicle class> tags present
+	Missing       uint32 // relation lacks from/to members
+	Conditional   uint32 // restriction:conditional (time dependent, not modelled)
+	Except        uint32 // except=motorcar/motor_vehicle/vehicle
+	BadType       uint32 // no usable restriction= or unknown restriction value
+	Unresolved    uint32 // via node not present in the graph / no matching edge
+	ChainFail     uint32 // multi via-way chain could not be ordered
+	ViaWayMissing uint32 // a via way is absent from the graph
 
 	// fine-grained reasons behind Unresolved
 	RNoNode   uint32 // via node id absent from the graph
@@ -36,38 +40,26 @@ type RestrictionStats struct {
 }
 
 func (s *RestrictionStats) String() string {
-	return "restrictions: seen=" + itoa(s.Relations) +
-		" usable=" + itoa(s.Usable) +
-		" via_node=" + itoa(s.ViaNode) +
-		" via_way=" + itoa(s.ViaWay) +
-		" ban=" + itoa(s.Ban) + " only=" + itoa(s.Only) +
-		" skipped{not_car=" + itoa(s.NotCar) +
-		" not_class=" + itoa(s.NotClass) +
-		" missing=" + itoa(s.Missing) +
-		" conditional=" + itoa(s.Conditional) +
-		" except=" + itoa(s.Except) +
-		" bad_type=" + itoa(s.BadType) +
-		" unresolved=" + itoa(s.Unresolved) +
-		" chain=" + itoa(s.ChainFail) +
-		" why{no_node=" + itoa(s.RNoNode) +
-		" not_on_way=" + itoa(s.RNotOnWay) +
-		" no_in=" + itoa(s.RNoIn) +
-		" no_out=" + itoa(s.RNoOut) +
+	u := func(v uint32) string { return strconv.FormatUint(uint64(v), 10) }
+	return "restrictions: seen=" + u(s.Relations) +
+		" usable=" + u(s.Usable) +
+		" via_node=" + u(s.ViaNode) +
+		" via_way=" + u(s.ViaWay) +
+		" ban=" + u(s.Ban) + " only=" + u(s.Only) +
+		" skipped{not_car=" + u(s.NotCar) +
+		" not_class=" + u(s.NotClass) +
+		" missing=" + u(s.Missing) +
+		" conditional=" + u(s.Conditional) +
+		" except=" + u(s.Except) +
+		" bad_type=" + u(s.BadType) +
+		" unresolved=" + u(s.Unresolved) +
+		" chain=" + u(s.ChainFail) +
+		" via_way_missing=" + u(s.ViaWayMissing) +
+		" why{no_node=" + u(s.RNoNode) +
+		" not_on_way=" + u(s.RNotOnWay) +
+		" no_in=" + u(s.RNoIn) +
+		" no_out=" + u(s.RNoOut) +
 		"}}"
-}
-
-func itoa(v uint32) string {
-	if v == 0 {
-		return "0"
-	}
-	var b [10]byte
-	i := len(b)
-	for v > 0 {
-		i--
-		b[i] = byte('0' + v%10)
-		v /= 10
-	}
-	return string(b[i:])
 }
 
 // restView is the read-only view of the built graph that restriction
@@ -290,21 +282,26 @@ func (res *restResult) addRelation(v *restView, r *osm.Relation) {
 		s.NotCar++
 		return
 	}
-	s.Usable++
 
 	only := strings.HasPrefix(kind, "only_")
 
+	stored := false
 	switch {
 	case len(viaWays) > 0:
 		if res.addViaWay(v, wf, wt, viaWays, only) {
 			s.ViaWay++
+			stored = true
 		}
 	case len(viaNodes) > 0:
 		if res.addViaNode(v, wf, wt, viaNodes[0], only) {
 			s.ViaNode++
+			stored = true
 		}
 	default:
 		s.Missing++
+	}
+	if stored {
+		s.Usable++
 	}
 }
 
@@ -358,7 +355,8 @@ func (res *restResult) addViaNode(v *restView, wf, wt int32, viaID int64, only b
 // full path is not expressible as a single banned transition, so we forbid
 // entering the via way from the restricted from-edge. That is conservative:
 // it can block legal exits from the via way too, so callers can retry without
-// restrictions when it causes a no-route.
+// restrictions when it causes a no-route. The ban covers every destination
+// leaving the via way, so wt only gated the from/to presence check above.
 func (res *restResult) addViaWay(v *restView, wf, wt int32, viaIDs []int64, only bool) bool {
 	s := &res.stats
 	if only {
@@ -367,29 +365,48 @@ func (res *restResult) addViaWay(v *restView, wf, wt int32, viaIDs []int64, only
 		s.ChainFail++
 		return false
 	}
-	fr := v.wayNodes(wf)
-	if len(fr) < 2 {
-		s.Unresolved++
-		return false
-	}
-	start := fr[len(fr)-1]
 	seqs := make([][]int64, 0, len(viaIDs))
 	for _, id := range viaIDs {
 		w, ok := v.wayIndex[id]
 		if !ok {
-			s.NotCar++
+			s.ViaWayMissing++
 			return false
 		}
 		seqs = append(seqs, v.wayNodes(w))
 	}
+
+	// The via way can share either endpoint with the from way, and the
+	// junction need not sit at the end of the from way.
+	fr := v.wayNodes(wf)
+	var start int64
+	var in uint32
+	found := false
+	for _, seq := range seqs {
+		if len(seq) < 2 {
+			continue
+		}
+		for _, node := range []int64{seq[0], seq[len(seq)-1]} {
+			i := indexOf(fr, node)
+			if i < 0 {
+				continue
+			}
+			if e, ok := v.inEdge(fr, i); ok {
+				start, in = node, e
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		s.Unresolved++
+		return false
+	}
 	chain, ok := chainVia(seqs, start)
 	if !ok || len(chain) < 2 {
 		s.ChainFail++
-		return false
-	}
-	in, ok := v.edge(fr[len(fr)-2], fr[len(fr)-1])
-	if !ok {
-		s.Unresolved++
 		return false
 	}
 	first, ok := v.edge(chain[0], chain[1])
@@ -449,5 +466,5 @@ func buildWayIndex(wayIDs []int64) map[int64]int32 {
 
 // Skipped is the number of restrictions that could not be represented.
 func (s *RestrictionStats) Skipped() uint32 {
-	return s.NotCar + s.NotClass + s.Missing + s.Conditional + s.Except + s.BadType + s.Unresolved + s.ChainFail
+	return s.NotCar + s.NotClass + s.Missing + s.Conditional + s.Except + s.BadType + s.Unresolved + s.ChainFail + s.ViaWayMissing
 }
