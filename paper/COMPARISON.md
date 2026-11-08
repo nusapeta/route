@@ -71,7 +71,7 @@ kedua engine <=50 m di kedua ujung. Rincian: `RESULTS.md` §13.
 | p50 50-80 km | 397,3 ms | 3,2 ms | | 50 pasang |
 | p95 0-5/…/50-80 km | 14,0 / 68,7 / 226,7 / 478,4 / 1.060,9 ms | 1,1 / 1,7 / 2,3 / 3,0 / 4,5 ms | | |
 | jarak rute: median / p95 / max | **−0,005% / 21,05% / 48,30%** | referensi | | gerbang p95 <12% **gagal**, tetapi bukan gerbang akurasi (§14) |
-| pasangan selisih >10% | 38/332 (11,4%) | — | | 10/332 >25% |
+| pasangan selisih >10% | 38/332 (11,4%) | n/a | | 10/332 >25% |
 | routeid 422 | 81/600 (72 snap, 7 budget, 2 no-route) | 0 error | | OSRM snap tujuan p50 14,7 km pada 81 itu |
 | turn restriction ditegakkan | 3.790 ban, 593 di-skip | `car.lua` | | audit `RESULTS.md` §14: bukan penyebab p95 jarak |
 | penalti belok | 0,25x tabel (2/7,5/20 s), ETA +1,6% median | `car.lua` `weight` | | `RESULTS.md` §15: p95 tidak turun, badan distribusi membaik |

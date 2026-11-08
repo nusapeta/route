@@ -48,7 +48,7 @@ Pasangan identik (526 query sukses). Excess jarak dihitung per query terhadap
 
 | ε | p50 (15–30 km) | p50 (50–80 km) | excess jarak | rasio latency p50 | p95 |
 |---|---|---|---|---|---|
-| 1.0 | 87.8 ms | 582.6 ms | — (optimal) | 1.00 | 1.00 |
+| 1.0 | 87.8 ms | 582.6 ms | 0 (optimal) | 1.00 | 1.00 |
 | 1.5 | 62.3 ms | 387.6 ms | 0.000 % | 0.72 | 0.89 |
 | 2.0 | 44.7 ms | 222.9 ms | mean −0.13 %, p95 0.000 %, max 11.0 % (1 pasang) | 0.52 | 0.78 |
 
@@ -518,8 +518,8 @@ dihapus; waktu tempuh dihitung saat load. Provenance v3 dan daftar ferry
 |---|---|---|---|
 | java | 1.019 | **693** | -32,0 % |
 | sumatra | 533 | **364** | -31,7 % |
-| tujuh region (nasional) | — | **1.650** | 53,9 M node / 110,2 M edge |
-| java, profil motor | — | 714 | 23,4 M node / 48,2 M edge |
+| tujuh region (nasional) | n/a | **1.650** | 53,9 M node / 110,2 M edge |
+| java, profil motor | n/a | 714 | 23,4 M node / 48,2 M edge |
 
 Waktu build (4 worker, `GOMEMLIMIT=4GiB` di box 7 GB): java 3m53s, sumatra
 1m09s, nasional 8m08s.
@@ -572,7 +572,7 @@ Jakarta-Bandung (148,67 km pada ε 1,5):
 |---|---|---|---|
 | 1,5 | 148,67 km | 6428 s | 5.586.589 (gagal budget) |
 | 2,0 | 148,62 km (+0,07 %) | 6545 s (+1,8 %) | 103.077 |
-| 2,5 | 155,30 km (+4,4 %) | — | — |
+| 2,5 | 155,30 km (+4,4 %) | tidak diukur | tidak diukur |
 
 Jadi ε 2,0 praktis gratis untuk rute yang gagal, ε 3,0 hanya dipakai lintas
 pulau (Jakarta -> Medan: 4,81 jt ekspansi, 19,3 s di server dengan `-timeout
@@ -861,7 +861,7 @@ yang jaraknya <= 40 km dengan build yang sekarang dikirim (penalti belok 0,25x,
 
 | concurrency | RPS | p50 | p95 | p99 | max |
 |---|---|---|---|---|---|
-| 1 | — | **24,3 ms** | **246,2 ms** | 419,9 ms | 609,5 ms |
+| 1 | n/a | **24,3 ms** | **246,2 ms** | 419,9 ms | 609,5 ms |
 | 2 | 24,66 | 32,9 ms | 336,6 ms | 577,9 ms | 780,4 ms |
 | 4 | 23,50 | 73,6 ms | 705,4 ms | 982,0 ms | 1.145,2 ms |
 | 8 | 24,85 | 192,7 ms | 1.205,0 ms | 1.531,3 ms | 1.810,5 ms |
@@ -917,9 +917,9 @@ sebelum (`f9693f8`) vs sesudah (pool bersama `-conc` + anggaran `-workspace-mb`
 
 | `-conc` | build | anon sesudah | RSS sesudah | tabel workspace | grows / shrinks | wall |
 |---|---|---|---|---|---|---|
-| 2 | sebelum (`f9693f8`) | 322 MB | 2004 MB | tak terukur (6 tabel) | — | 174,3 s |
+| 2 | sebelum (`f9693f8`) | 322 MB | 2004 MB | tak terukur (6 tabel) | n/a | 174,3 s |
 | 2 | sesudah | **213 MB** (-34%) | 1895 MB | 25 MB (2.097.152 slot) | 200 / 84 | 172,2 s |
-| 4 | sebelum (`f9693f8`) | 555 MB | 2236 MB | tak terukur (12 tabel) | — | 173,8 s |
+| 4 | sebelum (`f9693f8`) | 555 MB | 2236 MB | tak terukur (12 tabel) | n/a | 173,8 s |
 | 4 | sesudah | **425 MB** (-23%) | 2107 MB | 138 MB (11.534.336 slot) | 229 / 86 | 172,2 s |
 
 - Penghematan berasal dari dua hal yang bisa dipisah: tabel = `-conc` (bukan
@@ -970,7 +970,7 @@ pembanding `/tmp/rid-server-old` (build `f9693f8`).
 | run | build | flag | kode | wall | anon | RSS | tabel |
 |---|---|---|---|---|---|---|---|
 | A | `f9693f8` | (tanpa flag baru) | 519x200 / 81x422 | 316,8 s | 462 MB | 1.138 MB | 12 tabel, tak terukur |
-| B | `8e2dc11` | — | 518x200 / 82x422 | 270,3 s | **415 MB** | **1.087 MB** | 126 MB (10,5 jt slot) |
+| B | `8e2dc11` | tanpa flag | 518x200 / 82x422 | 270,3 s | **415 MB** | **1.087 MB** | 126 MB (10,5 jt slot) |
 | C | `8e2dc11` | `-max-route-km 40`, `-workspace-mb 256`, `GOMEMLIMIT=1GiB` | 298x200 / 302x422 | 97,4 s | **311 MB** | **958 MB** | 201 MB (16,8 jt slot) |
 
 - A vs B: `anon` -10%, RSS -4% pada beban identik. Jauh lebih kecil dari -34%

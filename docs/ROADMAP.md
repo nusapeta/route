@@ -221,11 +221,11 @@ beberapa detik.
 |---|---|---|---|---|---|
 | Java | 22,7 M | 46,7 M | 1.019 MB | **693 MB** | 3m53s |
 | Sumatra | 11,9 M | 24,3 M | 533 MB | **364 MB** | 1m09s |
-| Kalimantan | — | — | — | **215 MB** | 51s |
-| Sulawesi | — | — | — | **173 MB** | 45s |
-| Bali-Nusra | — | — | — | **153 MB** | 51s |
-| Maluku | — | — | — | **25 MB** | 8s |
-| Papua | — | — | — | **34 MB** | 8s |
+| Kalimantan | n/a | n/a | n/a | **215 MB** | 51s |
+| Sulawesi | n/a | n/a | n/a | **173 MB** | 45s |
+| Bali-Nusra | n/a | n/a | n/a | **153 MB** | 51s |
+| Maluku | n/a | n/a | n/a | **25 MB** | 8s |
+| Papua | n/a | n/a | n/a | **34 MB** | 8s |
 
 Tujuh region = 1.657 MB (v3 setara ~2,4 GB). Anggaran 800 MB berlaku per
 artefak yang dimuat: region terbesar (Java) 693 MB, dan subset yang realistis

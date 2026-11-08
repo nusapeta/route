@@ -116,8 +116,6 @@ p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
 | M4 | timeout, rate limit, `/metrics`, ETag | tak ada request menahan slot >10 s |
 | M5 ✅ | format v4 (Java 693 MB), ferry, profil motor, tangga ε, 7 region | rute lintas pulau `200` dengan penanda ferry |
 | M6 🟡 | baseline OSRM (E1) selesai; ground truth (E2) terbuka | tiap klaim di README punya angka pendukung |
-| M5 | profil motor, semua pulau, ferry, artefak <= 800 MB | 7 region terbangun, ferry ditandai, Java 693 MB |
-| M6 | E1 baseline OSRM, E2 ground truth | E1 terisi (median lulus, p95 gagal); E2 belum |
 
 Rincian item, kriteria lulus, dan biaya: [`docs/ROADMAP.md`](docs/ROADMAP.md) dan
 [`docs/BACKLOG.md`](docs/BACKLOG.md). Non-goals yang sengaja ditolak (traffic
@@ -467,7 +465,7 @@ himpunan pasangan <= 40 km, bukan satu rute contoh: 298 dari 600 pasang
 
 | concurrency | RPS | p50 | p95 |
 |---|---|---|---|
-| 1 | — | **24,3 ms** | **246,2 ms** |
+| 1 | n/a | **24,3 ms** | **246,2 ms** |
 | 2 | 24,7 | 32,9 ms | 336,6 ms |
 | 4 | 23,5 | 73,6 ms | 705,4 ms |
 | 8 | 24,9 | 192,7 ms | 1.205,0 ms |
@@ -680,8 +678,6 @@ punya provenance sejak v3 (SHA-256 pbf, waktu build) plus blob `key=value` di
 akhir file (sumber, profil + hash, batas kecepatan, versi extractor, order,
 grid). File v1-v3 **ditolak** oleh reader v4 (lebarnya beda, salah baca lebih
 buruk daripada error jelas): jalankan ulang extractor, 1-8 menit per region.
-
-## Catatan data
 
 ## Lisensi
 
