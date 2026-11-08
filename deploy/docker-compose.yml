@@ -11,6 +11,12 @@ services:
       # Dockerfile lengkap (multi-stage, butuh tarik image golang) atau
       # deploy/Dockerfile.prebuilt (pakai bin/rid-server yang sudah dibangun).
       dockerfile: ${ROUTEID_DOCKERFILE:-Dockerfile}
+      # Provenans image. Tanpa argumen ini /version melaporkan "dev".
+      #   COMMIT=$(git rev-parse --short HEAD) BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+      #     docker compose build && docker compose up -d
+      args:
+        COMMIT: ${COMMIT:-dev}
+        BUILT: ${BUILT:-unknown}
     image: routeid:local
     container_name: routeid
     restart: unless-stopped

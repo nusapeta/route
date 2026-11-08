@@ -44,10 +44,15 @@ rsync -a bin/static/ host:~/Projects/routeid/bin/
 ```bash
 sudo usermod -aG docker "$USER"   # sekali, lalu login ulang
 cd deploy
-docker compose up -d --build
+COMMIT=$(git rev-parse --short HEAD) BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  docker compose up -d --build
 docker compose ps                 # STATUS harus (healthy)
-curl -s localhost:8080/healthz
+curl -s localhost:8080/healthz    # version harus sama dengan COMMIT di atas
 ```
+
+Tanpa `COMMIT`/`BUILT`, `/version` melaporkan `dev`/`unknown` dan tidak ada cara
+mencocokkan image dengan commit. Di host yang bukan repo git, kirim nilainya
+dari mesin pengembang, misalnya `COMMIT=5517c97 BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ)`.
 
 Batas memori 1,5 GB (`mem_limit`: RSS memuat halaman `mmap` graf), graceful
 stop 25 s, log diputar 3x10 MB.
