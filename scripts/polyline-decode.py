@@ -20,41 +20,7 @@ import binascii
 import json
 import sys
 
-
-def decode_polyline(s):
-    pts, i, lat, lng = [], 0, 0, 0
-    while i < len(s):
-        vals = []
-        for _ in range(2):
-            shift = result = 0
-            while True:
-                if i >= len(s):
-                    raise ValueError(
-                        f"polyline terpotong di karakter {i}/{len(s)} — "
-                        "kemungkinan backslash ter-escape saat copy-paste"
-                    )
-                b = ord(s[i]) - 63
-                i += 1
-                result |= (b & 0x1F) << shift
-                shift += 5
-                if b < 0x20:
-                    break
-            vals.append(~(result >> 1) if result & 1 else result >> 1)
-        lat += vals[0]
-        lng += vals[1]
-        pts.append([lat / 1e5, lng / 1e5])
-    return pts
-
-
-def from_json(d):
-    note = "json:points"
-    if d.get("polyline_b64"):
-        return decode_polyline(base64.b64decode(d["polyline_b64"]).decode()), "json:polyline_b64"
-    if d.get("polyline"):
-        return decode_polyline(d["polyline"]), "json:polyline"
-    if d.get("points"):
-        return [list(p) for p in d["points"]], note
-    raise SystemExit("respons tidak punya points / polyline / polyline_b64")
+from polyline_decode import decode_polyline, from_json
 
 
 def main():
@@ -90,7 +56,7 @@ def main():
     print(f"sumber     : {how}", file=sys.stderr)
     print(f"titik      : {len(pts)}", file=sys.stderr)
     if meta.get("points_n") is not None:
-        cocok = "COCOK" if len(pts) == meta["points_n"] else "TIDAK COCOK — string rusak"
+        cocok = "COCOK" if len(pts) == meta["points_n"] else "TIDAK COCOK: string rusak"
         print(f"points_n   : {meta['points_n']} ({cocok})", file=sys.stderr)
     print(f"bbox       : [{min(lats):.6f}, {min(lons):.6f}, {max(lats):.6f}, {max(lons):.6f}]", file=sys.stderr)
     print(f"awal/akhir : {pts[0]} -> {pts[-1]}", file=sys.stderr)

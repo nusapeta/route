@@ -1,11 +1,18 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.27-alpine AS build
+# Provenance, same stamps as `make static`. Defaults keep the image
+# reproducible; pass --build-arg COMMIT=$(git rev-parse --short HEAD) and
+# --build-arg BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ) for a real build.
+ARG COMMIT=dev
+ARG BUILT=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags='-s -w' -o /out/rid-server ./cmd/rid-server
+RUN go build -trimpath \
+      -ldflags="-s -w -X main.commit=${COMMIT} -X main.buildTime=${BUILT} -X routeid/internal/extract.Version=${COMMIT}" \
+      -o /out/rid-server ./cmd/rid-server
 
 FROM alpine:3.22
 RUN adduser -D -H -u 65532 routeid && apk add --no-cache ca-certificates
