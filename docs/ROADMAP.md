@@ -1,7 +1,7 @@
 # Roadmap routeid
 
-**North star:** alternatif OSRM / Google Routes yang paling ringan —
-router jalan Indonesia yang memakai puluhan MB, bukan gigabyte, dan tetap
+**North star:** alternatif OSRM / Google Routes yang paling ringan:
+router jalan Indonesia yang memakai puluhan MB, dan tetap
 menjawab rute <=50 km di bawah setengah detik di perangkat murah.
 
 Rencana eksekusi aktif (memori + akurasi, terukur 2026-11-08):
@@ -54,7 +54,7 @@ sebanyak mungkin rute per detik.
 | M1 metadata + golden test | ✅ | format v3/v4 provenance, `/version`, regresi otomatis |
 | M2 snap ke ruas | ✅ | galat ujung 67,3 -> 16,1 m p50 |
 | M3 biaya per ekspansi | ✅ | latensi ~2x, memori -25 % |
-| M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,4 ms), `/metrics` |
+| M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,2 ms Ryzen / 0,39 ms i3-6100T), `/metrics` |
 | M5 cakupan | ✅ | v4 (Java 693 MB), ferry, motor, 7 pulau, tangga ε |
 | M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 belum |
 
@@ -64,12 +64,12 @@ menunjukkan p95 itu perbedaan fungsi biaya, bukan restriction yang di-skip. Itu
 menjadi dasar §15: penalti belok 0,25x dikirim, p95 tidak berubah (sisa selisih
 dari tabel kecepatan kelas), jadi
 README/paper tetap tidak
-boleh mengklaim "tercepat" maupun "paling akurat" — hanya biaya per rute
+boleh mengklaim "tercepat" maupun "paling akurat", hanya biaya per rute
 (memori, artefak, latency) dan perbandingan antar-engine.
 
 ## Milestone
 
-### M1 — Bisa dipercaya — SELESAI
+### M1. Bisa dipercaya (SELESAI)
 
 Tujuan: artefak bisa diaudit dan regresi ketahuan otomatis. Tanpa ini, angka
 performa tidak bisa dibandingkan antar build.
@@ -88,7 +88,7 @@ performa tidak bisa dibandingkan antar build.
 **Terbukti:** `format: v3`, `pbf_sha256: dcbc563f…` di `/healthz`; mengubah satu
 kecepatan di test menggagalkan 3 pasangan (harness tidak vakum).
 
-### M2 — Akurasi ujung rute — SELESAI
+### M2. Akurasi ujung rute (SELESAI)
 
 - [x] `SnapEdge` (proyeksi ke ruas) + `RouteSnap` (trim bila rute keluar lewat
       ruas itu, spur bila tidak). Tanpa perubahan format, tanpa pseudo-node.
@@ -101,7 +101,7 @@ kecepatan di test menggagalkan 3 pasangan (harness tidak vakum).
 45 → 4 m; jarak rute terkoreksi 58 m; geometri mulai/berakhir di jalan.
 **Sisa:** kasus spur (rute keluar arah lain) masih garis lurus sepanjang `Along`.
 
-### M3 — Naikkan densitas 2x — SELESAI
+### M3. Naikkan densitas 2x (SELESAI)
 
 Tujuan: satu box kecil menampung ~1.200 user (1 rute/menit), bukan 600.
 
@@ -118,14 +118,14 @@ Tujuan: satu box kecil menampung ~1.200 user (1 rute/menit), bukan 600.
 **Hasil terukur (Java, 601 pasang, ε=1,5, box uji 2 core):** p50 bucket 30–50 km
 406 → 206 ms dan 523 → 254 ms (rasio per-pasangan median 1,9x, 2,0x); throughput
 `-conc 2` pada satu rute 41,7 km 7,2 → 12,1 RPS. **Jumlah ekspansi sama**
-(815k vs 818k) — kemenangannya murni biaya per ekspansi. Waktu tempuh 537/537
+(815k vs 818k); kemenangannya murni biaya per ekspansi. Waktu tempuh 537/537
 pasang identik; 1 pasang memilih geometri lain dengan waktu sama.
 
 **Tidak dikerjakan (dengan alasan terukur):**
 
 - ALT ditunda: `d(l,·)` untuk 4 landmark sebagai `uint16` tetap butuh
   2 x 4 x 2 B x 22,7 jt node = 182 MB untuk Java, dan bidirectional butuh
-  reverse CSR ~278 MB — keduanya melewati batas 350 MB sebelum workspace.
+  reverse CSR ~278 MB, keduanya melewati batas 350 MB sebelum workspace.
   Lihat BACKLOG item 6 untuk skema sidecar `map.alt` (opt-in, di luar budget).
 - Alokasi awal workspace dari perkiraan jarak: grow yang ada sudah jarang
   (tabel berhenti tumbuh setelah query panjang pertama) dan `-conc` membatasi
@@ -148,10 +148,10 @@ sama, rute 41,7 km, `-conc 4`:
 RSS beban masih di atas 350 MB untuk rute 148 km (bukan kelas rute app); untuk
 42 km hanya 55 MiB. Kalau target 350 MB ingin dikejar juga untuk rute panjang,
 opsinya ada di BACKLOG 6/7 (ALT atau reverse CSR sebagai sidecar, keduanya
-menambah, bukan mengurangi) — atau turunkan `maxSlots` dan terima `ErrTooFar`
+menambah, bukan mengurangi), atau turunkan `maxSlots` dan terima `ErrTooFar`
 untuk koridor >150 km.
 
-### M4 — Siap dipakai app — SELESAI
+### M4. Siap dipakai app (SELESAI)
 
 - [x] Timeout per request + `context` yang membatalkan A* di tengah jalan:
       dicek tiap 256 ekspansi, `504 {"error":"deadline exceeded"}`, workspace
@@ -169,7 +169,7 @@ untuk koridor >150 km.
       parameter dan GET-vs-POST berbagi entri cache.
 - [x] `points`/`simplify` sudah terdokumentasi di README bagian Flutter.
 - [ ] Bind `127.0.0.1` di belakang Caddy: **belum**, karena di homelab sekarang
-      tidak ada reverse proxy untuk routeid — mengubah bind akan memutus akses
+      tidak ada reverse proxy untuk routeid; mengubah bind akan memutus akses
       LAN yang dipakai Postman. Resepnya ada di `deploy/README.md`.
 
 **Selesai bila:** tidak ada request yang bisa menahan slot >10 s, dan dashboard
@@ -179,7 +179,7 @@ menampilkan RPS/p95/fallback.
 
 | uji | hasil |
 |---|---|
-| 304 vs 200 (rute 41,7 km) | p50 **0,2 ms** vs 43,1 ms (~200x) |
+| 304 vs 200 (rute 41,7 km) | p50 **0,2 ms** (Ryzen 5 5600G) vs 43,1 ms (~200x) |
 | batas waktu 1 s pada rute 148 km | `504` pada 1,01 s, bukan 2,9 s |
 | request pendek saat 2 slot penuh, `-timeout 1s` | selesai 813 ms |
 | request pendek saat 2 slot penuh, `-timeout 20s` | selesai 2.596 ms |
@@ -195,18 +195,17 @@ pengecekan `ETag`, sehingga revalidasi ikut memakai token. Sekarang limiter
 dipanggil *setelah* `ETag`: hit cache tidak memakai budget rute, karena ia juga
 tidak menyentuh workspace.
 
-Artinya deadline bukan cuma mengubah status: ia mengembalikan slot ke antrean,
-jadi satu klien yang meminta rute 148 km tidak lagi "menyandera" server selama
-beberapa detik.
+Artinya deadline mengembalikan slot ke antrean, jadi satu klien yang meminta rute
+148 km tidak lagi "menyandera" server selama beberapa detik.
 
-### M5 — Cakupan — SELESAI (kecuali stitching antar-file, BACKLOG 17b)
+### M5. Cakupan (SELESAI, kecuali stitching antar-file, BACKLOG 17b)
 
 - [x] Profil motor (`-profile motor`): tabel kecepatan sendiri, `motorcycle=no`
-      menang atas apa pun, `motor_vehicle=no` **tidak** memblokir motor (motor
+      menang atas apa pun, `motor_vehicle=no` tidak memblokir motor (motor
       bukan motor_vehicle), tol dibuang kecuali `motorcycle=yes`, dan
       `path`/`footway`/`cycleway` boleh dipakai kalau ditandai untuk motor.
 - [x] Semua pulau besar: Java, Sumatra, Kalimantan, Sulawesi, Bali-Nusra,
-      Maluku, Papua — satu perintah (`make islands` / `make motor`).
+      Maluku, Papua, satu perintah (`make islands` / `make motor`).
 - [x] Ferry jadi edge biasa dengan waktu dari tag `duration`
       (`Merak-Bakauheni` 2 jam, bukan 30 km / 20 km/jam), ditandai di graph
       sebagai daftar edge sparse dan diekspos di respons (`ferry_m`,
@@ -221,11 +220,11 @@ beberapa detik.
 |---|---|---|---|---|---|
 | Java | 22,7 M | 46,7 M | 1.019 MB | **693 MB** | 3m53s |
 | Sumatra | 11,9 M | 24,3 M | 533 MB | **364 MB** | 1m09s |
-| Kalimantan | — | — | — | **215 MB** | 51s |
-| Sulawesi | — | — | — | **173 MB** | 45s |
-| Bali-Nusra | — | — | — | **153 MB** | 51s |
-| Maluku | — | — | — | **25 MB** | 8s |
-| Papua | — | — | — | **34 MB** | 8s |
+| Kalimantan | n/a | n/a | n/a | **215 MB** | 51s |
+| Sulawesi | n/a | n/a | n/a | **173 MB** | 45s |
+| Bali-Nusra | n/a | n/a | n/a | **153 MB** | 51s |
+| Maluku | n/a | n/a | n/a | **25 MB** | 8s |
+| Papua | n/a | n/a | n/a | **34 MB** | 8s |
 
 Tujuh region = 1.657 MB (v3 setara ~2,4 GB). Anggaran 800 MB berlaku per
 artefak yang dimuat: region terbesar (Java) 693 MB, dan subset yang realistis
@@ -271,7 +270,7 @@ angka absolutnya lebih lambat dari §2/RESULTS. Yang diukur adalah rasio A/B
 bergantian: ekspansi identik, CPU per query turun **1,6-2x** (Jakarta-Bandung
 18,6-22,1 s -> 11,7-13,7 s; Jakarta-Cikarang 2,2-2,4 s -> 0,95-1,54 s).
 
-### M6 — Bukti (paper) — E1 SELESAI (2026-11-07), E2 BELUM
+### M6. Bukti (paper): E1 SELESAI (2026-11-07), E2 BELUM
 
 Resep lengkap: **`docs/M6.md`**. E1 dijalankan di `omarchy` (Ryzen 5 5600G,
 6C/12T, 16 GB) dengan OSRM v5.26.0 MLD vs routeid, PBF Java yang sama, 600
@@ -336,7 +335,7 @@ mengetahui apakah perubahannya benar.
 ## Cara mengukur (jangan improvisasi)
 
 - Throughput & latensi: `scripts/loadtest.py` (kelas rute 7/15/42/148 km).
-- Memori: `/proc/<pid>/status` — `RssAnon` vs `RssFile`, bukan `ps rss`.
+- Memori: `/proc/<pid>/status`: `RssAnon` vs `RssFile`, bukan `ps rss`.
 - Regresi rute: golden 50 pasangan dari M1.
 - Turn restriction: `rid-restcheck`.
 - Semua angka yang masuk paper harus punya perintah reproduksi di

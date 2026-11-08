@@ -18,12 +18,12 @@ Valhalla/GraphHopper/OSRM CH masih butuh run sendiri sebelum masuk tabel.
 | Latency 15 km | 136-155 ms | `rid-route` / HTTP | terukur |
 | Latency 42 km | 191 ms (v3, 1 query) -> v4 ~1,6x lebih cepat; p50 server 223-283 ms di homelab berbeban | idem + `paper/RESULTS.md` §12b | terukur |
 | Throughput 42 km | v3 9,97-10,58 RPS -> v4 **13,79-16,02 RPS** @4 klien (A/B bergantian) | `scripts/loadtest.py` (i3-6100T) | terukur |
-| Throughput 7/15/148 km | 67 / 17 / 0,59 RPS | idem | terukur |
+| Throughput 7/15/148 km | **74,6** / 16,9 / 0,59 RPS (i3-6100T, 4 klien) | idem | terukur |
 | Memori vs beban | 15 -> 399 MB (4x 148 km serentak, v4) | `/proc` per tahap | terukur |
-| Turn restriction | 3.795 ban, 155 only, 587 skipped; 0 pelanggaran setelah enforcement | `rid-restcheck` | terukur |
+| Turn restriction | **3.790 ban / 593 di-skip** (build `5d3fdd1b`); 0 pelanggaran setelah enforcement | `rid-restcheck` | terukur |
 | Fallback restriction | 3,17% | idem | terukur |
-| Hilbert vs id OSM | RSS 579 → 104 MB, latency 1,5-2x | `rid-bench -order osm` | terukur |
-| eps=1.5 vs 1.0 | 2,4x lebih cepat, rute identik | `rid-bench -eps` | terukur |
+| Hilbert vs id OSM | RSS metropolitan **1.225 → 675 MB** (1,8x), p50 7-20 % lebih cepat | `rid-bench -order osm` | terukur |
+| eps=1.5 vs 1.0 | **1,4x** lebih cepat (rasio p50 0,72), rute identik 526/526 | `rid-bench -eps` | terukur |
 | Image container | 24 MB (prebuilt, alpine) | `docker image inspect` | terukur |
 | Galat snap ruas >150 m | p50 16,1 m / p95 34,9 m (node: 67,3 / 114,0) | `rid-snapcheck -bbox ... -offset 40` | terukur |
 | SnapEdge vs oracle | mean −1,25 m, 0% sampel >1 m lebih buruk | idem | terukur |
@@ -36,10 +36,10 @@ Valhalla/GraphHopper/OSRM CH masih butuh run sendiri sebelum masuk tabel.
 | E1 cakupan | 81/600 routeid `422` (72 snap >3 km); OSRM 0 error, snap tujuan pada 81 itu p50 14,7 km | idem | terukur |
 
 Catatan M2: galat snapping sudah terukur (ledger di atas), tetapi itu galat
-menempelkan titik ke jalan — bukan bukti bahwa jarak rute benar. Klaim akurasi rute
+menempelkan titik ke jalan, bukan bukti bahwa jarak rute benar. Klaim akurasi rute
 tetap menunggu E2.
 
-## 2. Yang **tidak** boleh diklaim sekarang
+## 2. Yang tidak boleh diklaim sekarang
 
 | klaim | kenapa |
 |---|---|
@@ -49,7 +49,7 @@ tetap menunggu E2.
 | "siap untuk seluruh Indonesia" | tujuh pulau sudah terbangun, tapi rute antar-file masih ditolak (`422`) kecuali satu graph nasional 1.650 MB dipakai |
 | "hemat memori" tanpa kualifikasi | tabel workspace 12 B/slot tumbuh mengikuti edge unik rute terpanjang, dikali region x `-conc`, dan bertahan sampai restart; E1: 815 MB setelah 600 pasangan campuran |
 
-## 3. Worksheet E1 (OSRM MLD, mesin sama) — terisi
+## 3. Worksheet E1 (OSRM MLD, mesin sama), terisi
 
 Run: 2026-11-07, AMD Ryzen 5 5600G (6C/12T), 16 GB RAM, 30 GiB swap.
 PBF dan set pasangan identik (`paper/results/pairs-java.csv`, 600 pasang).
@@ -71,7 +71,7 @@ kedua engine <=50 m di kedua ujung. Rincian: `RESULTS.md` §13.
 | p50 50-80 km | 397,3 ms | 3,2 ms | | 50 pasang |
 | p95 0-5/…/50-80 km | 14,0 / 68,7 / 226,7 / 478,4 / 1.060,9 ms | 1,1 / 1,7 / 2,3 / 3,0 / 4,5 ms | | |
 | jarak rute: median / p95 / max | **−0,005% / 21,05% / 48,30%** | referensi | | gerbang p95 <12% **gagal**, tetapi bukan gerbang akurasi (§14) |
-| pasangan selisih >10% | 38/332 (11,4%) | — | | 10/332 >25% |
+| pasangan selisih >10% | 38/332 (11,4%) | n/a | | 10/332 >25% |
 | routeid 422 | 81/600 (72 snap, 7 budget, 2 no-route) | 0 error | | OSRM snap tujuan p50 14,7 km pada 81 itu |
 | turn restriction ditegakkan | 3.790 ban, 593 di-skip | `car.lua` | | audit `RESULTS.md` §14: bukan penyebab p95 jarak |
 | penalti belok | 0,25x tabel (2/7,5/20 s), ETA +1,6% median | `car.lua` `weight` | | `RESULTS.md` §15: p95 tidak turun, badan distribusi membaik |
@@ -88,7 +88,7 @@ Isi dengan `scripts/m6-compare.py` (jarak + latency per bucket + snap) dan
 `scripts/m6-osrm.sh extract` (waktu + peak RSS tiap tahap); angka di atas dari
 run terakhir yang menghasilkan `paper/results/m6-osrm-vs-routeid.csv`.
 
-Perintah acuan — sudah dibungkus jadi skrip, resep lengkap di `docs/M6.md`:
+Perintah acuan sudah dibungkus jadi skrip; resep lengkap di `docs/M6.md`:
 
 ```bash
 scripts/m6-osrm.sh extract data/java-latest.osm.pbf   # + wall & peak RSS tiap tahap
@@ -109,11 +109,11 @@ scripts/m6-compare.py --pairs paper/results/pairs-java.csv \
 
 Peringatan RAM: `osrm-extract` Jawa terukur **peak 6.254 MB**; mesin 16 GB cukup,
 mesin 8 GB wajib swap. Jangan dijalankan bersamaan dengan `rid-extract` atau
-load test — waktu dan RSS jadi sampah. E1 dijalankan di Ryzen 5 5600G; belum
+load test: waktu dan RSS jadi sampah. E1 dijalankan di Ryzen 5 5600G; belum
 dicoba di i5-7360U 7,8 GB.
 
 Catatan metodologi: OSRM MLD di sini memakai `car.lua` (maxspeed), routeid
-memakai tabel kecepatan per kelas jalan — jadi **durasi tidak sebanding**.
+memakai tabel kecepatan per kelas jalan, jadi **durasi tidak sebanding**.
 Yang dibandingkan: jarak rute (akurasi relatif), latency, memori, ukuran artefak.
 
 ## 4. Worksheet E2 (ground truth)
@@ -125,7 +125,7 @@ Butuh referensi independen; OSRM bukan ground truth (dua-duanya graf OSM).
 | Google Maps manual | 60 pasangan | jarak rute + waktu, screenshot | ~2 jam kerja |
 | Google Routes API | 200-500 pasangan, tersebar | `distanceMeters`, `duration`, `polyline` | perlu API key (~$1 untuk 200-500 query) |
 
-Status: **belum ada** — tidak ada API key di mesin pengembangan, dan OSRM tidak
+Status: **belum ada**; tidak ada API key di mesin pengembangan, dan OSRM tidak
 bisa dipakai sebagai pengganti (dua-duanya graf OSM). Limitation eksplisit sudah
 ditulis di abstrak + `main.tex` §Threats~(ii): tidak ada klaim akurasi. Urutan
 kerja dan definisi selesai ada di `docs/M6.md` §E2.

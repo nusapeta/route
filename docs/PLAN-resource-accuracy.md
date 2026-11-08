@@ -112,11 +112,11 @@ pasangan E1, tidak ada 500/OOM; rute <=50 km tetap 332/332 cocok.
   `wp *WorkspacePool`; `NewRouter` tetap ada untuk pemakai library
   (`rid-route`, `rid-bench`) dan membuat poolnya sendiri.
 - W1.2 anggaran: flag `-workspace-mb` dipecah rata ke `-conc` slot (`12 B`/slot).
-  Default `0` = **tanpa** anggaran eksplisit (plafon lama `maxSlots` 33 M
+  Default `0` = tanpa anggaran eksplisit (plafon lama `maxSlots` 33 M
   slot = 384 MB/slot), bukan 256 MB/slot seperti draf: angka itu perlu
   pengukuran deploy dulu, dan default yang lebih kecil bisa menukar akurasi
   dengan 422 pada rute sah. Pemakaian dilaporkan di
-  `routeid_workspace_bytes`, bukan ditebak.
+  `routeid_workspace_bytes`.
 - W1.3 mulai kecil + shrink: 65.536 slot (0,75 MB) awal; setelah query, bila
   `cap > 8 x used`, rehash turun ke `max(65.536, 2 x used)`. Histeresis 8x
   terbukti cukup: 600 pasangan campuran memicu 84-86 shrink dan 200-229 grow,
@@ -128,7 +128,7 @@ pasangan E1, tidak ada 500/OOM; rute <=50 km tetap 332/332 cocok.
   RSS ikut turun 2004 -> 1895 MB dan 2236 -> 2107 MB (sisa RSS adalah halaman
   `mmap` 3 x 693 MB yang tidak dibandingkan). Hasil rute identik: 519 x 200,
   81 x 422 di keempat run.
-- Gerbang "RSS <= 256 MB di deploy 3 region" **tidak** dinyatakan lulus dalam
+- Gerbang "RSS <= 256 MB di deploy 3 region" tidak dinyatakan lulus dalam
   arti RSS: di homelab (Java + Sumatra + Nusa-Tenggara, `-conc 4`, 600 pasang,
   `GOMEMLIMIT=1GiB`, `-max-route-km 40`) terukur `anon` **311 MB**, tabel
   **201 MB** dari anggaran 256 MB, sedangkan RSS 958 MB karena `Rss`/`Pss`
@@ -149,14 +149,14 @@ itu perbaikan harus menyentuh model biaya, bukan menambah penalti belok
 **Rencana.**
 1. Audit kelas jalan: bandingkan `maxspeed` OSM vs tabel kecepatan per kelas
    pada 200 ruas acak (sampling deterministik). Perbaiki tabel hanya dengan
-   bukti hitungan, bukan perasaan.
+   bukti hitungan.
 2. Uji varian biaya pada 332 pasangan E1: waktu murni, jarak murni, campuran
    (mis. 0,7 waktu + 0,3 jarak). Pilih yang menurunkan p95 tanpa menaikkan
    median |Δ| dan tanpa menaikkan durasi >2%.
 3. Audit top-20 outlier p95: cek manual apakah routeid atau OSRM yang salah
    (ferry, turn restriction, snap). Setiap outlier masuk daftar uji regresi.
 4. Bila 1-3 tidak mencapai 12%: engine kedua (Valhalla atau GraphHopper, OSM
-   yang sama) untuk triangulasi — bukan untuk "menang", tapi memisahkan siapa
+   yang sama) untuk triangulasi, bukan untuk "menang"; tujuannya memisahkan siapa
    yang menyimpang.
 
 **Lulus bila.** p95 |Δ| <= 12% pada 332 pasangan E1, median <= 0,1%, dan
@@ -225,7 +225,7 @@ jumlah identik).
 
 ## 5. Non-goals rencana ini
 
-- Tidak mengejar "lebih cepat dari OSRM" — targetnya resource dan akurasi.
+- Tidak mengejar "lebih cepat dari OSRM": targetnya resource dan akurasi.
 - Tidak mengganti format graph v4 di fase mana pun; CH (kalau jadi) adalah
   artefak tambahan.
 - Tidak menambah traffic/ETA real-time.

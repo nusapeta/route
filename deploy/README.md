@@ -1,7 +1,7 @@
 # Deploy di homelab (Jawa + Sumatra)
 
 Dua cara: Docker Compose (paling cepat) atau systemd (tanpa Docker).
-Dua-duanya memakai graph yang sudah dibangun di host — image tidak pernah
+Dua-duanya memakai graph yang sudah dibangun di host; image tidak pernah
 memuat data 1,5 GB.
 
 ## 0. Bangun graph (sekali, di host)
@@ -25,7 +25,7 @@ Dua pilihan image:
 | multi-stage | `docker compose up -d --build` | tarik image `golang:1.27-alpine` (~800 MB) |
 | prebuilt (hemat) | `ROUTEID_DOCKERFILE=deploy/Dockerfile.prebuilt docker compose up -d --build` | hanya `alpine:3.22` (~4 MB) |
 
-Untuk pilihan prebuilt, kirim binary statisnya dulu (jangan binary dinamis —
+Untuk pilihan prebuilt, kirim binary statisnya dulu (jangan binary dinamis,
 lihat catatan di bawah):
 
 ```bash
@@ -35,7 +35,7 @@ rsync -a bin/static/ host:~/Projects/routeid/bin/
 
 > **Jebakan yang sudah memakan waktu:** binary hasil `go build` biasa ter-link
 > dinamis ke glibc. Di image alpine (musl) hasilnya error
-> `exec /usr/local/bin/rid-server: no such file or directory` — pesan yang
+> `exec /usr/local/bin/rid-server: no such file or directory`, pesan yang
 > menyesatkan, filenya ada. Selalu pakai `make static`
 > (`CGO_ENABLED=0`) untuk image, dan jangan rsync folder `bin/` mentah-mentah.
 
@@ -102,12 +102,12 @@ Untuk mesin kecil: `-conc 1` (memori ~4x lebih hemat, query diserialkan) dan
 
 Dua flag yang dipakai container sejak build `8e2dc11`:
 
-- `-workspace-mb 256` — anggaran total tabel A*, dibagi rata ke `-conc` slot
+- `-workspace-mb 256`: anggaran total tabel A*, dibagi rata ke `-conc` slot
   (12 B/slot, jadi 64 MB/slot pada `-conc 4`). Tabel mulai 0,75 MB, tumbuh saat
   rute panjang, dan menyusut balik bila kapasitas > 8x pemakaian. Bila anggaran
   habis, klien menerima `422 search space exhausted (route too long)`, bukan
   OOM. `0` = tanpa anggaran eksplisit (plafon lama 384 MB/slot).
-- `-max-route-km 40` — kontrak aplikasi: rute di atas 40 km (garis lurus lebih
+- `-max-route-km 40`: kontrak aplikasi, rute di atas 40 km (garis lurus lebih
   dulu, lalu jarak tempuh) ditolak `422`, jadi segmen <= 40 km tetap di p50
   24-73 ms dan p95 246-705 ms (`paper/RESULTS.md` §16).
 
@@ -155,7 +155,7 @@ rate limit. Untuk homelab:
 - bind ke LAN saja: `-addr 192.168.x.x:8080`, jangan `0.0.0.0` bila tak perlu.
 - taruh di belakang reverse proxy (Caddy/nginx) kalau harus HTTPS; proxy juga
   sebaiknya membatasi ukuran/rate.
-- jangan expose ke internet tanpa auth + rate limit — satu query rute panjang
+- jangan expose ke internet tanpa auth + rate limit: satu query rute panjang
   memakan 1 core selama beberapa detik.
 
 ## 5. Update data OSM
