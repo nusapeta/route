@@ -104,10 +104,6 @@ func (m *metrics) wrap(next http.HandlerFunc) http.HandlerFunc {
 // hand-written writer: no reflection, no registry, no dependencies.
 func (m *metrics) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	var total int64
-	for i := range m.hist {
-		total += m.hist[i].Load()
-	}
 	fmt.Fprintf(w, "# HELP routeid_build_info Build identity\n# TYPE routeid_build_info gauge\n")
 	fmt.Fprintf(w, "routeid_build_info{commit=%q,go_version=%q} 1\n", commit, runtime.Version())
 
@@ -154,7 +150,6 @@ func (m *metrics) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "# HELP routeid_workspace_grows_total Workspace capacity grow operations\n# TYPE routeid_workspace_grows_total counter\nrouteid_workspace_grows_total %d\n", grows)
 		fmt.Fprintf(w, "# HELP routeid_workspace_shrinks_total Workspace capacity shrink operations\n# TYPE routeid_workspace_shrinks_total counter\nrouteid_workspace_shrinks_total %d\n", shrinks)
 	}
-	_ = total
 }
 
 // trimFloat renders a bucket bound the way Prometheus expects (0.025, not 0.025000).

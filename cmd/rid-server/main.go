@@ -141,7 +141,7 @@ func main() {
 	}
 	sort.Slice(s.regions, func(i, j int) bool { return s.regions[i].name < s.regions[j].name })
 
-	s.fp = graphFingerprint(s.regions, s.maxRouteM, float32(*eps), float32(*turnPenalty))
+	s.fp = graphFingerprint(s.regions, s.maxRouteM, s.maxSnapM, float32(*eps), float32(*turnPenalty))
 	s.rl = newLimiter(*rate, *burst, *trustProxy)
 
 	mux := http.NewServeMux()
@@ -154,7 +154,10 @@ func main() {
 		Addr:              *addr,
 		Handler:           cors(gzipWrap(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		// The write deadline must outlast the routing deadline, otherwise a
+		// -timeout above 60 s is cut off before it can answer 504. The margin
+		// covers serializing a long polyline body.
+		WriteTimeout: s.timeout + 5*time.Second,
 	}
 	// Graceful shutdown so `docker stop` / `systemctl restart` can finish the
 	// request in flight instead of killing a multi-second long-distance route.
@@ -335,20 +338,21 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 
 	start := time.Now()
 
-	// Cheap cache works before the expensive part: an identical query only pays
-	// for hashing, and a graph rebuild or binary upgrade changes the tag.
+	// Cache hits are free, so the revalidation check runs before the limiter: a
+	// 304 never spends routing budget. The validator is only emitted on the
+	// 304 and 200 paths, so a throttled client cannot harvest one from a 429.
+	var etag string
 	if s.maxAge > 0 {
-		etag := routeETag(s.fp, p)
-		w.Header().Set("ETag", etag)
-		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.maxAge))
+		etag = routeETag(s.fp, p)
 		if match := req.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
+			w.Header().Set("ETag", etag)
+			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.maxAge))
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 	}
 
-	// Cached answers are free (no workspace), so they are not rate limited;
-	// everything past this point competes for a routing slot.
+	// Everything past this point competes for a routing slot.
 	if !s.rl.allowRequest(w, req, s.m) {
 		return
 	}
@@ -395,7 +399,10 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 			s.m.errNoRoute.Add(1)
 			httpErr(w, 422, err.Error())
 		default:
-			httpErr(w, 422, err.Error())
+			// Anything else is a server-side failure; the text stays in the log
+			// surface, not the response.
+			log.Printf("route error: %v", err)
+			httpErr(w, 500, "internal error")
 		}
 		return
 	}
@@ -427,8 +434,11 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	if p.pin {
 		pts = append(pts, [2]float64{tLat, tLon})
 	}
+	// keep maps each surviving geometry point back to its index before
+	// Simplify, so index-based fixtures (ferry spans) survive the drop.
+	var keep []int
 	if p.simplify > 0 {
-		pts = Simplify(pts, p.simplify)
+		pts, keep = simplifyIndexed(pts, p.simplify)
 	}
 
 	w.Header().Set("X-Route-Ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
@@ -452,24 +462,20 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	if res.FerryM > 0 {
 		body["ferry_m"] = res.FerryM
 		body["has_ferry"] = true
-		// spans index into points[] (and so into the decoded polyline), so a
-		// client can style the crossings dashed without re-reading geometry
-		off := 0
+		// FerrySpans index the trimmed Nodes; shift past the optional pin and
+		// Head, then through keep when the geometry was simplified.
+		off := 1
 		if p.pin {
-			off = 1
-		}
-		if res.TrimStart {
-			off--
+			off = 2
 		}
 		spans := make([][2]int, 0, len(res.FerrySpans))
 		for _, sp := range res.FerrySpans {
-			a0 := int(sp[0]) + 1 + off // +1 for Head
-			a1 := int(sp[1]) + 1 + off
-			if a0 < 0 {
-				a0 = 0
-			}
-			if a1 < a0 {
-				continue
+			a0, a1 := int(sp[0])+off, int(sp[1])+off
+			if keep != nil {
+				var ok bool
+				if a0, a1, ok = projectSpan(keep, a0, a1); !ok {
+					continue
+				}
 			}
 			spans = append(spans, [2]int{a0, a1})
 		}
@@ -525,6 +531,10 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	default:
 		body["points"] = pts
 	}
+	if etag != "" {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.maxAge))
+	}
 	writeJSON(w, body)
 }
 
@@ -538,14 +548,20 @@ func readRouteParams(req *http.Request) (routeParams, error) {
 		pin:          q.Get("pin") == "1" || q.Get("pin") == "true",
 	}
 	fromRaw, toRaw := q.Get("from"), q.Get("to")
-	out.simplify, _ = strconv.ParseFloat(q.Get("simplify"), 64)
+	if raw := q.Get("simplify"); raw != "" {
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return out, fmt.Errorf("simplify must be a non-negative number")
+		}
+		out.simplify = v
+	}
 
 	if req.Method == http.MethodPost {
 		var body struct {
 			From         json.RawMessage `json:"from"`
 			To           json.RawMessage `json:"to"`
 			Format       string          `json:"format"`
-			Simplify     float64         `json:"simplify"`
+			Simplify     *float64        `json:"simplify"`
 			Restrictions *bool           `json:"restrictions"`
 			Pin          *bool           `json:"pin"`
 		}
@@ -562,8 +578,11 @@ func readRouteParams(req *http.Request) (routeParams, error) {
 		if body.Format != "" {
 			out.format = body.Format
 		}
-		if body.Simplify > 0 {
-			out.simplify = body.Simplify
+		if body.Simplify != nil {
+			if *body.Simplify < 0 || math.IsNaN(*body.Simplify) || math.IsInf(*body.Simplify, 0) {
+				return out, fmt.Errorf("simplify must be a non-negative number")
+			}
+			out.simplify = *body.Simplify
 		}
 		if body.Restrictions != nil {
 			out.restrictions = *body.Restrictions
@@ -633,6 +652,10 @@ func inIndonesia(lat, lon float64) bool {
 }
 
 func httpErr(w http.ResponseWriter, code int, msg string) {
+	// An error body is not a cacheable representation of the route: drop any
+	// validator a previous branch may have set and forbid storing the answer.
+	w.Header().Del("ETag")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
@@ -670,23 +693,57 @@ func cors(h http.Handler) http.Handler {
 
 func gzipWrap(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Whether the body is gzipped or not, the chosen representation
+		// depends on Accept-Encoding, so every response must say so.
+		w.Header().Add("Vary", "Accept-Encoding")
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			h.ServeHTTP(w, r)
 			return
 		}
-		w.Header().Set("Content-Encoding", "gzip")
-		gz := gzip.NewWriter(w)
-		defer gz.Close()
-		h.ServeHTTP(&gzipRW{ResponseWriter: w, w: gz}, r)
+		g := &gzipRW{ResponseWriter: w}
+		defer g.close()
+		h.ServeHTTP(g, r)
 	})
 }
 
+// gzipRW starts the gzip stream on the first body write, so a status without a
+// body (304, 204) keeps Content-Encoding off, as RFC 9110 requires.
 type gzipRW struct {
 	http.ResponseWriter
-	w io.Writer
+	gz    *gzip.Writer
+	wrote bool
+	live  bool
 }
 
-func (g *gzipRW) Write(b []byte) (int, error) { return g.w.Write(b) }
+func (g *gzipRW) WriteHeader(code int) {
+	if g.wrote {
+		return
+	}
+	g.wrote = true
+	if code >= 200 && code != http.StatusNoContent && code != http.StatusNotModified {
+		g.Header().Set("Content-Encoding", "gzip")
+		g.Header().Del("Content-Length")
+		g.gz = gzip.NewWriter(g.ResponseWriter)
+		g.live = true
+	}
+	g.ResponseWriter.WriteHeader(code)
+}
+
+func (g *gzipRW) Write(b []byte) (int, error) {
+	if !g.wrote {
+		g.WriteHeader(http.StatusOK)
+	}
+	if !g.live {
+		return g.ResponseWriter.Write(b)
+	}
+	return g.gz.Write(b)
+}
+
+func (g *gzipRW) close() {
+	if g.live {
+		g.gz.Close()
+	}
+}
 
 // EncodePolyline encodes points with the given precision (5 = ~1.1m).
 func EncodePolyline(pts [][2]float64, precision int) string {
@@ -719,8 +776,19 @@ func encodeInt(v int64) string {
 
 // Simplify runs Douglas-Peucker with a tolerance in meters.
 func Simplify(pts [][2]float64, tolM float64) [][2]float64 {
+	out, _ := simplifyIndexed(pts, tolM)
+	return out
+}
+
+// simplifyIndexed is Simplify plus the original index of every kept point, so
+// callers holding indices into pts can re-project them after the drop.
+func simplifyIndexed(pts [][2]float64, tolM float64) ([][2]float64, []int) {
 	if len(pts) < 3 {
-		return pts
+		idx := make([]int, len(pts))
+		for i := range idx {
+			idx[i] = i
+		}
+		return pts, idx
 	}
 	keep := make([]bool, len(pts))
 	keep[0], keep[len(pts)-1] = true, true
@@ -742,12 +810,26 @@ func Simplify(pts [][2]float64, tolM float64) [][2]float64 {
 		}
 	}
 	out := make([][2]float64, 0, len(pts))
+	kept := make([]int, 0, len(pts))
 	for i, k := range keep {
 		if k {
 			out = append(out, pts[i])
+			kept = append(kept, i)
 		}
 	}
-	return out
+	return out, kept
+}
+
+// projectSpan maps an inclusive index range in the pre-simplify geometry into
+// the kept slice. It shrinks the range onto the nearest surviving points and
+// reports false when no sample in it survived.
+func projectSpan(kept []int, a, b int) (int, int, bool) {
+	i := sort.SearchInts(kept, a)
+	j := sort.SearchInts(kept, b+1) - 1
+	if i >= len(kept) || j < i {
+		return 0, 0, false
+	}
+	return i, j, true
 }
 
 func perpMeters(a, b, p [2]float64) float64 {
