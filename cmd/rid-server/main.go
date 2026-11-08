@@ -313,6 +313,79 @@ func trimLabel(from, to bool) string {
 
 func round6(v float64) float64 { return math.Round(v*1e6) / 1e6 }
 
+// snapRetryCandidates is how many alternative segment snaps each endpoint
+// offers once the nearest one yields no route; snapRetryTries caps how many of
+// the resulting pairs are searched. Both stay small: the nearest snap is right
+// almost every time, and a retry costs a full search.
+const (
+	snapRetryCandidates = 32
+	snapRetryTries      = 4
+	// snapRetryDeep is the wider scan used when every candidate near the pin
+	// reaches almost nothing, which is what a pin inside a dead pocket looks
+	// like: a park, a private forecourt, a few service roads behind a gate.
+	snapRetryDeep = 512
+	// snapRetryPocket is the reachability floor for a usable start. Below it
+	// the search would walk a few dozen nodes and give up.
+	snapRetryPocket = 512
+)
+
+// retryNoRoute retries a failed search from the next-nearest segment snaps.
+// Snapping only looks at geometry, so a pin in a park or inside a forecourt
+// lands on a dead end while a connected road may sit a few dozen metres away;
+// a dead-end start expands nothing, which is why the first search returns in
+// microseconds.
+func (s *server) retryNoRoute(ctx context.Context, rg *region, p routeParams, fLat, fLon, tLat, tLon float64, failF, failT graph.Snap) (graph.SnapRoute, graph.Snap, graph.Snap, bool) {
+	// Only starts that actually reach somewhere are worth a search. A pocket
+	// is often dozens of nodes wide, so the first scan can consist entirely of
+	// dead starts; widen it once before falling back to plain distance order.
+	starts := rg.g.SnapEdges(fLat, fLon, s.maxSnapM, snapRetryCandidates)
+	usable := usableStarts(rg.g, starts)
+	if len(usable) == 0 {
+		starts = rg.g.SnapEdges(fLat, fLon, s.maxSnapM, snapRetryDeep)
+		usable = usableStarts(rg.g, starts)
+	}
+	if len(usable) == 0 {
+		usable = starts
+	}
+	candsT := rg.g.SnapEdges(tLat, tLon, s.maxSnapM, snapRetryCandidates)
+	type pair struct {
+		a, b graph.Snap
+		d    float64
+	}
+	pairs := make([]pair, 0, len(usable)*len(candsT))
+	for _, a := range usable {
+		for _, b := range candsT {
+			if a.Node == failF.Node && b.Node == failT.Node {
+				continue
+			}
+			pairs = append(pairs, pair{a, b, a.Dist + b.Dist})
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].d < pairs[j].d })
+	for i := 0; i < len(pairs) && i < snapRetryTries; i++ {
+		if ctx.Err() != nil {
+			break
+		}
+		if res, err := rg.r.RouteSnapCtx(ctx, pairs[i].a, pairs[i].b, p.restrictions); err == nil {
+			return res, pairs[i].a, pairs[i].b, true
+		}
+	}
+	return graph.SnapRoute{}, graph.Snap{}, graph.Snap{}, false
+}
+
+// usableStarts keeps the snaps whose start reaches more than a pocket. An
+// isolated network is kept when nothing else is nearby, so a small island still
+// gets its retry.
+func usableStarts(g *graph.Graph, snaps []graph.Snap) []graph.Snap {
+	out := make([]graph.Snap, 0, len(snaps))
+	for _, a := range snaps {
+		if g.ForwardSize(a.Node, snapRetryPocket) > snapRetryPocket {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	p, err := readRouteParams(req)
 	if err != nil {
@@ -387,6 +460,13 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithTimeout(req.Context(), s.timeout)
 	defer cancel()
 	res, err := rg.r.RouteSnapCtx(ctx, snapF, snapT, p.restrictions)
+	if err != nil && errors.Is(err, graph.ErrNoRoute) {
+		// A dead-end snap is worth one more look before the client sees 422.
+		if res2, a, b, ok := s.retryNoRoute(ctx, rg, p, fLat, fLon, tLat, tLon, snapF, snapT); ok {
+			res, snapF, snapT, err = res2, a, b, nil
+			s.m.snapRetry.Add(1)
+		}
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, graph.ErrCanceled):

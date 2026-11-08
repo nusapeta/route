@@ -135,15 +135,30 @@ func projectOnSegment(plat, plon, alat, alon, blat, blon float64) (float64, floa
 // projection, using a slack of snapSlackM for segments whose nodes are farther
 // away than the projection itself.
 func (g *Graph) SnapEdge(lat, lon, maxMeters float64) (Snap, bool) {
-	const snapSlackM = 500.0
-	ri, ci, maxRing, cellM, ok := g.gridRing(lat, lon, maxMeters)
-	if !ok {
+	found := g.SnapEdges(lat, lon, maxMeters, 1)
+	if len(found) == 0 {
 		return Snap{}, false
 	}
+	return found[0], true
+}
 
-	best := Snap{Dist: math.MaxFloat64}
+// SnapEdges returns up to k segments within maxMeters, nearest first, one per
+// node the router would start from. The extra candidates let a caller whose
+// closest segment turns out to be a dead end retry from the next road over
+// instead of answering "no route".
+func (g *Graph) SnapEdges(lat, lon, maxMeters float64, k int) []Snap {
+	const snapSlackM = 500.0
+	if k < 1 {
+		k = 1
+	}
+	ri, ci, maxRing, cellM, ok := g.gridRing(lat, lon, maxMeters)
+	if !ok {
+		return nil
+	}
+
+	best := make([]Snap, 0, k)
 	for ring := 0; ring <= maxRing; ring++ {
-		if ring > 0 && best.Dist < math.MaxFloat64 && float64(ring-1)*cellM > best.Dist+snapSlackM {
+		if ring > 0 && len(best) == k && float64(ring-1)*cellM > best[k-1].Dist+snapSlackM {
 			break
 		}
 		for r := ri - ring; r <= ri+ring; r++ {
@@ -156,23 +171,28 @@ func (g *Graph) SnapEdge(lat, lon, maxMeters float64) (Snap, bool) {
 				c0, c1 = ci-ring, ci+ring
 			default:
 				// only the two edge columns of the ring
-				g.snapCell(lat, lon, r, ci-ring, &best)
-				g.snapCell(lat, lon, r, ci+ring, &best)
+				g.snapCell(lat, lon, r, ci-ring, &best, k)
+				g.snapCell(lat, lon, r, ci+ring, &best, k)
 				continue
 			}
 			for c := c0; c <= c1; c++ {
-				g.snapCell(lat, lon, r, c, &best)
+				g.snapCell(lat, lon, r, c, &best, k)
 			}
 		}
 	}
-	if best.Dist > maxMeters {
-		return Snap{}, false
+	n := 0
+	for _, s := range best {
+		if s.Dist > maxMeters {
+			break
+		}
+		n++
 	}
-	return best, true
+	return best[:n]
 }
 
-// snapCell evaluates every segment leaving the nodes of one grid cell.
-func (g *Graph) snapCell(lat, lon float64, r, c int, best *Snap) {
+// snapCell evaluates every segment leaving the nodes of one grid cell and keeps
+// the k nearest, ordered by distance.
+func (g *Graph) snapCell(lat, lon float64, r, c int, best *[]Snap, k int) {
 	if c < 0 || c >= g.GridNLon {
 		return
 	}
@@ -180,14 +200,14 @@ func (g *Graph) snapCell(lat, lon float64, r, c int, best *Snap) {
 	if cell+1 >= uint64(len(g.GOff)) {
 		return
 	}
-	for k := g.GOff[cell]; k < g.GOff[cell+1]; k++ {
-		u := g.GNodes[k]
+	for i := g.GOff[cell]; i < g.GOff[cell+1]; i++ {
+		u := g.GNodes[i]
 		ulat, ulon := g.Coords(u)
 		for e := g.Off[u]; e < g.Off[u+1]; e++ {
 			v := g.To[e]
 			vlat, vlon := g.Coords(v)
 			d, t, plat, plon := projectOnSegment(lat, lon, ulat, ulon, vlat, vlon)
-			if d >= best.Dist {
+			if len(*best) == k && d >= (*best)[k-1].Dist {
 				continue
 			}
 			s := Snap{Edge: uint32(e), From: u, To: v, T: t, Lat: plat, Lon: plon, Dist: d}
@@ -196,7 +216,36 @@ func (g *Graph) snapCell(lat, lon float64, r, c int, best *Snap) {
 			} else {
 				s.Node, s.Along, s.Reverse = v, (1-t)*float64(g.EdgeLenM(e)), true
 			}
-			*best = s
+			*best = insertSnap(*best, s, k)
 		}
 	}
+}
+
+// insertSnap keeps best sorted by distance, at most k long, one entry per
+// node. RouteSnap only uses the node, so two segments starting at the same node
+// would repeat the same search; the closer projection is the one kept.
+func insertSnap(best []Snap, s Snap, k int) []Snap {
+	for j := range best {
+		if best[j].Node != s.Node {
+			continue
+		}
+		if best[j].Dist <= s.Dist {
+			return best
+		}
+		best = append(best[:j], best[j+1:]...)
+		break
+	}
+	i := 0
+	for i < len(best) && best[i].Dist <= s.Dist {
+		i++
+	}
+	if i >= k {
+		return best
+	}
+	if len(best) < k {
+		best = append(best, Snap{})
+	}
+	copy(best[i+1:], best[i:len(best)-1])
+	best[i] = s
+	return best
 }
