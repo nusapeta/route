@@ -202,8 +202,10 @@ the raw tap coordinates so the line reached the pin directly.
 
 \subsection{Deployment topologies}
 The same engine supports two topologies. \textbf{T1}: one national graph, built
-from the national extract (needs about 7--8\,GB during extraction, estimated from
-the measured per-island peak). \textbf{T2}: one graph per island, served by a
+from the national extract. A national graph of 53.9\,M nodes and 110.2\,M edges
+was built with \texttt{GOMEMLIMIT=4GiB} on a 7\,GB box (1.65\,GB artifact,
+8\,min, three workers); an unbounded build is estimated at 7--8\,GB from the
+measured per-island peak. \textbf{T2}: one graph per island, served by a
 single process that selects the region by snapping and rejects cross-region
 requests; because the island extracts overlap, bounding boxes alone are
 insufficient and snapping decides. T2 keeps every build inside 3\,GB and permits
@@ -242,7 +244,10 @@ Java    & 22.74\,M & 46.73\,M & 1\,019\,MB & 58\,s & 2\,543\,MB \\
 Sumatra & 11.88\,M & 24.33\,M &   533\,MB & 18\,s & 1\,249\,MB \\
 \bottomrule
 \end{tabular}
-\caption{Extraction on a 4-thread laptop. Peak RSS includes the PBF decoder.}
+\caption{Extraction on a 4-thread laptop, format v3; peak RSS includes the PBF
+decoder. The v4 format of the same extracts is 32\,\% smaller (Java 693\,MB,
+Sumatra 364\,MB) and is built in 233\,s and 69\,s with four workers under
+\texttt{GOMEMLIMIT=4GiB}.}
 \label{tab:extract}
 \end{table}
 
@@ -542,7 +547,9 @@ harness (E2) is described in \texttt{paper/EXPERIMENTS.md} but not yet run. (iii
 526 successful queries; p99 estimates are therefore weak. (iv) Snap failures
 (coastline, forest) are excluded from percentiles and reported separately, and the
 snapping study uses injected offsets rather than recorded user taps. (v) The
-national topology is estimated, not measured, from per-island scaling.
+national topology is sized but not evaluated: the graph was built (1.65\,GB
+artifact), while its latency and accuracy are untested and the throughput
+results come from per-island serving.
 
 \section{Conclusion and future work}
 For bounded-radius routing, the interesting resource is not query time but

@@ -18,12 +18,12 @@ Valhalla/GraphHopper/OSRM CH masih butuh run sendiri sebelum masuk tabel.
 | Latency 15 km | 136-155 ms | `rid-route` / HTTP | terukur |
 | Latency 42 km | 191 ms (v3, 1 query) -> v4 ~1,6x lebih cepat; p50 server 223-283 ms di homelab berbeban | idem + `paper/RESULTS.md` §12b | terukur |
 | Throughput 42 km | v3 9,97-10,58 RPS -> v4 **13,79-16,02 RPS** @4 klien (A/B bergantian) | `scripts/loadtest.py` (i3-6100T) | terukur |
-| Throughput 7/15/148 km | 67 / 17 / 0,59 RPS | idem | terukur |
+| Throughput 7/15/148 km | **74,6** / 16,9 / 0,59 RPS (i3-6100T, 4 klien) | idem | terukur |
 | Memori vs beban | 15 -> 399 MB (4x 148 km serentak, v4) | `/proc` per tahap | terukur |
-| Turn restriction | 3.795 ban, 155 only, 587 skipped; 0 pelanggaran setelah enforcement | `rid-restcheck` | terukur |
+| Turn restriction | **3.790 ban / 593 di-skip** (build `5d3fdd1b`); 0 pelanggaran setelah enforcement | `rid-restcheck` | terukur |
 | Fallback restriction | 3,17% | idem | terukur |
-| Hilbert vs id OSM | RSS 579 → 104 MB, latency 1,5-2x | `rid-bench -order osm` | terukur |
-| eps=1.5 vs 1.0 | 2,4x lebih cepat, rute identik | `rid-bench -eps` | terukur |
+| Hilbert vs id OSM | RSS metropolitan **1.225 → 675 MB** (1,8x), p50 7-20 % lebih cepat | `rid-bench -order osm` | terukur |
+| eps=1.5 vs 1.0 | **1,4x** lebih cepat (rasio p50 0,72), rute identik 526/526 | `rid-bench -eps` | terukur |
 | Image container | 24 MB (prebuilt, alpine) | `docker image inspect` | terukur |
 | Galat snap ruas >150 m | p50 16,1 m / p95 34,9 m (node: 67,3 / 114,0) | `rid-snapcheck -bbox ... -offset 40` | terukur |
 | SnapEdge vs oracle | mean −1,25 m, 0% sampel >1 m lebih buruk | idem | terukur |

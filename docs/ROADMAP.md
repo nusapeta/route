@@ -54,7 +54,7 @@ sebanyak mungkin rute per detik.
 | M1 metadata + golden test | ✅ | format v3/v4 provenance, `/version`, regresi otomatis |
 | M2 snap ke ruas | ✅ | galat ujung 67,3 -> 16,1 m p50 |
 | M3 biaya per ekspansi | ✅ | latensi ~2x, memori -25 % |
-| M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,4 ms), `/metrics` |
+| M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,2 ms Ryzen / 0,39 ms i3-6100T), `/metrics` |
 | M5 cakupan | ✅ | v4 (Java 693 MB), ferry, motor, 7 pulau, tangga ε |
 | M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 belum |
 
@@ -179,7 +179,7 @@ menampilkan RPS/p95/fallback.
 
 | uji | hasil |
 |---|---|
-| 304 vs 200 (rute 41,7 km) | p50 **0,2 ms** vs 43,1 ms (~200x) |
+| 304 vs 200 (rute 41,7 km) | p50 **0,2 ms** (Ryzen 5 5600G) vs 43,1 ms (~200x) |
 | batas waktu 1 s pada rute 148 km | `504` pada 1,01 s, bukan 2,9 s |
 | request pendek saat 2 slot penuh, `-timeout 1s` | selesai 813 ms |
 | request pendek saat 2 slot penuh, `-timeout 20s` | selesai 2.596 ms |

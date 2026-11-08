@@ -69,7 +69,7 @@ dan preprocess, bukan latency.
 6. **Dua optimisasi yang terbukti, bukan klaim:** Hilbert ordering memangkas RSS
    metropolitan 1.225 -> 675 MB (1,8x) dan p50 7-20% lebih cepat; weighted A*
    `eps=1.5` 28% lebih cepat dari `eps=1.0` dengan 526/526 panjang rute identik.
-7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 67 RPS @7 km,
+7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 74,6 RPS @7 km,
    17 RPS @15 km, dan 42 km **13,8-16,0 RPS** pada pengukuran v4 terakhir
    (sebelumnya 11 RPS), saturasi di 4 query paralel. Untuk campuran pasangan
    <= 40 km (batas `-max-route-km`): p50 24,3 ms `-conc 1` dan plafon
@@ -323,7 +323,7 @@ Catatan lapangan:
 **Bruno** (native, environment ikut ter-import): buka folder
 `docs/bruno/routeid/` (Open Collection), lalu pilih environment `Local` atau
 `Homelab` di kanan atas. Isinya 21 request dengan test JavaScript Bruno
-(58 assertion): Meta (`healthz`/`version`/`metrics`), Route inti (points,
+(66 blok `test`): Meta (`healthz`/`version`/`metrics`), Route inti (points,
 geojson, polyline + `polyline_b64`, POST objek/string, `restrictions=0`,
 ETag → 304), kelas jarak (42 km, 148 km), region lain (Sumatra, Bali), dan 4
 kasus error. Versi CLI:
@@ -637,7 +637,7 @@ Temuan utama (601 pasang tetap, Java):
 
 `paper/` berisi draf short paper (ACM `acmart`), `refs.bib` (DOI terverifikasi),
 `RESULTS.md` (semua angka + cara reproduksi), `EXPERIMENTS.md` (checklist
-kekurangan: baseline OSRM, ground truth Google, turn restriction, build nasional).
+kekurangan: ground truth Google, pembanding selain OSRM MLD).
 
 ## Turn restriction
 

@@ -1,11 +1,12 @@
 # Paper draft — RouteID
 
-Status: **draf lengkap, siap dikompilasi; baseline & ground truth belum dijalankan.**
+Status: **draf lengkap, siap dikompilasi; E1 (baseline OSRM) selesai 2026-11-07,
+E2 (ground truth) belum.**
 
 | File | Isi |
 |---|---|
 | `main.tex` | Draf short paper (ACM `acmart`, `sigconf`, nonacm) |
-| `refs.bib` | 20 referensi, DOI sudah diverifikasi lewat Crossref |
+| `refs.bib` | 19 referensi, DOI sudah diverifikasi lewat Crossref |
 | `RESULTS.md` | Semua angka di paper + perintah untuk mereproduksinya |
 | `EXPERIMENTS.md` | Checklist kekurangan (E1–E7) sebelum submit |
 | `results/*.csv` | Data mentah benchmark (601 pasang, 4 konfigurasi) |
@@ -29,20 +30,28 @@ Rencana kerja dan budget performa ada di
 
 Ledger lengkap (klaim, angka, bukti, status) ada di
 [`COMPARISON.md`](COMPARISON.md). Aturannya: hanya angka terukur yang boleh masuk
-kolom routeid; kolom pembanding menunggu E1.
+kolom routeid.
 
-- Ekstraksi Java: 58 s, peak 2.5 GB, graph 1 019 MB (Tabel 1).
-- Latency per bucket dengan 601 pasang tetap (Tabel 2).
+- Ekstraksi Java (tabel ekstraksi): 22,7 jt node, 46,7 jt edge, graf 693 MB
+  (v3: 1 019 MB), 3m53s dengan 4 worker.
+- Latency per bucket dengan 601 pasang tetap (tabel latency).
 - ε=1.5 tidak mengubah panjang rute pada 526/526 pasang; ε=2.0 → 1 kasus +11 %
-  (Tabel 3).
-- Hilbert ordering: −7..20 % p50, −7..16 % p95, RSS metropolitan 1 225 → 675 MB
-  (Tabel 4).
-- RSS: 13 MB setelah start, 103 MB pada burst 50 km (Tabel 5).
+  (tabel inflation).
+- Hilbert ordering: 7-20 % lebih cepat di p50, 7-16 % di p95, RSS metropolitan
+  1.225 → 675 MB (tabel ordering).
+- RSS per tahap beban (tabel RSS): 15 MB setelah start, 89 MB setelah 20 rute
+  15 km, 385 MB setelah satu rute 148 km, 607 MB setelah satu rute 579 km.
+- E1 vs OSRM MLD di mesin yang sama (tabel comparison): graf 693 MB vs 5,08 GB,
+  preprocess 28 s vs 250 s, p50 35,1 ms vs 1,4 ms, p95 522 ms vs 3,4 ms.
+- Jarak rute pada 332 pasang E1: median −0,005 %, p95 21,05 %, max 48,30 %;
+  gerbang p95 <12 % gagal, sebabnya di `RESULTS.md` §14-§15 (bukan restriction).
 
 ## Klaim yang **belum** didukung (jangan submit sebelum ini)
 
-- Perbandingan terkontrol dengan OSRM (E1).
-- Akurasi jarak/geometri vs referensi (Google/Mapbox) (E2).
-- Build nasional terukur — masih estimasi (E5).
+- Akurasi jarak/geometri vs referensi independen (Google/Mapbox) (E2). E1 bukan
+  pengganti karena OSRM memakai graf OSM yang sama.
+- Pembanding selain OSRM MLD (Valhalla, GraphHopper, OSRM CH).
+- Latency dan akurasi pada graf nasional (E5). Yang sudah terukur hanya build-nya:
+  1.650 MB, 8m08s (`docs/ROADMAP.md` §M5).
 
 Kalimat "reference points" di §5.7 sengaja dibuat eksplisit soal status ini.
