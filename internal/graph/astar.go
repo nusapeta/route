@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/bits"
+	"sync/atomic"
 )
 
 // Route is a routing result.
@@ -47,12 +49,90 @@ const (
 	maxExpansions = 6_000_000
 	// maxSlots caps the open addressing table (33M entries).
 	maxSlots = 1 << 25
+	// initialSlots is the starting open-addressing table size (64K entries, ~0.75 MiB).
+	initialSlots = 1 << 16
 )
+
+// WorkspaceStats exposes metrics about the workspace pool.
+type WorkspaceStats struct {
+	TotalSlots   uint64
+	TotalBytes   uint64
+	GrowsTotal   uint64
+	ShrinksTotal uint64
+}
+
+// WorkspacePool manages reusable workspaces shared across graphs/routers.
+type WorkspacePool struct {
+	ch           chan *workspace
+	concurrency  int
+	maxSlots     uint32
+	growsTotal   atomic.Uint64
+	shrinksTotal atomic.Uint64
+	all          []*workspace
+}
+
+// NewWorkspacePool creates a shared pool of workspaces.
+// If maxSlotsPerWorkspace <= 0, maxSlots is used.
+//
+// The cap is floored to a power of two: the open-addressing probe walks
+// "i = (i+1) & mask", which only covers the whole table when its length is a
+// power of two. A budget such as "-workspace-mb 1" yields 87.381 slots, and a
+// non-power-of-two cap would make probe cycle forever in a full table.
+func NewWorkspacePool(concurrency int, maxSlotsPerWorkspace uint32) *WorkspacePool {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if maxSlotsPerWorkspace == 0 {
+		maxSlotsPerWorkspace = maxSlots
+	}
+	maxSlotsPerWorkspace = floorPow2(maxSlotsPerWorkspace)
+	start := min(initialSlots, maxSlotsPerWorkspace)
+	wp := &WorkspacePool{
+		ch:          make(chan *workspace, concurrency),
+		concurrency: concurrency,
+		maxSlots:    maxSlotsPerWorkspace,
+		all:         make([]*workspace, concurrency),
+	}
+	for i := range concurrency {
+		ws := newWorkspace(start, 1<<20)
+		ws.pool = wp
+		wp.all[i] = ws
+		wp.ch <- ws
+	}
+	return wp
+}
+
+// Stats returns workspace capacity and resize counts. Slots are read from an
+// atomic field per workspace: /metrics is scraped concurrently with rehash.
+func (wp *WorkspacePool) Stats() WorkspaceStats {
+	var totalSlots uint64
+	for _, ws := range wp.all {
+		totalSlots += uint64(ws.slots.Load())
+	}
+	return WorkspaceStats{
+		TotalSlots:   totalSlots,
+		TotalBytes:   totalSlots * 12,
+		GrowsTotal:   wp.growsTotal.Load(),
+		ShrinksTotal: wp.shrinksTotal.Load(),
+	}
+}
+
+func (wp *WorkspacePool) get(g *Graph) *workspace {
+	ws := <-wp.ch
+	ws.resetForGraph(g)
+	return ws
+}
+
+func (wp *WorkspacePool) put(ws *workspace) {
+	ws.trimPathBuffers()
+	ws.shrinkIfNeeded()
+	wp.ch <- ws
+}
 
 // Router runs weighted A* queries over a Graph with a bounded workspace pool.
 type Router struct {
 	g         *Graph
-	pool      chan *workspace
+	wp        *WorkspacePool
 	eps       float32 // heuristic weight: 1.0 = optimal, 1.25 = ~4x faster
 	strict    bool    // enforce turn restrictions
 	turnScale float32 // multiplier on the turn cost table; 0 disables it
@@ -62,28 +142,25 @@ type Router struct {
 
 // NewRouter creates a router; concurrency bounds peak memory.
 func NewRouter(g *Graph, concurrency int) *Router {
-	if concurrency < 1 {
-		concurrency = 1
-	}
-	slots := uint32(1 << 16)
-	for slots < g.NodeCount && slots < 1<<20 {
-		slots <<= 1
-	}
-	r := &Router{
+	return NewRouterWithPool(g, NewWorkspacePool(concurrency, maxSlots))
+}
+
+// NewRouterWithPool creates a router reusing a shared WorkspacePool.
+func NewRouterWithPool(g *Graph, pool *WorkspacePool) *Router {
+	return &Router{
 		g:           g,
-		pool:        make(chan *workspace, concurrency),
+		wp:          pool,
 		eps:         1.5,
 		strict:      true,
 		turnScale:   defaultTurnScale,
 		maxSpeedMps: g.MaxSpeedMps(),
 	}
-	for i := 0; i < concurrency; i++ {
-		r.pool <- newWorkspace(slots, g.EdgeCount)
-	}
-	return r
 }
 
-// Epsilon reports the heuristic weight.
+// Pool returns the router's WorkspacePool.
+func (r *Router) Pool() *WorkspacePool {
+	return r.wp
+}
 func (r *Router) Epsilon() float32 { return r.eps }
 
 // Strict reports whether turn restrictions are enforced.
@@ -111,8 +188,6 @@ func (r *Router) SetEpsilon(eps float32) {
 }
 
 // workspace is the per-query open-addressing table. Keys and generation stamps
-// share one word (gen<<nodeBits | node+1) so a probe touches one array instead of
-// two and the table costs 12 B/slot instead of 16 B/slot.
 type workspace struct {
 	keys     []uint32
 	gs       []float32
@@ -125,9 +200,97 @@ type workspace struct {
 	used     int
 	cur      uint32
 	heap     itemHeap
+	pool     *WorkspacePool
+	nodeBuf  []uint32      // reusable node sequence built by reconstruct
+	edgeBuf  []uint32      // reusable came-from chain built by reconstruct
+	slots    atomic.Uint32 // len(keys), readable while a query rehashes
 }
 
-// workspaceBits picks how many bits the search state needs, leaving the rest for
+func nextPow2(v uint32) uint32 {
+	if v <= 1 {
+		return 1
+	}
+	v--
+	v |= v >> 1
+	v |= v >> 2
+	v |= v >> 4
+	v |= v >> 8
+	v |= v >> 16
+	return v + 1
+}
+
+// floorPow2 rounds down to a power of two (the probe invariant), at least 1.
+func floorPow2(v uint32) uint32 {
+	if v < 2 {
+		return 1
+	}
+	return 1 << (bits.Len32(v) - 1)
+}
+
+func (w *workspace) resetForGraph(g *Graph) {
+	bits := workspaceBits(g.EdgeCount)
+	if bits > 28 {
+		panic("graph: edge count exceeds the packed workspace limit")
+	}
+	genBits := 32 - bits
+	maxGen := (uint32(1) << genBits) - 1
+	nodeMask := (uint32(1) << bits) - 1
+
+	if w.nodeBits != bits || w.genBits != genBits {
+		w.nodeBits = bits
+		w.genBits = genBits
+		w.nodeMask = nodeMask
+		w.maxGen = maxGen
+		for i := range w.keys {
+			w.keys[i] = 0
+		}
+		w.cur = 1
+		w.used = 0
+		w.heap = w.heap[:0]
+		return
+	}
+	w.reset()
+}
+
+func (w *workspace) shrinkIfNeeded() {
+	if len(w.keys) <= initialSlots || len(w.keys) <= 8*w.used {
+		return
+	}
+	target := uint32(w.used * 2)
+	if target < initialSlots {
+		target = initialSlots
+	}
+	target = nextPow2(target)
+	if target >= uint32(len(w.keys)) {
+		return
+	}
+	w.rehash(target)
+	if w.pool != nil {
+		w.pool.shrinksTotal.Add(1)
+	}
+}
+func (w *workspace) rehash(n uint32) {
+	oldK, oldG, oldC := w.keys, w.gs, w.came
+	w.keys = make([]uint32, n)
+	w.gs = make([]float32, n)
+	w.came = make([]uint32, n)
+	w.mask = n - 1
+	w.used = 0
+	w.slots.Store(n)
+	for i := range oldK {
+		k := oldK[i]
+		if k>>w.nodeBits != w.cur {
+			continue
+		}
+		node := k&w.nodeMask - 1
+		idx, _ := w.probe(node)
+		w.keys[idx] = k
+		w.gs[idx] = oldG[i]
+		w.came[idx] = oldC[i]
+		w.used++
+	}
+}
+
 // the generation stamp. The state is an edge index, so edge count sets the budget.
 func workspaceBits(entries uint32) (bits uint) {
 	bits = 1
@@ -145,7 +308,7 @@ func newWorkspace(slots, entries uint32) *workspace {
 		panic("graph: edge count exceeds the packed workspace limit")
 	}
 	genBits := 32 - bits
-	return &workspace{
+	w := &workspace{
 		keys:     make([]uint32, slots),
 		gs:       make([]float32, slots),
 		came:     make([]uint32, slots),
@@ -155,6 +318,22 @@ func newWorkspace(slots, entries uint32) *workspace {
 		nodeMask: (uint32(1) << bits) - 1,
 		maxGen:   (uint32(1) << genBits) - 1,
 		cur:      1,
+	}
+	w.slots.Store(slots)
+	return w
+}
+
+// maxReusePath bounds the path scratch kept per workspace. A single long-haul
+// query up to the 2M-edge reconstruction guard must not pin tens of megabytes
+// in every pooled workspace, so longer buffers are released on put.
+const maxReusePath = 1 << 16
+
+func (w *workspace) trimPathBuffers() {
+	if cap(w.nodeBuf) > maxReusePath {
+		w.nodeBuf = nil
+	}
+	if cap(w.edgeBuf) > maxReusePath {
+		w.edgeBuf = nil
 	}
 }
 
@@ -212,22 +391,20 @@ func (w *workspace) set(n uint32, g float32, came uint32) bool {
 }
 
 func (w *workspace) grow() bool {
-	if uint32(len(w.keys)) >= maxSlots {
+	capSlots := uint32(maxSlots)
+	if w.pool != nil && w.pool.maxSlots > 0 {
+		capSlots = w.pool.maxSlots
+	}
+	if uint32(len(w.keys)) >= capSlots {
 		return false
 	}
-	oldK, oldG, oldC := w.keys, w.gs, w.came
-	n := len(oldK) * 2
-	w.keys = make([]uint32, n)
-	w.gs = make([]float32, n)
-	w.came = make([]uint32, n)
-	w.mask = uint32(n - 1)
-	w.used = 0
-	for i := range oldK {
-		k := oldK[i]
-		if k>>w.nodeBits != w.cur {
-			continue
-		}
-		_ = w.set(k&w.nodeMask-1, oldG[i], oldC[i])
+	n := uint32(len(w.keys) * 2)
+	if n > capSlots {
+		n = capSlots
+	}
+	w.rehash(n)
+	if w.pool != nil {
+		w.pool.growsTotal.Add(1)
 	}
 	return true
 }
@@ -318,11 +495,9 @@ func relaxedLadder(eps float32) []float32 {
 
 func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps float32) (Route, error) {
 	g := r.g
-	w := <-r.pool
-	defer func() { r.pool <- w }()
-	w.reset()
+	w := r.wp.get(g)
+	defer r.wp.put(w)
 	h := r.newHctx(dst, eps)
-
 	for e := g.Off[src]; e < g.Off[src+1]; e++ {
 		ee := uint32(e)
 		g0 := g.EdgeTimeDs(ee)
@@ -464,7 +639,7 @@ func (h *hctx) estEdge(g *Graph, e uint32) float32 {
 // reconstruct walks the came-from chain of edges and turns it into a node
 // sequence src..dst plus aggregated length and time.
 func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
-	var edges []uint32
+	edges := w.edgeBuf[:0]
 	e := goal
 	for {
 		edges = append(edges, e)
@@ -477,7 +652,9 @@ func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
 			return Route{}, ErrNoRoute
 		}
 	}
-	nodes := make([]uint32, 0, len(edges)+1)
+	w.edgeBuf = edges
+
+	nodes := w.nodeBuf[:0]
 	nodes = append(nodes, src)
 	var dist, ferry uint32
 	var tm float32
@@ -500,6 +677,7 @@ func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
 			}
 		}
 	}
+	w.nodeBuf = nodes
 	if r.turnScale != 0 && len(nodes) > 2 {
 		for i := 1; i+1 < len(nodes); i++ {
 			ax, ay := r.g.dirTo(nodes[i-1], nodes[i])
@@ -507,8 +685,13 @@ func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
 			tm += turnCostDs(ax, ay, bx, by) * r.turnScale
 		}
 	}
+	// The workspace goes back to the pool as soon as search returns, so the
+	// caller needs its own copy; one exact-size allocation replaces the grow
+	// chains the old edge/node appends produced.
+	out := make([]uint32, len(nodes))
+	copy(out, nodes)
 	return Route{
-		Nodes:      nodes,
+		Nodes:      out,
 		DistanceM:  dist,
 		TimeDs:     uint32(math.Round(float64(tm))),
 		FerryM:     ferry,

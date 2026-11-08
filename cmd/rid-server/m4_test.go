@@ -129,6 +129,9 @@ func TestMetricsText(t *testing.T) {
 	m.canceled.Store(5)
 	m.tooFar.Store(6)
 	m.errSnap.Store(7)
+	m.wsPoolFn = func() (uint64, uint64, uint64, uint64) {
+		return 65536, 786432, 2, 1
+	}
 	m.observe(200, 25*time.Millisecond)
 	m.observe(304, 5*time.Millisecond)
 	m.observe(504, 11*time.Second)
@@ -150,6 +153,10 @@ func TestMetricsText(t *testing.T) {
 		"route_rate_limited_total 4",
 		"route_canceled_total 5",
 		`route_errors_total{reason="too_far"} 6`,
+		"routeid_workspace_slots 65536",
+		"routeid_workspace_bytes 786432",
+		"routeid_workspace_grows_total 2",
+		"routeid_workspace_shrinks_total 1",
 		`route_errors_total{reason="snap"} 7`,
 	} {
 		if !strings.Contains(body, want) {

@@ -67,6 +67,17 @@ tidak ada tes regresi anggaran memori.
 **Lulus bila.** Satu perintah menghasilkan tabel memori yang bisa dibandingkan
 antar commit; CI menjalankan tes regresi memori (skala kecil, deterministik).
 
+**Status (2026-11-08).** Metrik terkirim sebagai gauge **tanpa label region**
+(`routeid_workspace_slots`, `routeid_workspace_bytes`,
+`routeid_workspace_grows_total`, `routeid_workspace_shrinks_total`): sejak W1
+tabel dipakai bersama lintas region, jadi label `region` akan menyesatkan.
+`scripts/memcheck.sh` hanya membaca `/metrics` + `smaps_rollup`; pengukuran
+beban tetap memakai `scripts/loadtest.py` (belum digabung jadi satu perintah),
+jadi gerbang "satu perintah" belum lulus. Tes regresi yang ada:
+`TestWorkspaceShrinkHysteresis`, `TestWorkspaceMaxSlotsBudget`,
+`TestWorkspaceStatsConcurrent` (gagal di `-race` bila `Stats` membaca tabel
+tanpa atomik, sudah dibuktikan), `TestMetricsText`, `TestMaxRouteFastReject`.
+
 ### W1. Memori workspace (dampak terbesar)
 
 **Masalah.** 12 tabel (region x `-conc`), masing-masing tumbuh 12 B/slot tanpa
@@ -92,6 +103,36 @@ menaikkan container ke 629 MiB, padahal halaman graf hanya ~45 MB.
 RSS <= 256 MB (dari ~629 MiB), tanpa perubahan satu pun jarak rute pada 332
 pasangan E1, tidak ada 500/OOM; rute <=50 km tetap 332/332 cocok.
 
+**Status (2026-11-08): dikerjakan W1.1-W1.4.** Detail angka di
+`paper/RESULTS.md` §17.
+
+- W1.1 pool bersama: `graph.WorkspacePool` di level server, satu pool `-conc`
+  slot yang di-*rebind* per graf (`resetForGraph` menghitung ulang
+  `nodeBits/genBits`, tabel dikosongkan bila berubah). Router kini memegang
+  `wp *WorkspacePool`; `NewRouter` tetap ada untuk pemakai library
+  (`rid-route`, `rid-bench`) dan membuat poolnya sendiri.
+- W1.2 anggaran: flag `-workspace-mb` dipecah rata ke `-conc` slot (`12 B`/slot).
+  Default `0` = **tanpa** anggaran eksplisit (plafon lama `maxSlots` 33 M
+  slot = 384 MB/slot), bukan 256 MB/slot seperti draf: angka itu perlu
+  pengukuran deploy dulu, dan default yang lebih kecil bisa menukar akurasi
+  dengan 422 pada rute sah. Pemakaian dilaporkan di
+  `routeid_workspace_bytes`, bukan ditebak.
+- W1.3 mulai kecil + shrink: 65.536 slot (0,75 MB) awal; setelah query, bila
+  `cap > 8 x used`, rehash turun ke `max(65.536, 2 x used)`. Histeresis 8x
+  terbukti cukup: 600 pasangan campuran memicu 84-86 shrink dan 200-229 grow,
+  wall-clock identik dengan build lama (172,2 vs 174,3 s, §17b).
+- W1.4 konkurensi total: `-conc` sekarang berarti total lintas region, sesuai
+  teks rencana; help text-nya diperbarui.
+- A/B di mesin uji (graf yang sama dimuat 3x, 600 pasangan identik):
+  anon 322 -> **213 MB** (`-conc 2`) dan 555 -> **425 MB** (`-conc 4`);
+  RSS ikut turun 2004 -> 1895 MB dan 2236 -> 2107 MB (sisa RSS adalah halaman
+  `mmap` 3 x 693 MB yang tidak dibandingkan). Hasil rute identik: 519 x 200,
+  81 x 422 di keempat run.
+- Gerbang "RSS <= 256 MB di deploy 3 region" **belum** dinyatakan lulus:
+  angka di atas dari mesin uji dengan graf 3x Java. Yang harus diukur adalah
+  container homelab setelah deploy (Java + Sumatra + Nusa-Tenggara), dan itu
+  dicatat di `README.md` §"Homelab uji" pada commit yang sama.
+
 ### W2. Akurasi B: kejar p95 21% -> <=12%
 
 **Masalah.** Ekor selisih jarak E1 berasal dari perbedaan fungsi biaya (A*
@@ -114,6 +155,14 @@ itu perbaikan harus menyentuh model biaya, bukan menambah penalti belok
 
 **Lulus bila.** p95 |Δ| <= 12% pada 332 pasangan E1, median <= 0,1%, dan
 20 outlier teratas punya penjelasan tertulis (siapa yang salah dan kenapa).
+
+**Status (2026-11-08): belum dikerjakan.** Yang selesai di putaran ini hanya
+sisi *kontrak* kelas rute, bukan model biaya: `-max-route-km` (default 40)
+menolak lebih awal dan membuat segmentasi <= 40 km eksplisit, dan pada segmen
+itu p95 sudah 7,44% (§16c). Tabel kecepatan
+(`internal/extract/extract.go:111-168`) tidak diubah: itu mengubah
+`ProfileHash()` dan menuntut rebuild graf 3 region + E1 ulang, jadi harus
+menjadi commit sendiri dengan diff statistik E1 yang dilampirkan.
 
 ### W3. Akurasi C: ground truth minimal (E2-lite)
 
@@ -146,6 +195,12 @@ penilaian, dan angka presisi yang bisa direproduksi.
 
 **Lulus bila.** p50 30-50 km <= 100 ms, 148 km <= 1,5 s, p95 tidak naik, jarak
 rute identik pada set regresi, RSS tidak naik.
+
+**Status (2026-11-08): W4.3 sebagian, W4.1/W4.2 belum.** Yang terpasang hanya
+scratch buffer path per workspace (`nodeBuf`/`edgeBuf`, dipotong bila
+`cap > 64 K`) supaya rekonstruksi rute tidak mengalokasi slice baru tiap
+request. Bidirectional A* belum dieksperimen, jadi target p50/p95 di atas belum
+diklaim.
 
 ## 4. Urutan & gerbang
 

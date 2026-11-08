@@ -888,3 +888,71 @@ GOMEMLIMIT=768MiB bin/rid-server -graph data/java.graph -graph data/sumatra.grap
 Catatan: angka latency E1 (§13c) untuk segmen ini tidak dipakai — sebagian
 baris 0-5 km/30-50 km tercatat 1-4 ms (terkontaminasi cache/alat ukur), jadi
 tabel di atas adalah pengukuran ulang bersih di mesin yang sama dengan deploy.
+
+## 17. Pool workspace bersama + shrink (A/B, Ryzen 5 5600G)
+
+§5 mengukur tabel workspace sebagai penyebab kenaikan RSS setelah beban, dan
+§16 mencatat RSS 805 MB pada deploy 3 region. Bagian ini mengukur **pengaruhnya**:
+sebelum (`f9693f8`) vs sesudah (pool bersama `-conc` + anggaran `-workspace-mb`
++ shrink histeresis 8x, `docs/PLAN-resource-accuracy.md` W1).
+
+### 17a. Metode
+- Mesin: AMD Ryzen 5 5600G (12 thread), 15 GB, Linux 7.2.15, Go 1.27.3 —
+  **bukan** mesin deploy, jadi yang dibandingkan adalah delta antar build di
+  mesin yang sama, bukan angka absolut i3-6100T.
+- Graph: `data/java.graph` (`5d3fdd1b`, 22,71 jt node, 46,68 jt edge, 693 MB)
+  di-`mmap` **tiga kali** lewat symlink (`/tmp/g3/java{,2,3}.graph`) supaya
+  jumlah region sama dengan deploy (Java + Sumatra + Nusa-Tenggara). Konsekuensi:
+  halaman file resident jadi 3x693 MB dan tidak sebanding dengan deploy nyata;
+  yang dibandingkan adalah **anon** (tabel workspace + heap Go) dan
+  `routeid_workspace_bytes`.
+- Beban identik: 600 pasang `paper/results/pairs-java.csv` berurutan, HTTP tanpa
+  keep-alive, `-rate 0 -timeout 60s`, tanpa `-max-route-km` (kedua build
+  menjalankan himpunan yang sama). Hasil kedua build sama: **519 x 200,
+  81 x 422** (`snap` 72, `no_route` 2, `too_far` 7).
+- Baca memori: `/proc/<pid>/smaps_rollup` (`Rss`, `Anonymous`) sesudah semua
+  query; metrik `routeid_workspace_*` dari `/metrics`.
+
+### 17b. Hasil
+
+| `-conc` | build | anon sesudah | RSS sesudah | tabel workspace | grows / shrinks | wall |
+|---|---|---|---|---|---|---|
+| 2 | sebelum (`f9693f8`) | 322 MB | 2004 MB | tak terukur (6 tabel) | — | 174,3 s |
+| 2 | sesudah | **213 MB** (-34%) | 1895 MB | 25 MB (2.097.152 slot) | 200 / 84 | 172,2 s |
+| 4 | sebelum (`f9693f8`) | 555 MB | 2236 MB | tak terukur (12 tabel) | — | 173,8 s |
+| 4 | sesudah | **425 MB** (-23%) | 2107 MB | 138 MB (11.534.336 slot) | 229 / 86 | 172,2 s |
+
+- Penghematan berasal dari dua hal yang bisa dipisah: tabel = `-conc` (bukan
+  region x `-conc`) dan tabel mengecil setelah rute panjang. Pada `-conc 2`
+  tabel akhir hanya 25 MB karena 84 shrink mengembalikan kapasitas; pada
+  `-conc 4` tersisa 138 MB (34,6 MB/slot) karena ambang shrink (`cap > 8 x used`)
+  belum terpenuhi untuk tabel yang masih terisi.
+- Latency tidak berubah: wall 172-174 s untuk 600 pasang di keempat run; shrink
+  (86 rehash per 600 query) tidak terlihat di total.
+- Tidak ada perubahan hasil rute: 519/81 identik pada keempat run.
+- Idle anon 4-9 MB di semua run; RSS idle 12-17 MB (halaman graf belum tersentuh).
+
+### 17c. Anggaran `-workspace-mb`
+Dengan `-workspace-mb 256 -conc 2` (128 MB/slot), himpunan pasangan <= 40 km
+(298 rute, `-max-route-km` default) berhenti di **126 MB** tabel (2 x 5.242.880 slot,
+`grows_total` 150, `shrinks_total` 60) — di
+bawah anggaran, jadi 40 km tidak menyentuh plafon. Bila plafon tersentuh, klien
+menerima `422 {"error":"search space exhausted (route too long)"}`, bukan OOM:
+`-conc 1 -workspace-mb 1` (87.381 slot) untuk rute 42 km menjawab **422 dalam
+57 ms** dengan tabel tetap 65.536 slot (0,75 MB), `grows_total` 0.
+
+Catatan implementasi: anggaran bukan pangkat dua (87.381) sempat diteruskan
+sebagai `maxSlots`, sedangkan probe memakai `i = (i+1) & mask` — tabel tidak
+pernah penuh merata, probe berputar tanpa henti, dan request menggantung
+(terukur: tidak ada jawaban dalam 300 s). Perbaikan: `floorPow2` pada anggaran
+dan slot awal `min(initialSlots, maxSlots)`; regresi dikunci
+`TestWorkspaceBudgetNonPow2`.
+
+### 17d. Reproduksi
+```bash
+git worktree add /tmp/routeid-old f9693f8 && (cd /tmp/routeid-old && go build -o /tmp/rid-server-old ./cmd/rid-server)
+ln -s $PWD/data/java.graph /tmp/g3/java{,2,3}.graph
+# masing-masing build: 3 x -graph, -conc N, 600 pasang, lalu
+grep -E "^Rss:|^Anonymous:" /proc/$(pgrep -x rid-server)/smaps_rollup
+curl -s localhost:PORT/metrics | grep ^routeid_workspace_
+```

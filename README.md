@@ -58,9 +58,11 @@ dan preprocess, bukan latency.
    **815 MB** setelah 600 pasangan campuran di E1 — OSRM 2,45 GiB untuk beban
    yang sama. Pengukuran ulang (3 region, `-conc 4`): halaman file/mmap yang
    resident hanya ~45 MB; sisa RSS adalah tabel workspace `keys`/`gs`/`came`
-   12 B/slot per slot konkurensi **per region**, yang dobel saat load 80%
-   (rute 148 km, 3,16 jt ekspansi → 4 M slot = 48 MB/slot) dan kapasitasnya
-   bertahan di pool sampai restart. Frontier heap A* cuma ~25 ribu item.
+   12 B/slot. Sejak pool bersama + shrink, tabel = `-conc` (bukan region ×
+   `-conc`) dan mengecil sendiri: A/B 600 pasangan yang sama, graf Java
+   dimuat 3x, `-conc 2` (`paper/RESULTS.md` §17) turun dari 322 MB menjadi
+   **213 MB anon** (−34%) dengan 519 rute identik. Frontier heap A* cuma ~25
+   ribu item.
 5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
    dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
    hanya 3,17% pada data uji.
@@ -70,7 +72,7 @@ dan preprocess, bukan latency.
 7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 67 RPS @7 km,
    17 RPS @15 km, dan 42 km **13,8-16,0 RPS** pada pengukuran v4 terakhir
    (sebelumnya 11 RPS), saturasi di 4 query paralel. Untuk campuran pasangan
-   <= 40 km (batas desain aplikasi): p50 24,3 ms `-conc 1` dan plafon
+   <= 40 km (batas `-max-route-km`): p50 24,3 ms `-conc 1` dan plafon
    **23,5-24,9 RPS** (`paper/RESULTS.md` §16). Ini kapasitas routeid
    sendiri; E1 menunjukkan OSRM ~25x lebih cepat p50 untuk satu query.
 
@@ -196,7 +198,7 @@ Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`,
 | `GET /route?from=lat,lng&to=lat,lng` | rute. Opsional: `format=json\|points\|geojson\|polyline`, `simplify=<m>`, `pin=1`, `restrictions=0` |
 | `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan **provenance** (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile_sha256`) |
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
-| `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}` |
+| `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
 
 `/healthz` dan `/version` menjawab "graph dan binary mana yang sedang jalan",
 jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
@@ -221,6 +223,12 @@ bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
 - **Rate limit `-rate`/`-burst` (default 15/menit per IP, burst 5)** → `429` +
   `Retry-After`. Di belakang reverse proxy pakai `-trust-proxy` supaya IP diambil
   dari `X-Forwarded-For`; tanpa flag itu header diabaikan (tidak bisa dipalsukan).
+- **Batas jarak `-max-route-km` (default 40, `0` = nonaktif).** Dua penjagaan:
+  jarak garis lurus (great-circle, batas bawah jarak tempuh) ditolak `422` tepat
+  setelah validasi koordinat, sebelum ETag/rate-limit/snap/A*; lalu jarak
+  tempuh hasil rute dicek lagi setelah `RouteSnapCtx` supaya rute pendek yang
+  berbelok jauh tetap ditolak. Keduanya menaikkan `reason="too_far"` di
+  `/metrics` dan batasnya ikut masuk fingerprint ETag.
 - **Biaya belok `-turn-penalty` (default 0,25, `0` = waktu murni).** Biaya
   belok dibaca dari sudut antara arah datang dan arah keluar
   (22,5°/67,5°/135° → 2/7,5/20 s, dikali flag) dan masuk ke `duration_s`,
@@ -228,7 +236,21 @@ bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
   mean 3,60% → 3,50%, ETA +1,6% median (`paper/RESULTS.md` §15).
 - **Bobot heuristik `-eps` (default 1,5, `1,0` = optimal).** Turun ke 1,2 di
   E1 menghasilkan rute identik dengan 20% ekspansi lebih banyak, jadi 1,5
-  dipertahankan.
+  dipertahankan. `-eps`, `-turn-penalty`, dan `-max-route-km` semuanya masuk
+  fingerprint ETag: restart dengan nilai berbeda membatalkan cache lama.
+- **Pool workspace bersama `-conc` + anggaran `-workspace-mb`.** Tabel A*
+  (12 B/slot: `keys`, `gs`, `came`) tidak lagi disimpan per region × `-conc`;
+  satu pool sebesar `-conc` dipakai ulang lintas region dan di-*rebind* ke
+  graf yang dilayani (`nodeBits`/`mask`/generasi dihitung ulang). Tabel
+  dimulai dari 65.536 slot (0,75 MB) dan hanya tumbuh saat rute panjang
+  membutuhkan; saat dikembalikan ke pool dan terisi < 1/8 kapasitas, tabel
+  mengecil lagi (histeresis 8x) sehingga satu rute 500 km tidak menahan
+  puluhan MB di semua slot. `-workspace-mb` (default `0` = tanpa anggaran
+  eksplisit, plafon lama 384 MB/slot) membagi anggaran ke `-conc` slot;
+  tembus anggaran → `422 {"error":"search space exhausted (route too long)"}`
+  (lihat `routeid_workspace_bytes`), bukan OOM.
+  `routeid_workspace_slots`/`_bytes` menunjukkan biaya nyata saat ini, `_grows_total`
+  dan `_shrinks_total` menunjukkan berapa kali tabel tumbuh/mengecil.
 - Semua angka di atas terlihat di `/metrics`, jadi tidak perlu log untuk tahu
   berapa ekspansi/fallback/penolakan yang terjadi.
 

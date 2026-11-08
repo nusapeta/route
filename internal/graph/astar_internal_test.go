@@ -169,3 +169,144 @@ func TestTurnCostBuckets(t *testing.T) {
 		}
 	}
 }
+func TestWorkspaceShrinkHysteresis(t *testing.T) {
+	wp := NewWorkspacePool(1, 1<<20)
+	g := &Graph{EdgeCount: 1 << 19} // ~500K edges so nodeMask doesn't alias
+	ws := wp.get(g)
+
+	// Populate enough items to force growing above initialSlots (65536)
+	// 65536 * 0.8 = 52428.8, so inserting 60000 items forces grow to 131072.
+	for i := uint32(0); i < 60000; i++ {
+		if !ws.set(i, float32(i), i) {
+			t.Fatalf("failed to set item %d", i)
+		}
+	}
+	if len(ws.keys) <= int(initialSlots) {
+		t.Fatalf("expected keys to grow past initialSlots, got %d", len(ws.keys))
+	}
+	grownCap := len(ws.keys)
+	t.Logf("len(keys)=%d used=%d", len(ws.keys), ws.used)
+	// Put back with used=60000. len(ws.keys) is 131072.
+	// 131072 is NOT > 8 * 60000 (480000), so no shrink should occur yet.
+	wp.put(ws)
+	st := wp.Stats()
+	if st.ShrinksTotal != 0 {
+		t.Fatalf("unexpected shrink when used is large: %d", st.ShrinksTotal)
+	}
+	// Now borrow again, and simulate a query that only uses 10 items.
+	ws = wp.get(g)
+	for i := uint32(0); i < 10; i++ {
+		ws.set(i, float32(i), i)
+	}
+	// len(keys) is 131072. used is 10.
+	// 131072 > 8 * 10 (80), so put should shrink it back to initialSlots.
+	wp.put(ws)
+	st = wp.Stats()
+	if st.ShrinksTotal != 1 {
+		t.Fatalf("expected 1 shrink, got %d", st.ShrinksTotal)
+	}
+	ws = wp.get(g)
+	if len(ws.keys) != int(initialSlots) {
+		t.Fatalf("expected keys to shrink to initialSlots (%d), got %d (was %d)", initialSlots, len(ws.keys), grownCap)
+	}
+	wp.put(ws)
+}
+
+func TestWorkspaceResetForDifferentGraphs(t *testing.T) {
+	wp := NewWorkspacePool(1, 1<<20)
+	g1 := tinyGraph(t, false) // 3 nodes, small edge count
+	ws := wp.get(g1)
+	ws.set(1, 10.0, 0)
+	wp.put(ws)
+
+	// Create a dummy second graph with more edges
+	g2 := &Graph{
+		NodeCount: 50000,
+		EdgeCount: 100000,
+	}
+	ws = wp.get(g2)
+	expectedBits := workspaceBits(g2.EdgeCount)
+	if ws.nodeBits != expectedBits {
+		t.Fatalf("expected nodeBits=%d for g2, got %d", expectedBits, ws.nodeBits)
+	}
+	if ws.used != 0 {
+		t.Fatalf("expected used=0 after resetForGraph, got %d", ws.used)
+	}
+	wp.put(ws)
+}
+
+// TestWorkspaceStatsConcurrent checks that scraping pool metrics while a query
+// grows its table is race-free; /metrics is hit while routes are in flight.
+func TestWorkspaceStatsConcurrent(t *testing.T) {
+	wp := NewWorkspacePool(1, 1<<20)
+	g := &Graph{EdgeCount: 1 << 19}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 20 {
+			ws := wp.get(g)
+			for j := uint32(0); j < 60000; j++ {
+				ws.set(j, float32(j), j)
+			}
+			wp.put(ws)
+		}
+	}()
+
+	for range 2000 {
+		if st := wp.Stats(); st.TotalSlots == 0 || st.TotalBytes != st.TotalSlots*12 {
+			t.Fatalf("inconsistent stats while routing: %+v", st)
+		}
+	}
+	<-done
+
+	ws := wp.get(g)
+	size := uint64(len(ws.keys))
+	if st := wp.Stats(); st.TotalSlots != size {
+		t.Fatalf("Stats slots = %d, want %d", st.TotalSlots, size)
+	}
+	wp.put(ws)
+}
+
+// TestWorkspaceBudgetNonPow2 guards the probe invariant: a budget that is not a
+// power of two used to reach the table as maxSlots, and "i = (i+1) & mask" then
+// cycled over a subset and never found a free slot, hanging the request.
+func TestWorkspaceBudgetNonPow2(t *testing.T) {
+	const budget = 87381 // 1 MB / 12 B, not a power of two
+	wp := NewWorkspacePool(1, budget)
+	if got := wp.maxSlots; got != 65536 {
+		t.Fatalf("maxSlots = %d, want 65536 (floor to a power of two)", got)
+	}
+	ws := wp.get(tinyGraph(t, false))
+	blocked := false
+	for i := uint32(0); i < budget; i++ {
+		if !ws.set(i, float32(i), 0) {
+			blocked = true
+			break
+		}
+	}
+	if !blocked {
+		t.Fatal("set never reported the budget, so the cap is not enforced")
+	}
+	wp.put(ws)
+}
+
+func TestWorkspaceMaxSlotsBudget(t *testing.T) {
+	// Pool with maxSlots = initialSlots (65536)
+	wp := NewWorkspacePool(1, initialSlots)
+	g := tinyGraph(t, false)
+	ws := wp.get(g)
+	// Fill up to 80% of initialSlots -> next insert should fail because grow is blocked by maxSlots
+	limit := int(initialSlots * 8 / 10)
+	var failed bool
+	for i := uint32(0); i <= uint32(limit+10); i++ {
+		if !ws.set(i, float32(i), i) {
+			failed = true
+			break
+		}
+	}
+	if !failed {
+		t.Fatalf("expected set to fail when exceeding budget, but succeeded")
+	}
+	wp.put(ws)
+}

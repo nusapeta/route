@@ -46,13 +46,14 @@ func (rg *region) contains(lat, lon float64) bool {
 }
 
 type server struct {
-	regions  []*region
-	maxSnapM float64
-	timeout  time.Duration
-	maxAge   int // Cache-Control max-age for /route, seconds
-	fp       string
-	m        *metrics
-	rl       *limiter
+	regions   []*region
+	maxSnapM  float64
+	maxRouteM float64 // straight-line/road distance cap; 0 disables it
+	timeout   time.Duration
+	maxAge    int // Cache-Control max-age for /route, seconds
+	fp        string
+	m         *metrics
+	rl        *limiter
 }
 
 type strList []string
@@ -72,8 +73,10 @@ func main() {
 	var graphs strList
 	flag.Var(&graphs, "graph", "graph file(s); repeat or comma-separate for multi-region")
 	addr := flag.String("addr", ":8080", "listen address")
-	conc := flag.Int("conc", 4, "concurrent routing workspaces per region")
+	conc := flag.Int("conc", 4, "concurrent routing workspaces (shared across all regions)")
+	workspaceMB := flag.Int("workspace-mb", 0, "total workspace memory budget in MB across all concurrency slots (0 = default 384 MB/slot)")
 	snap := flag.Float64("snap", 3000, "max snap distance in meters")
+	maxRouteKm := flag.Float64("max-route-km", 40, "reject routes longer than this in km (straight-line pre-check + driven distance); 0 disables")
 	timeout := flag.Duration("timeout", 10*time.Second, "per-request deadline; longer routes get 504")
 	turnPenalty := flag.Float64("turn-penalty", 0.25, "turn cost multiplier; 0 = pure edge time")
 	eps := flag.Float64("eps", 1.5, "heuristic weight (1.0 = optimal but slow)")
@@ -87,7 +90,34 @@ func main() {
 		log.Fatal("need at least one -graph")
 	}
 
-	s := &server{maxSnapM: *snap, timeout: *timeout, maxAge: *maxAge, m: &metrics{}}
+	var maxSlotsPerSlot uint32
+	if *workspaceMB > 0 {
+		c := *conc
+		if c < 1 {
+			c = 1
+		}
+		mbPerSlot := *workspaceMB / c
+		if mbPerSlot < 1 {
+			mbPerSlot = 1
+		}
+		// 12 bytes per slot
+		maxSlotsPerSlot = uint32((uint64(mbPerSlot) * 1024 * 1024) / 12)
+	}
+
+	wsPool := graph.NewWorkspacePool(*conc, maxSlotsPerSlot)
+	m := &metrics{
+		wsPoolFn: func() (uint64, uint64, uint64, uint64) {
+			st := wsPool.Stats()
+			return st.TotalSlots, st.TotalBytes, st.GrowsTotal, st.ShrinksTotal
+		},
+	}
+	s := &server{
+		maxSnapM:  *snap,
+		maxRouteM: *maxRouteKm * 1000,
+		timeout:   *timeout,
+		maxAge:    *maxAge,
+		m:         m,
+	}
 	for _, p := range expand(graphs) {
 		g, err := graph.Open(p)
 		if err != nil {
@@ -95,7 +125,7 @@ func main() {
 		}
 		mnLat, mnLon, mxLat, mxLon := g.Bounds()
 		const pad = 0.05
-		r := graph.NewRouter(g, *conc)
+		r := graph.NewRouterWithPool(g, wsPool)
 		r.SetEpsilon(float32(*eps))
 		r.SetTurnScale(float32(*turnPenalty))
 		rg := &region{
@@ -111,7 +141,7 @@ func main() {
 	}
 	sort.Slice(s.regions, func(i, j int) bool { return s.regions[i].name < s.regions[j].name })
 
-	s.fp = graphFingerprint(s.regions)
+	s.fp = graphFingerprint(s.regions, s.maxRouteM, float32(*eps), float32(*turnPenalty))
 	s.rl = newLimiter(*rate, *burst, *trustProxy)
 
 	mux := http.NewServeMux()
@@ -291,6 +321,17 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		httpErr(w, 400, "coordinates outside Indonesia")
 		return
 	}
+	// Cheap contract check before any graph work: the great-circle distance is
+	// a lower bound on the driven distance, so it rejects out-of-range requests
+	// without spending a snap, a workspace, or a cache entry. It cannot catch a
+	// short-line/long-detour route; the post-route check below does that.
+	if s.maxRouteM > 0 {
+		if d := graph.Haversine(fLat, fLon, tLat, tLon); d > s.maxRouteM {
+			s.m.tooFar.Add(1)
+			httpErr(w, 422, fmt.Sprintf("route too long: straight-line %.1f km exceeds %.0f km limit", d/1000, s.maxRouteM/1000))
+			return
+		}
+	}
 
 	start := time.Now()
 
@@ -356,6 +397,11 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		default:
 			httpErr(w, 422, err.Error())
 		}
+		return
+	}
+	if s.maxRouteM > 0 && float64(res.DistanceM) > s.maxRouteM {
+		s.m.tooFar.Add(1)
+		httpErr(w, 422, fmt.Sprintf("route distance %.1f km exceeds %.0f km limit", float64(res.DistanceM)/1000, s.maxRouteM/1000))
 		return
 	}
 	s.m.expansions.Add(int64(res.Expansions))

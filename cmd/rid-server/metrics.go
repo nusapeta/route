@@ -30,6 +30,8 @@ type metrics struct {
 	hist [12]atomic.Int64 // len(latencyBuckets)+1, the last is +Inf
 	sum  atomic.Uint64    // microseconds
 	n    atomic.Int64
+
+	wsPoolFn func() (slots uint64, bytes uint64, grows uint64, shrinks uint64)
 }
 
 // observe records one /route request.
@@ -144,6 +146,14 @@ func (m *metrics) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "route_errors_total{reason=\"no_route\"} %d\n", m.errNoRoute.Load())
 	fmt.Fprintf(w, "route_errors_total{reason=\"snap\"} %d\n", m.errSnap.Load())
 	fmt.Fprintf(w, "route_errors_total{reason=\"cross_region\"} %d\n", m.errCrossRegion.Load())
+
+	if m.wsPoolFn != nil {
+		slots, bytes, grows, shrinks := m.wsPoolFn()
+		fmt.Fprintf(w, "# HELP routeid_workspace_slots Total open-addressing slots across allocated workspaces\n# TYPE routeid_workspace_slots gauge\nrouteid_workspace_slots %d\n", slots)
+		fmt.Fprintf(w, "# HELP routeid_workspace_bytes Estimated total bytes used by workspaces (12 bytes/slot)\n# TYPE routeid_workspace_bytes gauge\nrouteid_workspace_bytes %d\n", bytes)
+		fmt.Fprintf(w, "# HELP routeid_workspace_grows_total Workspace capacity grow operations\n# TYPE routeid_workspace_grows_total counter\nrouteid_workspace_grows_total %d\n", grows)
+		fmt.Fprintf(w, "# HELP routeid_workspace_shrinks_total Workspace capacity shrink operations\n# TYPE routeid_workspace_shrinks_total counter\nrouteid_workspace_shrinks_total %d\n", shrinks)
+	}
 	_ = total
 }
 

@@ -9,17 +9,19 @@ import (
 	"strings"
 )
 
-// graphFingerprint identifies the loaded graphs plus the binary. A route answer
-// depends only on those two things (the router is deterministic for a given
-// epsilon), so the ETag can be built from it and the client can keep a route
-// cached until the graph is rebuilt or the server is upgraded.
-func graphFingerprint(regions []*region) string {
+// graphFingerprint identifies the loaded graphs, the binary, and the settings
+// that change an answer: the route distance cap, the heuristic weight, and the
+// turn penalty. A route answer depends on all of them, so any change must
+// invalidate cached routes; the router is deterministic per (eps, turnScale).
+func graphFingerprint(regions []*region, maxRouteM float64, eps, turnScale float32) string {
 	h := sha256.New()
 	for _, rg := range regions {
 		prov := rg.g.Provenance()
 		fmt.Fprintf(h, "%s|%d|%d|%s|%s|%s\n", rg.name, rg.g.NodeCount, rg.g.EdgeCount,
 			prov.PBFHash, prov.BuiltAt, rg.g.MetaValue("extractor"))
 	}
+	fmt.Fprintf(h, "max_route_m=%.0f\n", maxRouteM)
+	fmt.Fprintf(h, "eps=%.4f\nturn_scale=%.4f\n", eps, turnScale)
 	io.WriteString(h, "commit="+commit)
 	return short(h, 12)
 }
