@@ -193,7 +193,11 @@ Di homelab (setelah deploy `49e5279`): 304 p50 **0,6 ms** vs rute penuh 93 ms,
 **Temuan yang mengubah implementasi:** rate limiter semula dipasang sebelum
 pengecekan `ETag`, sehingga revalidasi ikut memakai token. Sekarang limiter
 dipanggil *setelah* `ETag`: hit cache tidak memakai budget rute, karena ia juga
-tidak menyentuh workspace.
+tidak menyentuh workspace. Konsekuensinya validator harus mahal dijaga: `ETag`
+dan `Cache-Control: public` hanya dipasang pada `200`/`304`, sementara semua
+respons error (`400`/`422`/`429`/`500`/`504`) membuang `ETag` dan memakai
+`Cache-Control: no-store`, supaya klien yang di-throttle tidak bisa memanen tag
+dari `429` dan semua respons membawa `Vary: Accept-Encoding`.
 
 Artinya deadline mengembalikan slot ke antrean, jadi satu klien yang meminta rute
 148 km tidak lagi "menyandera" server selama beberapa detik.

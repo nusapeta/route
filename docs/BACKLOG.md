@@ -292,6 +292,17 @@ pasangan graph dan `pickSnap` memilih berdasarkan param `profile`.
 `restriction:motor_vehicle` -> `restriction`; `except` dievaluasi per profil.
 Rebuild Java: usable 4.198 -> 4.202, ban 3.904 -> 3.907, skipped 596 -> 593;
 600/600 jarak & durasi E1 identik.
+
+**Rebuild setelah audit-002 (2026-11-08).** Satu PBF yang sama, extractor baru:
+`seen=4654 usable=4078` (ban 3.924, only 154), `skipped=576`
+(`not_car=200 not_class=14 missing=62 conditional=167 except=16 bad_type=1
+unresolved=72 chain=8 via_way_missing=36`). `usable + skipped = seen` sekarang
+selalu benar: dulu `Usable` dihitung sebelum aturan benar-benar tersimpan,
+sehingga 141 relation terhitung dua kali. Via way yang tidak ada di graf pindah
+dari `not_car` ke `via_way_missing`. Junction via way kini dicari lewat endpoint
+yang benar, jadi 17 aturan via-way tambahan tersimpan (3.907 -> 3.924 ban).
+Maluku tidak berubah sama sekali (45 relation, 42 usable, ban 22, only 20).
+`profile_sha256` ikut berubah karena hash kini dihitung per profil.
 ### 16b. Restriction conditional (M)
 **Masalah.** 167 relation hanya punya `restriction:conditional` (jam sekolah,
 jam pasar); graf statis tidak bisa mengevaluasi waktu. Saat ini di-skip dan
