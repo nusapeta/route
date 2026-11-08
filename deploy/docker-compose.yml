@@ -1,11 +1,41 @@
-# Homelab deploy: Jawa + Sumatra + Bali/Nusra, satu proses, graph v4.
+# Homelab deploy: Jawa + Sumatra + Bali/Nusra (mobil), plus Jawa motor.
 #   cd deploy && docker compose up -d --build
 # Graph dibangun sekali di host (butuh RAM lebih besar dari saat run):
-#   make java sumatra nusa-tenggara
+#   make java sumatra nusa-tenggara        (mobil)
+#   bin/static/rid-extract -pbf data/java-latest.osm.pbf -profile motor \
+#     -out data/java-motor.graph           (motor)
 # Format v3 (java-v3.graph.bak) hanya terbaca oleh image pre-m5; untuk rollback
 # simpan image lama: docker tag routeid:local routeid:pre-m5
+#
+# Dua layanan, satu image: pemilihan region memakai snap terdekat, jadi profil
+# mobil dan motor tidak boleh berada di proses yang sama (dua graph dengan
+# geometri hampir identik akan saling menutupi). Motor karena itu di port 8081.
+x-routeid: &routeid
+  image: routeid:local
+  restart: unless-stopped
+  volumes:
+    - ../data:/data:ro
+  environment:
+    GOMEMLIMIT: 1GiB
+  # terukur: 4x rute 148 km paralel = 745 MiB; sisakan kepala (paper/RESULTS.md §5)
+  mem_limit: 1536m
+  memswap_limit: 1536m
+  stop_grace_period: 25s
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+    interval: 30s
+    timeout: 3s
+    retries: 3
+    start_period: 5s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   routeid:
+    <<: *routeid
     build:
       context: ..
       # Dockerfile lengkap (multi-stage, butuh tarik image golang) atau
@@ -17,13 +47,9 @@ services:
       args:
         COMMIT: ${COMMIT:-dev}
         BUILT: ${BUILT:-unknown}
-    image: routeid:local
     container_name: routeid
-    restart: unless-stopped
     ports:
       - "8080:8080"
-    volumes:
-      - ../data:/data:ro
     command:
       - -graph
       - /data/java.graph
@@ -53,20 +79,31 @@ services:
       - "5"
       - -maxage
       - "3600"
-    environment:
-      GOMEMLIMIT: 1GiB
-    # terukur: 4x rute 148 km paralel = 745 MiB; sisakan kepala (paper/RESULTS.md §5)
-    mem_limit: 1536m
-    memswap_limit: 1536m
-    stop_grace_period: 25s
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+
+  routeid-motor:
+    <<: *routeid
+    container_name: routeid-motor
+    ports:
+      # port host beda; di dalam container tetap 8080
+      - "8081:8080"
+    command:
+      - -graph
+      - /data/java-motor.graph
+      - -addr
+      - :8080
+      # Sisa flag sengaja ditulis ulang, bukan dibiarkan default: nilai default
+      # di kode bisa berubah tanpa disadari. Samakan dengan layanan routeid.
+      - -conc
+      - "4"
+      - -workspace-mb
+      - "256"
+      - -max-route-km
+      - "40"
+      - -timeout
+      - 10s
+      - -rate
+      - "15"
+      - -burst
+      - "5"
+      - -maxage
+      - "3600"

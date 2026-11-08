@@ -73,6 +73,27 @@ systemctl status routeid --no-pager
 Unit sudah membatasi `MemoryMax=1200M` dan mengeraskan filesystem
 (`ProtectSystem=strict`, data read-only).
 
+## 1c. Profil motor (port 8081)
+
+Mobil dan motor memakai artefak graf berbeda, dan pemilihan region memakai snap
+terdekat, sehingga dua graf dengan geometri hampir sama tidak boleh berada di
+satu proses: yang satu akan menutupi yang lain. Karena itu compose menjalankan
+dua layanan dari image yang sama, `routeid` (8080, mobil) dan `routeid-motor`
+(8081, hanya `java-motor.graph`).
+
+```bash
+make static                                   # bin/static/rid-extract
+bin/static/rid-extract -pbf data/java-latest.osm.pbf -profile motor \
+  -out data/java-motor.graph
+cd deploy && docker compose up -d             # routeid-motor ikut dibuat
+curl -s 127.0.0.1:8081/healthz | head -c 200
+```
+
+Graf motor memuat jalan/gang yang tidak boleh dilalui mobil (Jawa: +2,3 jt node,
+714 MB), jadi artefaknya lebih besar dan waktu ekstrak lebih lama. Kalau hanya
+mobil yang dipakai, layanan `routeid-motor` boleh dihapus dari compose tanpa
+mengubah yang lain.
+
 ## 2. Verifikasi
 
 ```bash
