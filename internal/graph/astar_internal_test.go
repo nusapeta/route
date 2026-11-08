@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 )
 
 // TestWorkspaceGenerationWrap drives the packed key/generation word through more
@@ -127,13 +128,20 @@ func TestRouteCanceled(t *testing.T) {
 	// Pre-canceled: must not even start.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := r.RouteCtx(ctx, 0, g.NodeCount-1); !errors.Is(err, ErrCanceled) {
-		t.Fatalf("pre-canceled: got %v, want ErrCanceled", err)
+	if _, err := r.RouteCtx(ctx, 0, g.NodeCount-1); !errors.Is(err, ErrCanceled) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-canceled: got %v, want ErrCanceled wrapping context.Canceled", err)
+	}
+
+	// A deadline surfaces as the deadline error and never as ErrTooFar.
+	dctx, dcancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer dcancel()
+	if _, err := r.RouteCtx(dctx, 0, g.NodeCount-1); !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrTooFar) {
+		t.Fatalf("deadline: got %v, want context.DeadlineExceeded", err)
 	}
 
 	// Canceled a few checks into the search.
-	if _, err := r.RouteCtx(&cancelAfter{Context: context.Background(), n: 3}, 0, g.NodeCount-1); !errors.Is(err, ErrCanceled) {
-		t.Fatalf("mid-search cancel: got %v, want ErrCanceled", err)
+	if _, err := r.RouteCtx(&cancelAfter{Context: context.Background(), n: 3}, 0, g.NodeCount-1); !errors.Is(err, ErrCanceled) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("mid-search cancel: got %v, want ErrCanceled wrapping context.Canceled", err)
 	}
 
 	// A live context still routes, and the workspace is reusable afterwards.
@@ -172,7 +180,7 @@ func TestTurnCostBuckets(t *testing.T) {
 func TestWorkspaceShrinkHysteresis(t *testing.T) {
 	wp := NewWorkspacePool(1, 1<<20)
 	g := &Graph{EdgeCount: 1 << 19} // ~500K edges so nodeMask doesn't alias
-	ws := wp.get(g)
+	ws := mustGet(t, wp, g)
 
 	// Populate enough items to force growing above initialSlots (65536)
 	// 65536 * 0.8 = 52428.8, so inserting 60000 items forces grow to 131072.
@@ -194,7 +202,7 @@ func TestWorkspaceShrinkHysteresis(t *testing.T) {
 		t.Fatalf("unexpected shrink when used is large: %d", st.ShrinksTotal)
 	}
 	// Now borrow again, and simulate a query that only uses 10 items.
-	ws = wp.get(g)
+	ws = mustGet(t, wp, g)
 	for i := uint32(0); i < 10; i++ {
 		ws.set(i, float32(i), i)
 	}
@@ -205,7 +213,7 @@ func TestWorkspaceShrinkHysteresis(t *testing.T) {
 	if st.ShrinksTotal != 1 {
 		t.Fatalf("expected 1 shrink, got %d", st.ShrinksTotal)
 	}
-	ws = wp.get(g)
+	ws = mustGet(t, wp, g)
 	if len(ws.keys) != int(initialSlots) {
 		t.Fatalf("expected keys to shrink to initialSlots (%d), got %d (was %d)", initialSlots, len(ws.keys), grownCap)
 	}
@@ -215,7 +223,7 @@ func TestWorkspaceShrinkHysteresis(t *testing.T) {
 func TestWorkspaceResetForDifferentGraphs(t *testing.T) {
 	wp := NewWorkspacePool(1, 1<<20)
 	g1 := tinyGraph(t, false) // 3 nodes, small edge count
-	ws := wp.get(g1)
+	ws := mustGet(t, wp, g1)
 	ws.set(1, 10.0, 0)
 	wp.put(ws)
 
@@ -224,7 +232,7 @@ func TestWorkspaceResetForDifferentGraphs(t *testing.T) {
 		NodeCount: 50000,
 		EdgeCount: 100000,
 	}
-	ws = wp.get(g2)
+	ws = mustGet(t, wp, g2)
 	expectedBits := workspaceBits(g2.EdgeCount)
 	if ws.nodeBits != expectedBits {
 		t.Fatalf("expected nodeBits=%d for g2, got %d", expectedBits, ws.nodeBits)
@@ -245,7 +253,7 @@ func TestWorkspaceStatsConcurrent(t *testing.T) {
 	go func() {
 		defer close(done)
 		for range 20 {
-			ws := wp.get(g)
+			ws := mustGet(t, wp, g)
 			for j := uint32(0); j < 60000; j++ {
 				ws.set(j, float32(j), j)
 			}
@@ -254,13 +262,13 @@ func TestWorkspaceStatsConcurrent(t *testing.T) {
 	}()
 
 	for range 2000 {
-		if st := wp.Stats(); st.TotalSlots == 0 || st.TotalBytes != st.TotalSlots*12 {
+		if st := wp.Stats(); st.TotalSlots == 0 || st.TotalBytes != st.TotalSlots*workspaceSlotBytes {
 			t.Fatalf("inconsistent stats while routing: %+v", st)
 		}
 	}
 	<-done
 
-	ws := wp.get(g)
+	ws := mustGet(t, wp, g)
 	size := uint64(len(ws.keys))
 	if st := wp.Stats(); st.TotalSlots != size {
 		t.Fatalf("Stats slots = %d, want %d", st.TotalSlots, size)
@@ -277,7 +285,7 @@ func TestWorkspaceBudgetNonPow2(t *testing.T) {
 	if got := wp.maxSlots; got != 65536 {
 		t.Fatalf("maxSlots = %d, want 65536 (floor to a power of two)", got)
 	}
-	ws := wp.get(tinyGraph(t, false))
+	ws := mustGet(t, wp, tinyGraph(t, false))
 	blocked := false
 	for i := uint32(0); i < budget; i++ {
 		if !ws.set(i, float32(i), 0) {
@@ -295,7 +303,7 @@ func TestWorkspaceMaxSlotsBudget(t *testing.T) {
 	// Pool with maxSlots = initialSlots (65536)
 	wp := NewWorkspacePool(1, initialSlots)
 	g := tinyGraph(t, false)
-	ws := wp.get(g)
+	ws := mustGet(t, wp, g)
 	// Fill up to 80% of initialSlots -> next insert should fail because grow is blocked by maxSlots
 	limit := int(initialSlots * 8 / 10)
 	var failed bool
@@ -308,5 +316,28 @@ func TestWorkspaceMaxSlotsBudget(t *testing.T) {
 	if !failed {
 		t.Fatalf("expected set to fail when exceeding budget, but succeeded")
 	}
+	wp.put(ws)
+}
+
+// mustGet borrows a workspace, failing the test when the graph cannot be
+// searched.
+func mustGet(t *testing.T, wp *WorkspacePool, g *Graph) *workspace {
+	t.Helper()
+	ws, err := wp.get(g)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	return ws
+}
+
+// TestWorkspaceOverflow checks that a graph too large for the packed key is
+// rejected with the sentinel instead of panicking on a request.
+func TestWorkspaceOverflow(t *testing.T) {
+	wp := NewWorkspacePool(1, 1<<20)
+	if _, err := wp.get(&Graph{EdgeCount: 1 << 29}); !errors.Is(err, ErrWorkspaceOverflow) {
+		t.Fatalf("get oversized graph: got %v, want ErrWorkspaceOverflow", err)
+	}
+	// The rejected borrow must not leak the pool slot.
+	ws := mustGet(t, wp, tinyGraph(t, false))
 	wp.put(ws)
 }
