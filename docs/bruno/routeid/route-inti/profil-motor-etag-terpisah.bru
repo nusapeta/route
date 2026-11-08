@@ -1,0 +1,37 @@
+meta {
+  name: profil mobil vs motor: ETag tidak boleh tertukar
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{baseUrl}}/route?from=-6.1754,106.8272&to=-6.1900,106.8300
+  body: none
+  auth: none
+}
+
+docs {
+  Jalankan 'profil motor' dulu: request ini memakai profil default (mobil) dan
+  membandingkan ETag-nya dengan etag_motor. Fingerprint graf berbeda, jadi tag
+  harus berbeda dan cache klien tidak bisa menyajikan rute profil lain.
+}
+
+headers {
+  If-None-Match: {{etag_motor}}
+}
+
+tests {
+  const code = res.getStatus();
+  test("200/304 sah", function () {
+    expect([200, 304]).to.include(code);
+  });
+  const tag = res.getHeader("ETag");
+  if (tag && bru.getVar("etag_motor")) {
+    test("ETag mobil berbeda dari motor", function () {
+      expect(tag).to.not.equal(bru.getVar("etag_motor"));
+    });
+    test("ETag motor tidak dijawab 304 oleh profil mobil", function () {
+      expect(code).to.equal(200);
+    });
+  }
+}

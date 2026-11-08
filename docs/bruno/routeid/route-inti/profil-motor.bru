@@ -1,0 +1,42 @@
+meta {
+  name: profil motor (query profile=motor)
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/route?from=-6.1754,106.8272&to=-6.1900,106.8300&profile=motor
+  body: none
+  auth: none
+}
+
+docs {
+  Base URL sama, profil beda: tanpa gateway (env Local langsung ke satu server)
+  parameter diabaikan, jadi kode 200/422/502 semuanya sah. Dengan gateway,
+  respons harus membawa X-Route-Profile: motor dan region java-motor (Monas
+  ke selatan, 3806 m). Mengisi collection variable etag_motor untuk request
+  berikutnya yang membandingkan ETag antar profil.
+}
+
+tests {
+  const code = res.getStatus();
+  test("200, atau 422/502 kalau environment ini tidak punya profil motor", function () {
+    expect([200, 422, 502]).to.include(code);
+  });
+  const p = res.getHeader("X-Route-Profile");
+  if (code === 200 && p) {
+    const j = res.getBody();
+    test("header profil = motor", function () {
+      expect(p).to.equal("motor");
+    });
+    test("region graf motor", function () {
+      expect(j.region).to.equal("java-motor");
+    });
+    test("jarak Monas selatan wajar", function () {
+      expect(j.distance_m).to.be.above(3000);
+      expect(j.distance_m).to.be.below(4500);
+    });
+    bru.setVar("etag_motor", res.getHeader("ETag") || "");
+    console.log(j.region, j.distance_m + "m", p, res.getHeader("ETag"));
+  }
+}

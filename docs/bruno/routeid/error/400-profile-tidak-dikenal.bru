@@ -1,0 +1,29 @@
+meta {
+  name: 400 profile tidak dikenal
+  type: http
+  seq: 22
+}
+
+get {
+  url: {{baseUrl}}/route?from=-6.1754,106.8272&to=-6.1900,106.8300&profile=truk
+  body: none
+  auth: none
+}
+
+docs {
+  Gateway menolak nilai selain mobil/motor dengan 400 supaya tidak diam-diam
+  memakai default. Tanpa gateway parameter ini diabaikan, jadi kode lain sah.
+}
+
+tests {
+  const code = res.getStatus();
+  test("400, atau diabaikan tanpa gateway", function () {
+    expect([200, 400, 422]).to.include(code);
+  });
+  if (res.getHeader("X-Route-Profile")) {
+    test("400 dari gateway", function () {
+      expect(code).to.equal(400);
+      expect(res.getBody().error).to.include("profile");
+    });
+  }
+}

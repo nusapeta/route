@@ -350,11 +350,14 @@ Catatan lapangan:
 
 **Bruno** (native, environment ikut ter-import): buka folder
 `docs/bruno/routeid/` (Open Collection), lalu pilih environment `Local` atau
-`Homelab` di kanan atas. Isinya 21 request dengan test JavaScript Bruno
-(66 blok `test`): Meta (`healthz`/`version`/`metrics`), Route inti (points,
-geojson, polyline + `polyline_b64`, POST objek/string, `restrictions=0`,
-ETag → 304), kelas jarak (42 km, 148 km), region lain (Sumatra, Bali), dan 4
-kasus error. Versi CLI:
+`Homelab` di kanan atas. Isinya 26 request dengan test JavaScript Bruno
+(81 blok `test`): Meta (`healthz` termasuk bentuk agregat gateway, `version`,
+`metrics`, dan versi `profile=motor`), Route inti (points, geojson, polyline +
+`polyline_b64`, POST objek/string, `restrictions=0`, ETag → 304, `profile=motor`
+plus bukti ETag antar profil tidak bisa tertukar), kelas jarak (42 km, 148 km),
+region lain (Sumatra, Bali), dan 5 kasus error (termasuk `profile=truk` → 400).
+Request khusus gateway melewatkan pemeriksaan header kalau base URL langsung
+menuju satu server, jadi keduanya tetap bisa dijalankan. Versi CLI:
 
 ```bash
 cd docs/bruno/routeid
@@ -367,7 +370,7 @@ impor file environment Postman, jadi pakai folder `docs/bruno/` di atas):
 
 | file | isi |
 |---|---|
-| `docs/routeid.postman_collection.json` | 21 request, isi sama dengan koleksi Bruno; tiap request punya test script Postman. |
+| `docs/routeid.postman_collection.json` | 21 request inti (set sebelum gateway; koleksi Bruno di atas yang terbaru), tiap request punya test script Postman. |
 | `docs/routeid.postman_environment-local.json` | `baseUrl = http://127.0.0.1:8080` |
 | `docs/routeid.postman_environment-homelab.json` | `baseUrl = http://192.168.1.219:8080` |
 

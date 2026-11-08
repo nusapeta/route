@@ -1,0 +1,35 @@
+meta {
+  name: healthz (profil motor)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/healthz?profile=motor
+  body: none
+  auth: none
+}
+
+docs {
+  Satu profil saja, untuk memastikan yang mati sisi mana. Butuh gateway:
+  langsung ke satu server parameter ini diabaikan dan jawabannya sama dengan
+  /healthz biasa, jadi test melewatkan pemeriksaan header.
+}
+
+tests {
+  const code = res.getStatus();
+  test("200, atau 502 kalau profil motor tidak jalan", function () {
+    expect([200, 502]).to.include(code);
+  });
+  const p = res.getHeader("X-Route-Profile");
+  if (p) {
+    test("gateway melayani profil motor", function () {
+      expect(p).to.equal("motor");
+    });
+    test("region motor, bukan mobil", function () {
+      const j = res.getBody();
+      const names = (j.regions || []).map(function (r) { return r.name; });
+      expect(names).to.include("java-motor");
+    });
+  }
+}

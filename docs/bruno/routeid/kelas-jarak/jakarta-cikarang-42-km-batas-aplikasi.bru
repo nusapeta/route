@@ -10,27 +10,40 @@ get {
   auth: none
 }
 
+docs {
+  Jarak tempuh 42,0 km sementara garis lurusnya 37 km: pre-check lolos, jadi
+  penolakan terjadi sesudah A* karena jalur melewati -max-route-km 40. Server
+  dengan -max-route-km 0 (atau 100) menjawab 200 dan test memeriksa isinya.
+}
+
 tests {
-  test("200", function () {
-    expect(res.getStatus()).to.equal(200);
-  });
+  const code = res.getStatus();
   const j = res.getBody();
-  test("region + jarak + durasi", function () {
-    expect(j.region).to.be.a("string");
-    expect(j.distance_m).to.be.above(0);
-    expect(j.duration_s).to.be.above(0);
+  test("200, atau 422 kalau batas 40 km aktif", function () {
+    expect([200, 422]).to.include(code);
   });
-  test("points_n cocok dengan points", function () {
-    expect(j.points).to.have.lengthOf(j.points_n);
-  });
-  test("snap terisi", function () {
-    expect(j.snap_from_m).to.be.a("number");
-    expect(j.snap_to_m).to.be.a("number");
-  });
-  test("header X-Route-Ms ada", function () {
-    expect(res.getHeader("X-Route-Ms")).to.match(/^\d+$/);
-  });
-  console.log(j.region, j.distance_m + "m", j.duration_s + "s", j.points_n + " titik", res.getHeader("X-Route-Ms") + "ms");
-  bru.setVar("region", j.region);
-  bru.setVar("etag", res.getHeader("ETag") || "");
+  if (code === 422) {
+    test("pesan menyebut batas jarak", function () {
+      expect(j.error).to.include("40 km");
+    });
+  } else {
+    test("region + jarak + durasi", function () {
+      expect(j.region).to.be.a("string");
+      expect(j.distance_m).to.be.above(0);
+      expect(j.duration_s).to.be.above(0);
+    });
+    test("points_n cocok dengan points", function () {
+      expect(j.points).to.have.lengthOf(j.points_n);
+    });
+    test("snap terisi", function () {
+      expect(j.snap_from_m).to.be.a("number");
+      expect(j.snap_to_m).to.be.a("number");
+    });
+    test("header X-Route-Ms ada", function () {
+      expect(res.getHeader("X-Route-Ms")).to.match(/^\d+$/);
+    });
+    console.log(j.region, j.distance_m + "m", j.duration_s + "s", j.points_n + " titik");
+    bru.setVar("region", j.region);
+    bru.setVar("etag", res.getHeader("ETag") || "");
+  }
 }
