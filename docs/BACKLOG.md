@@ -109,9 +109,11 @@ normal tidak berubah, dan keberhasilannya dihitung di `route_snap_retry_total`.
 | mobil | 184 ok / 10 `no_route` / 6 anggaran habis | 193 / 0 / 7 |
 
 Monas di `/route` motor: `422` → `200` (3806 m, snap 338 m). Satu pasangan mobil
-yang sebelumnya `no_route` sekarang berakhir di `too_far` (rute nyata melewati
-batas `-max-route-km` 40 km), jadi `422` anggaran ekspansi tetap 4-7 dan itu
-batasan anggaran, bukan snap.
+yang sebelumnya `no_route` sekarang berakhir di `too_far` (46,4 km, melewati
+`-max-route-km` 40 km), jadi `422` anggaran ekspansi tetap 4-7 dan itu batasan
+anggaran, bukan snap. Diulang pada image `81722ea` di homelab dengan pasangan
+yang sama: motor 196 ok / 0 `no_route` / 4 (habis `-timeout` 10 s), mobil
+193 / 0 / 7, `route_snap_retry_total` 6 dan 10.
 
 **Batasan sisa.** Pemeriksaan hanya di sisi awal: graf hanya punya CSR maju, jadi
 "ada yang bisa mencapai tujuan" butuh indeks masuk terbalik (memori atau format
