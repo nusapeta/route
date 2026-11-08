@@ -121,8 +121,44 @@ func (r *Router) RouteSnapCtx(ctx context.Context, a, b Snap, strict bool) (Snap
 		ferry = 0
 	}
 	out.Nodes = nodes
+	out.FerrySpans = trimFerrySpans(res.FerrySpans, len(nodes), out.TrimStart)
 	out.DistanceM = uint32(math.Round(dist))
 	out.TimeDs = uint32(math.Round(tds))
 	out.FerryM = uint32(math.Round(ferry))
 	return out, nil
+}
+
+// trimFerrySpans maps spans that index the untrimmed node path onto the path
+// RouteSnap returns. A trim-start drops the leading node, so indexes shift down
+// by one and a span left with no node disappears; a trim-end shortens the path,
+// so indexes past the end are clamped and spans entirely past it are dropped.
+func trimFerrySpans(spans [][2]uint32, n int, trimStart bool) [][2]uint32 {
+	if len(spans) == 0 {
+		return nil
+	}
+	var shift uint32
+	if trimStart {
+		shift = 1
+	}
+	last := uint32(n)
+	out := make([][2]uint32, 0, len(spans))
+	for _, sp := range spans {
+		a, b := sp[0], sp[1]
+		if b < shift {
+			continue // the whole span sat on the dropped leading node
+		}
+		if a < shift {
+			a = shift
+		}
+		a -= shift
+		b -= shift
+		if a >= last {
+			continue
+		}
+		if b >= last {
+			b = last - 1
+		}
+		out = append(out, [2]uint32{a, b})
+	}
+	return out
 }

@@ -13,6 +13,7 @@ import (
 	"sort"
 
 	"routeid/internal/graph"
+	"routeid/internal/stats"
 )
 
 func main() {
@@ -133,7 +134,7 @@ func main() {
 
 	rnd := rand.New(rand.NewSource(7))
 	var nodeErr, edgeErr, segLen, implErr []float64
-	tried := 0
+	tried, snapFailed := 0, 0
 	for tried < *n {
 		e := sample[rnd.Intn(len(sample))]
 		u, v := tail[e], g.To[e]
@@ -143,8 +144,6 @@ func main() {
 			continue
 		}
 		tried++
-		// simulate a user tapping near (not exactly on) this segment: take a
-		// random position along it and push it sideways by a random offset.
 		t := 0.15 + 0.7*rnd.Float64()
 		alongLat := la + (lb-la)*t
 		alongLon := lo + (lob-lo)*t
@@ -161,56 +160,60 @@ func main() {
 			nLon = dx / norm * off / kx
 		}
 		mlat, mlon := alongLat+nLat, alongLon+nLon
-		segLen = append(segLen, graph.Haversine(la, lo, lb, lob))
 
-		nu, d, ok := g.Nearest(mlat, mlon, 3000)
+		_, nodeD, ok := g.Nearest(mlat, mlon, 3000)
 		if !ok {
+			snapFailed++
 			continue
 		}
-		_ = nu
-		nodeErr = append(nodeErr, d)
-		de, _ := nearestEdge(mlat, mlon)
-		edgeErr = append(edgeErr, de)
-		if sn, ok := g.SnapEdge(mlat, mlon, 3000); ok {
-			implErr = append(implErr, sn.Dist)
-		} else {
-			implErr = append(implErr, math.Inf(1))
+		sn, ok := g.SnapEdge(mlat, mlon, 3000)
+		if !ok {
+			snapFailed++
+			continue
 		}
+		edgeD, _ := nearestEdge(mlat, mlon)
+		segLen = append(segLen, segM)
+		nodeErr = append(nodeErr, nodeD)
+		edgeErr = append(edgeErr, edgeD)
+		implErr = append(implErr, sn.Dist)
 	}
 
-	p := func(v []float64, q float64) float64 {
-		if len(v) == 0 {
-			return 0
-		}
-		s := append([]float64(nil), v...)
-		sort.Float64s(s)
-		i := int(q * float64(len(s)-1))
-		return s[i]
-	}
 	fmt.Printf("graph            %s\n", *path)
 	fmt.Printf("samples          %d\n", len(nodeErr))
-	fmt.Printf("segment length   p50=%.0f m p95=%.0f m p99=%.0f m max=%.0f m\n",
-		p(segLen, 0.5), p(segLen, 0.95), p(segLen, 0.99), p(segLen, 1))
-	fmt.Printf("node snap error  p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m\n",
-		p(nodeErr, 0.5), p(nodeErr, 0.95), p(nodeErr, 0.99), p(nodeErr, 1))
-	fmt.Printf("segment oracle   p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m  (ground truth)\n",
-		p(edgeErr, 0.5), p(edgeErr, 0.95), p(edgeErr, 0.99), p(edgeErr, 1))
-	fmt.Printf("router SnapEdge  p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m\n",
-		p(implErr, 0.5), p(implErr, 0.95), p(implErr, 0.99), p(implErr, 1))
-	if len(implErr) == len(edgeErr) {
-		var worse, sum float64
-		for i := range implErr {
-			d := implErr[i] - edgeErr[i]
-			if d > 1 {
-				worse++
-			}
-			sum += d
-		}
-		fmt.Printf("vs oracle        mean %+.2f m, worse than 1 m on %.2f%% of samples\n",
-			sum/float64(len(implErr)), 100*worse/float64(len(implErr)))
+	if tried > 0 {
+		fmt.Printf("snap misses      %d (%.2f%% of %d attempts)\n",
+			snapFailed, 100*float64(snapFailed)/float64(tried), tried)
 	}
-	fmt.Printf("edge snap error  p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m\n",
-		p(edgeErr, 0.5), p(edgeErr, 0.95), p(edgeErr, 0.99), p(edgeErr, 1))
+	if len(nodeErr) == 0 {
+		return
+	}
+
+	segSorted := sortedCopy(segLen)
+	nodeSorted := sortedCopy(nodeErr)
+	edgeSorted := sortedCopy(edgeErr)
+	implSorted := sortedCopy(implErr)
+	fmt.Printf("segment length   p50=%.0f m p95=%.0f m p99=%.0f m max=%.0f m\n",
+		stats.Percentile(segSorted, 0.5), stats.Percentile(segSorted, 0.95),
+		stats.Percentile(segSorted, 0.99), stats.Percentile(segSorted, 1))
+	fmt.Printf("node snap error  p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m\n",
+		stats.Percentile(nodeSorted, 0.5), stats.Percentile(nodeSorted, 0.95),
+		stats.Percentile(nodeSorted, 0.99), stats.Percentile(nodeSorted, 1))
+	fmt.Printf("segment oracle   p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m  (ground truth)\n",
+		stats.Percentile(edgeSorted, 0.5), stats.Percentile(edgeSorted, 0.95),
+		stats.Percentile(edgeSorted, 0.99), stats.Percentile(edgeSorted, 1))
+	fmt.Printf("router SnapEdge  p50=%.1f m p95=%.1f m p99=%.1f m max=%.0f m\n",
+		stats.Percentile(implSorted, 0.5), stats.Percentile(implSorted, 0.95),
+		stats.Percentile(implSorted, 0.99), stats.Percentile(implSorted, 1))
+	var worse, sum float64
+	for i := range implErr {
+		d := implErr[i] - edgeErr[i]
+		if d > 1 {
+			worse++
+		}
+		sum += d
+	}
+	fmt.Printf("vs oracle        mean %+.2f m, worse than 1 m on %.2f%% of samples\n",
+		sum/float64(len(implErr)), 100*worse/float64(len(implErr)))
 	var over100 int
 	for _, v := range nodeErr {
 		if v > 100 {
@@ -222,9 +225,10 @@ func main() {
 	// Node snapping error is bounded by half a segment, so the gain only shows up
 	// where segments are long. Report both snappers per segment-length bucket.
 	type bucket struct {
-		label     string
-		min, max  float64
-		node, imp []float64
+		label    string
+		min, max float64
+		node     []float64
+		imp      []float64
 	}
 	lenBuckets := []*bucket{
 		{"seg <= 20 m", 0, 20, nil, nil},
@@ -233,9 +237,6 @@ func main() {
 		{"seg > 150 m", 150, math.Inf(1), nil, nil},
 	}
 	for i, L := range segLen {
-		if i >= len(nodeErr) || i >= len(implErr) {
-			break
-		}
 		for _, b := range lenBuckets {
 			if L > b.min && L <= b.max {
 				b.node = append(b.node, nodeErr[i])
@@ -249,7 +250,15 @@ func main() {
 		if len(b.node) == 0 {
 			continue
 		}
+		bNode, bImp := sortedCopy(b.node), sortedCopy(b.imp)
 		fmt.Printf("%-15s %5d  %8.1f  %8.1f   %8.1f  %8.1f\n", b.label, len(b.node),
-			p(b.node, 0.5), p(b.node, 0.95), p(b.imp, 0.5), p(b.imp, 0.95))
+			stats.Percentile(bNode, 0.5), stats.Percentile(bNode, 0.95),
+			stats.Percentile(bImp, 0.5), stats.Percentile(bImp, 0.95))
 	}
+}
+
+func sortedCopy(v []float64) []float64 {
+	s := append([]float64(nil), v...)
+	sort.Float64s(s)
+	return s
 }

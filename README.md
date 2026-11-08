@@ -186,8 +186,10 @@ digambar dari koordinat yang dikirim klien. Kalau butuh perilaku lama (garis
 menyambung pin ke jalan), tambahkan `&pin=1`.
 
 Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`,
-`pin=0|1`, `restrictions=0|1`. Header respons: `X-Route-Ms`, `X-Route-Expansions`,
-`X-Route-Region`, `X-Route-Trim` (`none|from|to|both`).
+`pin=0|1`, `restrictions=0|1`. `simplify` harus angka tidak negatif; nilai lain
+(`abc`, `-5`, `NaN`, `Infinity`) dijawab `400` sebelum graph disentuh. Header
+respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
+(`none|from|to|both`).
 
 ### Endpoint
 
@@ -210,10 +212,16 @@ bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
 
 - **`ETag` + `Cache-Control`.** `max-age` diambil dari flag `-maxage` (default
   3600 detik, `0` mematikan header cache). Tag dibentuk dari
-  fingerprint graph (`pbf_sha256`, node/edge, commit) plus query yang sudah
-  dinormalisasi (urutan parameter dan GET-vs-POST tidak mengubah tag). Kirim
-  `If-None-Match` → `304` tanpa body: **p50 0,2 ms** vs 43 ms untuk rute 42 km,
-  jadi app yang mengulang query saat rotasi layar nyaris tidak memakai slot.
+  fingerprint graph (`pbf_sha256`, node/edge, `snap`, `eps`, `turn-penalty`,
+  commit) plus query yang sudah dinormalisasi (urutan parameter dan GET-vs-POST
+  tidak mengubah tag). Kirim `If-None-Match` → `304` tanpa body: **p50 0,2 ms**
+  vs 43 ms untuk rute 42 km, jadi app yang mengulang query saat rotasi layar
+  nyaris tidak memakai slot. Cek `If-None-Match` jalan sebelum rate limiter,
+  jadi `304` tidak memakai kuota; sebaliknya `ETag`/`Cache-Control` hanya
+  dipasang pada `200` dan `304`. Respons error (`400`, `422`, `429`, `500`,
+  `504`) tidak pernah membawa `ETag` dan memakai `Cache-Control: no-store`.
+  Semua respons memasang `Vary: Accept-Encoding`; `Content-Encoding: gzip`
+  hanya pada respons yang punya body (tidak pada `304`/`204`).
 - **Deadline `-timeout` (default 10 s).** `context` diteruskan ke dalam A* dan
   dicek tiap 256 ekspansi; lewat batas → `504 {"error":"deadline exceeded"}` dan
   workspace langsung dilepas. Klien yang memutus koneksi juga membatalkan

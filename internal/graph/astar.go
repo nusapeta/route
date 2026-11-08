@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/bits"
 	"sync/atomic"
@@ -17,7 +18,8 @@ type Route struct {
 	Expansions int
 	// FerrySpans holds [start,end] index ranges into Nodes (inclusive start,
 	// inclusive end) covered by ferry crossings, so callers can draw them
-	// dashed. Empty when the route stays on land.
+	// dashed. Empty when the route stays on land. The spans always index the
+	// Nodes of the same Route, including the trimmed path RouteSnap returns.
 	FerrySpans [][2]uint32
 	// Fallback is set when restrictions were dropped to find a path.
 	Fallback bool
@@ -42,6 +44,18 @@ var ErrTooFar = errors.New("search space exhausted (route too long)")
 // concurrency slot for the rest of its run.
 var ErrCanceled = errors.New("route canceled")
 
+// maxWorkspaceBits bounds the state bits packed into a workspace key. The state
+// is an edge index, so a graph with more than 2^28 edges cannot be searched:
+// fewer than 4 generation bits would make the table clear on almost every query.
+const maxWorkspaceBits = 28
+
+const workspaceOverflowMsg = "graph: edge count exceeds the packed workspace limit"
+
+// ErrWorkspaceOverflow is returned for a graph whose edge count does not fit the
+// packed workspace key. Open rejects such files; the search path returns this
+// sentinel when a Graph is built by hand.
+var ErrWorkspaceOverflow = errors.New(workspaceOverflowMsg)
+
 const (
 	// maxSpeedMps bounds the A* heuristic in m/s (130 km/h).
 	maxSpeedMps = 130.0 / 3.6
@@ -60,6 +74,10 @@ type WorkspaceStats struct {
 	GrowsTotal   uint64
 	ShrinksTotal uint64
 }
+
+// workspaceSlotBytes is the footprint of one open-addressing slot: keys, gs and
+// came are one 4-byte word each.
+const workspaceSlotBytes = 12
 
 // WorkspacePool manages reusable workspaces shared across graphs/routers.
 type WorkspacePool struct {
@@ -111,16 +129,19 @@ func (wp *WorkspacePool) Stats() WorkspaceStats {
 	}
 	return WorkspaceStats{
 		TotalSlots:   totalSlots,
-		TotalBytes:   totalSlots * 12,
+		TotalBytes:   totalSlots * workspaceSlotBytes,
 		GrowsTotal:   wp.growsTotal.Load(),
 		ShrinksTotal: wp.shrinksTotal.Load(),
 	}
 }
 
-func (wp *WorkspacePool) get(g *Graph) *workspace {
+func (wp *WorkspacePool) get(g *Graph) (*workspace, error) {
 	ws := <-wp.ch
-	ws.resetForGraph(g)
-	return ws
+	if err := ws.resetForGraph(g); err != nil {
+		wp.ch <- ws
+		return nil, err
+	}
+	return ws, nil
 }
 
 func (wp *WorkspacePool) put(ws *workspace) {
@@ -157,20 +178,8 @@ func NewRouterWithPool(g *Graph, pool *WorkspacePool) *Router {
 	}
 }
 
-// Pool returns the router's WorkspacePool.
-func (r *Router) Pool() *WorkspacePool {
-	return r.wp
-}
-func (r *Router) Epsilon() float32 { return r.eps }
-
-// Strict reports whether turn restrictions are enforced.
-func (r *Router) Strict() bool { return r.strict }
-
 // SetStrict toggles turn restriction enforcement (used for A/B measurement).
 func (r *Router) SetStrict(v bool) { r.strict = v }
-
-// TurnScale reports the multiplier applied to the turn cost table.
-func (r *Router) TurnScale() float32 { return r.turnScale }
 
 // SetTurnScale scales the turn cost table; 0 disables turn costs entirely
 // (used for A/B measurement against pure edge-time routing).
@@ -187,7 +196,9 @@ func (r *Router) SetEpsilon(eps float32) {
 	}
 }
 
-// workspace is the per-query open-addressing table. Keys and generation stamps
+// workspace is the per-query open-addressing table. Keys pack a generation
+// stamp in the high bits and the state (node or edge index + 1) in the low
+// bits, so starting a query bumps a counter instead of clearing the slots.
 type workspace struct {
 	keys     []uint32
 	gs       []float32
@@ -227,10 +238,10 @@ func floorPow2(v uint32) uint32 {
 	return 1 << (bits.Len32(v) - 1)
 }
 
-func (w *workspace) resetForGraph(g *Graph) {
+func (w *workspace) resetForGraph(g *Graph) error {
 	bits := workspaceBits(g.EdgeCount)
-	if bits > 28 {
-		panic("graph: edge count exceeds the packed workspace limit")
+	if bits > maxWorkspaceBits {
+		return ErrWorkspaceOverflow
 	}
 	genBits := 32 - bits
 	maxGen := (uint32(1) << genBits) - 1
@@ -247,9 +258,10 @@ func (w *workspace) resetForGraph(g *Graph) {
 		w.cur = 1
 		w.used = 0
 		w.heap = w.heap[:0]
-		return
+		return nil
 	}
 	w.reset()
+	return nil
 }
 
 func (w *workspace) shrinkIfNeeded() {
@@ -291,7 +303,8 @@ func (w *workspace) rehash(n uint32) {
 	}
 }
 
-// the generation stamp. The state is an edge index, so edge count sets the budget.
+// workspaceBits returns the bits the key needs for the state index plus its
+// generation stamp. The state is an edge index, so edge count sets the budget.
 func workspaceBits(entries uint32) (bits uint) {
 	bits = 1
 	for (uint32(1) << bits) <= entries {
@@ -302,10 +315,11 @@ func workspaceBits(entries uint32) (bits uint) {
 
 func newWorkspace(slots, entries uint32) *workspace {
 	bits := workspaceBits(entries)
-	if bits > 28 {
-		// Keep at least 4 generation bits; beyond 2^28 edges the packed table
-		// would wrap too often and is not worth the 25% saving.
-		panic("graph: edge count exceeds the packed workspace limit")
+	if bits > maxWorkspaceBits {
+		// The pool seeds a fixed 1<<20-edge table and resetForGraph reconfigures
+		// per graph, so this only guards a bogus caller. Clamping keeps the key
+		// layout consistent; resetForGraph rejects graphs that would need more.
+		bits = maxWorkspaceBits
 	}
 	genBits := 32 - bits
 	w := &workspace{
@@ -442,8 +456,8 @@ func (r *Router) RouteStrict(src, dst uint32, strict bool) (Route, error) {
 // RouteStrictCtx is RouteStrict with cancellation.
 func (r *Router) RouteStrictCtx(ctx context.Context, src, dst uint32, strict bool) (Route, error) {
 	g := r.g
-	if err := ctx.Err(); err != nil {
-		return Route{}, ErrCanceled
+	if ctx.Err() != nil {
+		return Route{}, cancelErr(ctx)
 	}
 	if src >= g.NodeCount || dst >= g.NodeCount {
 		return Route{}, ErrNoRoute
@@ -452,7 +466,7 @@ func (r *Router) RouteStrictCtx(ctx context.Context, src, dst uint32, strict boo
 		return Route{Nodes: []uint32{src}}, nil
 	}
 	res, err := r.search(ctx, src, dst, strict, r.eps)
-	if err == ErrTooFar && ctx.Err() == nil {
+	if errors.Is(err, ErrTooFar) && ctx.Err() == nil {
 		// The corridor is longer than the expansion budget. Rather than
 		// failing, retry with a greedier heuristic: the frontier collapses by
 		// an order of magnitude for a route a few percent slower. The ladder
@@ -463,11 +477,14 @@ func (r *Router) RouteStrictCtx(ctx context.Context, src, dst uint32, strict boo
 				return res2, nil
 			}
 			if ctx.Err() != nil {
+				// The query ended, not the corridor: never report the stale
+				// budget error for a canceled client.
+				err = cancelErr(ctx)
 				break
 			}
 		}
 	}
-	if err != nil && err != ErrCanceled && ctx.Err() == nil && strict && (len(g.Ban) > 0 || len(g.Only) > 0) {
+	if err != nil && !errors.Is(err, ErrCanceled) && ctx.Err() == nil && strict && (len(g.Ban) > 0 || len(g.Only) > 0) {
 		// A restriction may have made the destination unreachable (bad OSM
 		// data, or our conservative via-way handling). Retry unrestricted and
 		// flag the answer so callers can count it.
@@ -477,6 +494,11 @@ func (r *Router) RouteStrictCtx(ctx context.Context, src, dst uint32, strict boo
 		}
 	}
 	return res, err
+}
+
+// cancelErr wraps ErrCanceled with the context error, so errors.Is finds both.
+func cancelErr(ctx context.Context) error {
+	return fmt.Errorf("%w: %w", ErrCanceled, ctx.Err())
 }
 
 // relaxedLadder is the sequence of heuristic weights tried when the budget runs
@@ -495,7 +517,10 @@ func relaxedLadder(eps float32) []float32 {
 
 func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps float32) (Route, error) {
 	g := r.g
-	w := r.wp.get(g)
+	w, err := r.wp.get(g)
+	if err != nil {
+		return Route{}, err
+	}
 	defer r.wp.put(w)
 	h := r.newHctx(dst, eps)
 	for e := g.Off[src]; e < g.Off[src+1]; e++ {
@@ -532,8 +557,8 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 		// noise next to an expansion, and a canceled request frees its workspace
 		// within a few milliseconds instead of running to the expansion cap.
 		if expanded&255 == 0 {
-			if err := ctx.Err(); err != nil {
-				return Route{}, ErrCanceled
+			if ctx.Err() != nil {
+				return Route{}, cancelErr(ctx)
 			}
 		}
 		v := g.To[cur.node]

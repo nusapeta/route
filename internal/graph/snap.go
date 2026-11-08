@@ -4,38 +4,40 @@ import "math"
 
 // cellIndex maps a coordinate to a grid cell, clamped to the grid.
 func (g *Graph) cellIndex(lat, lon float64) (int, int) {
-	ri := int((lat - g.GridLat0) / g.GridStep)
-	ci := int((lon - g.GridLon0) / g.GridStep)
-	if ri < 0 {
-		ri = 0
-	}
-	if ri >= g.GridNLat {
-		ri = g.GridNLat - 1
-	}
-	if ci < 0 {
-		ci = 0
-	}
-	if ci >= g.GridNLon {
-		ci = g.GridNLon - 1
-	}
+	ri := clampCell(int((lat-g.GridLat0)/g.GridStep), g.GridNLat)
+	ci := clampCell(int((lon-g.GridLon0)/g.GridStep), g.GridNLon)
 	return ri, ci
+}
+
+// maxSnapRing caps the ring scan so a huge maxMeters on a coarse grid cannot
+// turn one query into a full grid walk.
+const maxSnapRing = 4000
+
+// gridRing returns the cell containing (lat, lon) and the ring budget for a
+// maxMeters scan. ok is false when the graph carries no usable grid.
+func (g *Graph) gridRing(lat, lon, maxMeters float64) (ri, ci, maxRing int, cellM float64, ok bool) {
+	if g.GridNLat == 0 || g.GridNLon == 0 || g.GridStep <= 0 {
+		return 0, 0, 0, 0, false
+	}
+	ri, ci = g.cellIndex(lat, lon)
+	cellM = g.GridStep * metersPerDegLon
+	maxRing = int(math.Ceil(maxMeters/cellM)) + 1
+	if maxRing > maxSnapRing {
+		maxRing = maxSnapRing
+	}
+	return ri, ci, maxRing, cellM, true
 }
 
 // Nearest finds the closest graph node to a coordinate. The grid is expanded
 // ring by ring and stops as soon as no closer node can exist.
 func (g *Graph) Nearest(lat, lon float64, maxMeters float64) (uint32, float64, bool) {
-	if g.GridNLat == 0 || g.GridNLon == 0 || g.GridStep <= 0 {
+	ri, ci, maxRing, cellM, ok := g.gridRing(lat, lon, maxMeters)
+	if !ok {
 		return 0, 0, false
 	}
-	ri, ci := g.cellIndex(lat, lon)
 
 	best := uint32(0)
 	bestD := math.MaxFloat64
-	cellM := g.GridStep * 111320.0
-	maxRing := int(math.Ceil(maxMeters/cellM)) + 1
-	if maxRing > 4000 {
-		maxRing = 4000
-	}
 
 	for ring := 0; ring <= maxRing; ring++ {
 		if ring > 0 && bestD <= float64(ring-1)*cellM {
@@ -109,8 +111,8 @@ type Snap struct {
 // coordinate. Uses a local equirectangular frame, accurate to well under a metre
 // at city scale.
 func projectOnSegment(plat, plon, alat, alon, blat, blon float64) (float64, float64, float64, float64) {
-	kx := math.Cos(alat*math.Pi/180) * 111320
-	ky := 110540.0
+	kx := math.Cos(alat*math.Pi/180) * metersPerDegLon
+	ky := metersPerDegLat
 	bx, by := (blon-alon)*kx, (blat-alat)*ky
 	px, py := (plon-alon)*kx, (plat-alat)*ky
 	den := bx*bx + by*by
@@ -133,15 +135,10 @@ func projectOnSegment(plat, plon, alat, alon, blat, blon float64) (float64, floa
 // projection, using a slack of snapSlackM for segments whose nodes are farther
 // away than the projection itself.
 func (g *Graph) SnapEdge(lat, lon, maxMeters float64) (Snap, bool) {
-	if g.GridNLat == 0 || g.GridNLon == 0 || g.GridStep <= 0 {
-		return Snap{}, false
-	}
 	const snapSlackM = 500.0
-	ri, ci := g.cellIndex(lat, lon)
-	cellM := g.GridStep * 111320.0
-	maxRing := int(math.Ceil(maxMeters/cellM)) + 1
-	if maxRing > 4000 {
-		maxRing = 4000
+	ri, ci, maxRing, cellM, ok := g.gridRing(lat, lon, maxMeters)
+	if !ok {
+		return Snap{}, false
 	}
 
 	best := Snap{Dist: math.MaxFloat64}

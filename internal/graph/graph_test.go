@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"math"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -90,7 +91,7 @@ func TestRoundTripAndRoute(t *testing.T) {
 		t.Fatal("snap should fail far away")
 	}
 
-	// unreachable: node 3 is reachable, use a disconnected check via far snap
+	// a zero-length route returns the node itself
 	if _, err := r.Route(0, 0); err != nil {
 		t.Fatalf("zero-length route should work: %v", err)
 	}
@@ -120,5 +121,19 @@ func TestUnreachable(t *testing.T) {
 	r := graph.NewRouter(g, 1)
 	if _, err := r.Route(0, 1); err != graph.ErrNoRoute {
 		t.Fatalf("want ErrNoRoute, got %v", err)
+	}
+}
+
+// TestOpenTruncatedFile covers the file parser: a cut-off file must return an
+// error from Open, not panic when a section is sliced past the mapping.
+func TestOpenTruncatedFile(t *testing.T) {
+	path := buildLine(t)
+	// 330 bytes is just past the fixed 320-byte header, inside the first
+	// section, so the section bounds check is the one that fires.
+	if err := os.Truncate(path, 330); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	if _, err := graph.Open(path); err == nil {
+		t.Fatal("Open accepted a truncated graph")
 	}
 }

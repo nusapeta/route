@@ -103,3 +103,42 @@ func TestParseProfile(t *testing.T) {
 		t.Error("ParseProfile(truck) should fail")
 	}
 }
+
+func TestProfileHashPerProfile(t *testing.T) {
+	car, motor := ProfileHash(ProfileCar), ProfileHash(ProfileMotor)
+	if car == motor {
+		t.Fatalf("car and motor profile hashes are equal: %s", car)
+	}
+	if again := ProfileHash(ProfileCar); again != car {
+		t.Errorf("ProfileHash(ProfileCar) unstable: %s then %s", car, again)
+	}
+	if got := ProfileHash(ProfileMotor); got != motor {
+		t.Errorf("ProfileHash(ProfileMotor) unstable: %s then %s", motor, got)
+	}
+}
+
+func TestParseSpeedKMH(t *testing.T) {
+	cases := []struct {
+		in   string
+		want float64
+		ok   bool
+	}{
+		{"60", 60, true},
+		{" 60 ", 60, true},
+		{"12.5", 12.5, true},
+		{"60 km/h", 60, true},
+		{"30 mph", 30 * 1.609344, true},
+		{"0", 0, false},
+		{"", 0, false},
+		{"abc", 0, false},
+		{"50;30", 0, false},
+		{"30 knots", 0, false},
+		{"300", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := parseSpeedKMH(c.in)
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("parseSpeedKMH(%q) = %v,%v, want %v,%v", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}

@@ -60,7 +60,6 @@ func main() {
 		r.SetEpsilon(float32(*eps))
 	}
 
-	// edgeOf returns the edge id for a node pair, if any.
 	edgeOf := func(a, b uint32) (uint32, bool) {
 		for e := g.Off[a]; e < g.Off[a+1]; e++ {
 			if g.To[e] == b {
@@ -136,9 +135,9 @@ func main() {
 		looseViol, looseErr, looseFallback, mean(looseNs, samples))
 	if samples > 0 {
 		fmt.Printf("violation rate  strict=%.2f%%  loose=%.2f%%\n",
-			pct(strictViol, samples), pct(looseViol, samples))
+			ratioPct(strictViol, samples), ratioPct(looseViol, samples))
 		fmt.Printf("non-vacuous     %d (%.2f%% of samples would otherwise take the forbidden turn)\n",
-			nonVacuous, pct(nonVacuous, samples))
+			nonVacuous, ratioPct(nonVacuous, samples))
 	}
 	fmt.Printf("total wall      %s\n", time.Since(t0).Round(time.Millisecond))
 
@@ -148,14 +147,14 @@ func main() {
 "strict_violation_pct":%.4f,"loose_violation_pct":%.4f}`,
 			*path, len(g.Ban), len(g.Only), samples,
 			strictViol, strictErr, strictFallback, looseViol, looseErr, nonVacuous,
-			pct(strictViol, samples), pct(looseViol, samples))
+			ratioPct(strictViol, samples), ratioPct(looseViol, samples))
 		if err := os.WriteFile(*jsonOut, []byte(body), 0o644); err != nil {
 			log.Fatal(err)
 		}
 	}
 }
 
-func pct(a, b int) float64 {
+func ratioPct(a, b int) float64 {
 	if b == 0 {
 		return 0
 	}

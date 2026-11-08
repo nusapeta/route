@@ -105,7 +105,7 @@ const SpeedClassScale = 2
 
 // classRate[c] is the time in deciseconds to cover one LenUnit (4 m) at the
 // speed encoded by class c: 4 m at v m/s is 40/v ds and v = c/7.2 m/s, so the
-// rate is 288/c — exact for every integer km/h (c = 2*km/h).
+// rate is 288/c, exact for every integer km/h (c = 2*km/h).
 var classRate = func() (t [256]float32) {
 	for c := 1; c < 256; c++ {
 		t[c] = 288 / float32(c)
@@ -265,6 +265,48 @@ func Open(path string) (*Graph, error) {
 		c += 8
 	}
 
+	cells := uint64(0)
+	if g.GridNLat > 0 && g.GridNLon > 0 {
+		cells = uint64(g.GridNLat) * uint64(g.GridNLon)
+		if cells > math.MaxUint32-1 {
+			syscall.Munmap(data)
+			return nil, fmt.Errorf("graph: grid %dx%d exceeds the section limit", g.GridNLat, g.GridNLon)
+		}
+	}
+
+	// A truncated or corrupt file must fail here, not panic inside unsafe.Slice
+	// on the first query. Every section below is checked against the mapping
+	// before it is sliced.
+	specs := []sectionSpec{
+		{"Lat", off[sLat], uint64(g.NodeCount), 4},
+		{"Lon", off[sLon], uint64(g.NodeCount), 4},
+		{"Off", off[sOff], uint64(g.NodeCount) + 1, 4},
+		{"To", off[sTo], uint64(g.EdgeCount), 4},
+		{"Len", off[sLen], uint64(g.EdgeCount), 2},
+		{"Cls", off[sCls], uint64(g.EdgeCount), 1},
+		{"Ferry", off[sFerry], uint64(ferryCount), 4},
+		{"CLat", off[sCLat], uint64(g.CoordCount), 4},
+		{"CLon", off[sCLon], uint64(g.CoordCount), 4},
+		{"TurnOff", off[sTurnOff], uint64(banCount), 8},
+		{"TurnTo", off[sTurnTo], uint64(onlyCount), 8},
+	}
+	if cells > 0 {
+		specs = append(specs,
+			sectionSpec{"GOff", off[sGOff], cells + 1, 8},
+			sectionSpec{"GNodes", off[sGNodes], uint64(g.GridCount), 4},
+		)
+	}
+	if err := validateSections(data, specs); err != nil {
+		syscall.Munmap(data)
+		return nil, err
+	}
+	// The search packs the state into a workspace key; a graph that cannot be
+	// searched must be rejected at load time, not on the first request.
+	if workspaceBits(g.EdgeCount) > maxWorkspaceBits {
+		syscall.Munmap(data)
+		return nil, ErrWorkspaceOverflow
+	}
+
 	g.Lat = i32s(data, off[sLat], g.NodeCount)
 	g.Lon = i32s(data, off[sLon], g.NodeCount)
 	g.Off = u32s(data, off[sOff], g.NodeCount+1)
@@ -274,12 +316,8 @@ func Open(path string) (*Graph, error) {
 	g.Ferry = u32s(data, off[sFerry], ferryCount)
 	g.CLat = i32s(data, off[sCLat], g.CoordCount)
 	g.CLon = i32s(data, off[sCLon], g.CoordCount)
-	cells := uint32(0)
-	if g.GridNLat > 0 && g.GridNLon > 0 {
-		cells = uint32(g.GridNLat * g.GridNLon)
-	}
 	if cells > 0 {
-		g.GOff = u64s(data, off[sGOff], cells+1)
+		g.GOff = u64s(data, off[sGOff], uint32(cells+1))
 		g.GNodes = u32s(data, off[sGNodes], g.GridCount)
 	}
 	g.Ban = u64s(data, off[sTurnOff], banCount)
@@ -295,6 +333,29 @@ func (g *Graph) Close() error {
 	err := syscall.Munmap(g.d)
 	g.d = nil
 	return err
+}
+
+// sectionSpec describes one fixed-size section read by Open.
+type sectionSpec struct {
+	name string
+	off  uint64
+	n    uint64
+	size uint64
+}
+
+// validateSections checks that every section fits in the mapped file. An empty
+// section is valid: count 0 means the writer emitted no section at all.
+func validateSections(d []byte, specs []sectionSpec) error {
+	for _, s := range specs {
+		if s.n == 0 {
+			continue
+		}
+		size := s.n * s.size
+		if s.off < headerSize || s.off > uint64(len(d)) || size > uint64(len(d))-s.off {
+			return fmt.Errorf("graph: section %s out of bounds (offset %d, %d bytes, file %d)", s.name, s.off, size, len(d))
+		}
+	}
+	return nil
 }
 
 func i32s(d []byte, off uint64, n uint32) []int32 {
@@ -425,21 +486,21 @@ func (b *Builder) BuildGrid(step float64) {
 	}
 }
 
+// clampCell maps a computed cell index into [0, n-1]. An empty dimension maps
+// to 0; callers reject grids with a non-positive size before using it.
+func clampCell(v, n int) int {
+	if v < 0 {
+		return 0
+	}
+	if v >= n {
+		return n - 1
+	}
+	return v
+}
+
 func (b *Builder) cellOf(lat, lon float64) int {
-	ri := int((lat - b.GridLat0) / b.GridStep)
-	ci := int((lon - b.GridLon0) / b.GridStep)
-	if ri < 0 {
-		ri = 0
-	}
-	if ri >= b.GridNLat {
-		ri = b.GridNLat - 1
-	}
-	if ci < 0 {
-		ci = 0
-	}
-	if ci >= b.GridNLon {
-		ci = b.GridNLon - 1
-	}
+	ri := clampCell(int((lat-b.GridLat0)/b.GridStep), b.GridNLat)
+	ci := clampCell(int((lon-b.GridLon0)/b.GridStep), b.GridNLon)
 	return ri*b.GridNLon + ci
 }
 

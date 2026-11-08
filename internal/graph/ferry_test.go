@@ -83,3 +83,77 @@ func TestLenAndClassDeriveTime(t *testing.T) {
 		t.Errorf("edge 1 length = %d, want 2000", got)
 	}
 }
+
+// TestTrimFerrySpans covers the index shift between the untrimmed node path and
+// the trimmed path RouteSnap returns.
+func TestTrimFerrySpans(t *testing.T) {
+	cases := []struct {
+		name  string
+		spans [][2]uint32
+		n     int
+		start bool
+		want  [][2]uint32
+	}{
+		{"no trim", [][2]uint32{{1, 2}}, 3, false, [][2]uint32{{1, 2}}},
+		{"start shift", [][2]uint32{{1, 2}}, 2, true, [][2]uint32{{0, 1}}},
+		{"start drop", [][2]uint32{{0, 0}}, 2, true, nil},
+		{"clamp end", [][2]uint32{{1, 2}}, 2, false, [][2]uint32{{1, 1}}},
+		{"drop past end", [][2]uint32{{2, 2}}, 2, false, nil},
+		{"empty path", [][2]uint32{{0, 1}}, 0, false, nil},
+	}
+	for _, c := range cases {
+		got := trimFerrySpans(c.spans, c.n, c.start)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+			continue
+		}
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+				break
+			}
+		}
+	}
+}
+
+// TestRouteSnapFerrySpansTrimmed checks that the spans still index the trimmed
+// Nodes: the route 0--1--2--3 with a ferry on 1->2 loses node 0 at the start and
+// node 3 at the end, so the span [1,2] must come back as [0,1].
+func TestRouteSnapFerrySpansTrimmed(t *testing.T) {
+	b := &Builder{
+		Lat:   []int32{-62000000, -62000000, -62000000, -62000000},
+		Lon:   []int32{106800000, 106810000, 106820000, 106830000},
+		Off:   []uint32{0, 1, 2, 3, 4},
+		To:    []uint32{1, 2, 3, 0},
+		Len:   []uint16{500, 500, 500, 750}, // 2 km hops
+		Cls:   []uint8{60, 26, 60, 60},
+		Ferry: []uint32{1},
+	}
+	b.BuildGrid(0.02)
+	path := filepath.Join(t.TempDir(), "trim.graph")
+	if err := b.Write(path); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	g, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer g.Close()
+
+	r := NewRouter(g, 1)
+	a := Snap{Edge: 0, From: 0, To: 1, Node: 0, T: 0.5, Along: 1000}
+	z := Snap{Edge: 2, From: 2, To: 3, Node: 3, T: 1}
+	res, err := r.RouteSnap(a, z, true)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !res.TrimStart || !res.TrimEnd {
+		t.Fatalf("trim = %v/%v, want both", res.TrimStart, res.TrimEnd)
+	}
+	if len(res.Nodes) != 2 || res.Nodes[0] != 1 || res.Nodes[1] != 2 {
+		t.Fatalf("nodes = %v, want [1 2]", res.Nodes)
+	}
+	if len(res.FerrySpans) != 1 || res.FerrySpans[0] != [2]uint32{0, 1} {
+		t.Fatalf("ferry spans = %v, want [[0 1]]", res.FerrySpans)
+	}
+}

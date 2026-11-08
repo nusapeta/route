@@ -1,4 +1,4 @@
-# routeid — build, test, and data targets.
+# routeid - build, test, and data targets.
 GO      ?= go
 REGION  ?= java
 PROFILE ?= car

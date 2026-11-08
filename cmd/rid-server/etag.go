@@ -10,17 +10,20 @@ import (
 )
 
 // graphFingerprint identifies the loaded graphs, the binary, and the settings
-// that change an answer: the route distance cap, the heuristic weight, and the
-// turn penalty. A route answer depends on all of them, so any change must
-// invalidate cached routes; the router is deterministic per (eps, turnScale).
-func graphFingerprint(regions []*region, maxRouteM float64, eps, turnScale float32) string {
+// that change an answer: the route distance cap, the snap radius, the heuristic
+// weight, and the turn penalty. The router is deterministic per (eps,
+// turnScale), and the snap radius decides whether a point routes at all, so a
+// change to any of them must invalidate cached routes. The workspace budget is
+// deliberately left out: it only sizes the search scratch space, so it can turn
+// a request into an error but never into a different answer.
+func graphFingerprint(regions []*region, maxRouteM, maxSnapM float64, eps, turnScale float32) string {
 	h := sha256.New()
 	for _, rg := range regions {
 		prov := rg.g.Provenance()
 		fmt.Fprintf(h, "%s|%d|%d|%s|%s|%s\n", rg.name, rg.g.NodeCount, rg.g.EdgeCount,
 			prov.PBFHash, prov.BuiltAt, rg.g.MetaValue("extractor"))
 	}
-	fmt.Fprintf(h, "max_route_m=%.0f\n", maxRouteM)
+	fmt.Fprintf(h, "max_route_m=%.0f\nsnap_m=%.0f\n", maxRouteM, maxSnapM)
 	fmt.Fprintf(h, "eps=%.4f\nturn_scale=%.4f\n", eps, turnScale)
 	io.WriteString(h, "commit="+commit)
 	return short(h, 12)

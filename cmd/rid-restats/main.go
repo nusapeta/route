@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/paulmach/osm"
@@ -20,7 +21,7 @@ var carHighways = map[string]bool{
 func pass(pbf string, fn func(*osmpbf.Scanner)) {
 	f, err := os.Open(pbf)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer f.Close()
 	sc := osmpbf.New(context.Background(), f, 3)
@@ -29,7 +30,7 @@ func pass(pbf string, fn func(*osmpbf.Scanner)) {
 }
 
 func main() {
-	pbf := flag.String("pbf", "", "")
+	pbf := flag.String("pbf", "", "input .osm.pbf")
 	flag.Parse()
 	car := make(map[osm.WayID]struct{}, 4<<20)
 	oneway := map[osm.WayID]int8{}
@@ -63,16 +64,15 @@ func main() {
 			}
 		}
 		if err := sc.Err(); err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 	})
 	fmt.Printf("car ways: %d\n", len(car))
 
-	var tot, ok, fromMissing, toMissing, both = 0, 0, 0, 0, 0
-	var viaWaySurvive, viaWayLen1, viaWayLenN = 0, 0, 0
+	var tot, ok, fromMissing, toMissing int
+	var viaWaySurvive, viaWayLen1, viaWayLenN, viaNodesSurvive int
 	pass(*pbf, func(sc *osmpbf.Scanner) {
 		sc.SkipNodes = true
-		sc.SkipWays = false
 		sc.SkipWays = true
 		for sc.Scan() {
 			r, o := sc.Object().(*osm.Relation)
@@ -114,25 +114,30 @@ func main() {
 			}
 			if fok && tok {
 				ok++
-				both++
-				if len(viaWays) > 0 {
+				switch {
+				case len(viaWays) > 0:
 					viaWaySurvive++
 					if len(viaWays) == 1 {
 						viaWayLen1++
 					} else {
 						viaWayLenN++
 					}
+				case viaNodes > 0:
+					viaNodesSurvive++
 				}
 			}
-			_ = viaNodes
 		}
 		if err := sc.Err(); err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 	})
+	usablePct := 0.0
+	if tot > 0 {
+		usablePct = float64(ok) * 100 / float64(tot)
+	}
 	fmt.Printf("restrictions total: %d\n", tot)
-	fmt.Printf("usable (from+to both car): %d (%.1f%%)\n", ok, float64(ok)*100/float64(tot))
+	fmt.Printf("usable (from+to both car): %d (%.1f%%)\n", ok, usablePct)
 	fmt.Printf("from way not car: %d   to way not car: %d\n", fromMissing, toMissing)
 	fmt.Printf("usable via-way: %d (1 via way: %d, multi: %d)\n", viaWaySurvive, viaWayLen1, viaWayLenN)
-	fmt.Printf("usable via-node: %d\n", ok-viaWaySurvive)
+	fmt.Printf("usable via-node: %d\n", viaNodesSurvive)
 }

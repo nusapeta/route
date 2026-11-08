@@ -15,7 +15,9 @@
 # waktu/RSS jadi sampah.
 set -euo pipefail
 
-IMG=${OSRM_IMG:-osrm/osrm-backend:latest}
+# Pin the tag: paper/COMPARISON.md quotes numbers per osrm-backend release, so
+# E1 stays reproducible. Override with OSRM_IMG=... to try another version.
+IMG=${OSRM_IMG:-osrm/osrm-backend:v5.25.0}
 MODE=${1:-}
 ARG=${2:-}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -72,7 +74,7 @@ sizes)
 	du -ch "${DATA}/$(basename "${ARG%.osrm}")".osrm* | tail -1
 	;;
 *)
-	sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
 	exit 2
 	;;
 esac

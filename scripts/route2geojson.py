@@ -5,32 +5,14 @@ Pakai:
     curl -s "http://127.0.0.1:8080/route?from=-6.2,106.8&to=-6.23,106.82" > r.json
     scripts/route2geojson.py r.json > r.geojson     # atau: ... | scripts/route2geojson.py -
 
-Mendukung dua bentuk respons: {"points": [[lat,lng],...]} dan {"polyline": "..."}.
+Mendukung respons {"points": [[lat,lng],...]}, {"polyline": "..."}, dan
+{"polyline_b64": "..."} lewat scripts/polyline_decode.py.
 Juga mencetak ringkasan (jumlah titik, bbox, jarak, ujung) ke stderr.
 """
 import json
 import sys
 
-
-def decode_polyline(s):
-    """Decoder referensi Google (precision 1e-5)."""
-    pts, i, lat, lng = [], 0, 0, 0
-    while i < len(s):
-        vals = []
-        for _ in range(2):
-            shift = result = 0
-            while True:
-                b = ord(s[i]) - 63
-                i += 1
-                result |= (b & 0x1F) << shift
-                shift += 5
-                if b < 0x20:
-                    break
-            vals.append(~(result >> 1) if result & 1 else result >> 1)
-        lat += vals[0]
-        lng += vals[1]
-        pts.append([lat / 1e5, lng / 1e5])
-    return pts
+from polyline_decode import from_json
 
 
 def main():
@@ -40,11 +22,7 @@ def main():
     if "error" in d:
         sys.exit(f"server error: {d['error']}")
 
-    pts = d.get("points")
-    if not pts:
-        if "polyline" not in d:
-            sys.exit("respons tidak punya 'points' maupun 'polyline'")
-        pts = decode_polyline(d["polyline"])
+    pts, _ = from_json(d)
 
     lats = [p[0] for p in pts]
     lons = [p[1] for p in pts]

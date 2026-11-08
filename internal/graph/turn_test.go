@@ -58,14 +58,15 @@ func TestRestrictionRoundTrip(t *testing.T) {
 	if len(g.Ban) != 1 {
 		t.Fatalf("ban count = %d, want 1", len(g.Ban))
 	}
-	if !g.Banned(3, 1) {
+	sp := g.Span(3)
+	if !sp.Forbidden(1) {
 		t.Fatal("expected transition (2->1)->(1->0) to be banned")
 	}
-	if g.Banned(3, 2) || g.Banned(0, 1) {
+	if sp.Forbidden(2) {
 		t.Fatal("unexpected ban")
 	}
-	if !g.Forbidden(3, 1) || g.Forbidden(3, 2) {
-		t.Fatal("Forbidden mismatch")
+	if !g.Span(0).Empty() {
+		t.Fatal("edge 0 carries no restriction")
 	}
 }
 
@@ -91,13 +92,13 @@ func TestOnlyRule(t *testing.T) {
 	}
 	defer g.Close()
 
-	if g.OnlyBlocked(0, 1) {
+	if g.Span(0).Forbidden(1) {
 		t.Fatal("edge 0->1 is the permitted successor, must not be blocked")
 	}
-	if !g.OnlyBlocked(0, 0) {
+	if !g.Span(0).Forbidden(0) {
 		t.Fatal("every other successor must be blocked by an only_* rule")
 	}
-	if g.OnlyBlocked(1, 0) {
+	if g.Span(1).Forbidden(0) {
 		t.Fatal("edge without an only_* rule must be unrestricted")
 	}
 }

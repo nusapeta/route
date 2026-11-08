@@ -149,8 +149,9 @@ routeid.lan {
 
 ## 4. Keamanan
 
-Server ini **tanpa autentikasi**, `Access-Control-Allow-Origin: *`, dan tanpa
-rate limit. Untuk homelab:
+Server ini **tanpa autentikasi**, `Access-Control-Allow-Origin: *`, dan rate
+limit per IP aktif secara default (`-rate 15 -burst 5`, lihat M4 di bawah).
+Untuk homelab:
 
 - bind ke LAN saja: `-addr 192.168.x.x:8080`, jangan `0.0.0.0` bila tak perlu.
 - taruh di belakang reverse proxy (Caddy/nginx) kalau harus HTTPS; proxy juga
