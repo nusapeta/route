@@ -82,6 +82,21 @@ Tidak ada perubahan format file.
 satu arah), offset ditambahkan sebagai spur lurus, masih garis menyeberang
 bangunan sepanjang `Along`. Menghilangkan ini butuh pseudo-node (opsi 2).
 
+**Sisa keterbatasan kedua (terukur 2026-11-08).** `SnapEdge` memilih ruas
+terdekat tanpa melihat keterhubungan, jadi titik yang jatuh di ujung buntu bisa
+menghasilkan `422 no route` padahal ada jalan lain beberapa ratus meter lagi.
+Di graf Jawa: 3606 komponen / 2290 node tanpa ruas keluar / komponen terbesar
+99,60% node (mobil: 5170 / 2312 / 99,56%). Sampel 200 pasangan koordinat acak di
+bbox Jakarta: mobil
+164 ok / 16 `no route` / 20 anggaran ekspansi habis, motor 174 / 9 / 17; pasangan
+yang sama gagal di kedua profil, jadi bukan soal profil. Contoh: Monas
+(-6.1754,106.8272) di graf motor, node hasil snap tidak punya ruas keluar karena
+ruas lanjutannya ditolak profil motor (alasan di kode hanya bisa salah satu dari:
+`motorcycle`/`access` terlarang, atau `motorway`/`motorway_link`). Perbaikan yang
+masuk akal:
+`SnapEdge` mengembalikan k kandidat, dan handler mencoba kandidat berikutnya bila
+A* mengembalikan `ErrNoRoute`; belum dikerjakan.
+
 ### 5. Ukur galat snap terhadap oracle (SELESAI, S)
 
 **Masalah.** Belum ada angka galat ujung sama sekali.
