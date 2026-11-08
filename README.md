@@ -200,6 +200,17 @@ respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
 | `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
 
+**Dua profil lewat satu base URL.** Satu proses memuat satu profil (snap
+terdekat membuat dua graf hampir identik saling menutupi), jadi compose
+menjalankan dua server di loopback dan `rid-gateway` memegang port publik:
+`?profile=mobil|motor` memilih upstream, tanpa parameter dilayani mobil.
+Parameter itu dicopot sebelum diteruskan (upstream dan log-nya tidak perlu tahu),
+nilai lain dijawab `400`, dan respons membawa `X-Route-Profile`. `/healthz`
+tanpa parameter menjawab kedua profil sekaligus (`503` bila salah satu mati),
+`/healthz?profile=motor` hanya satu. ETag tiap profil berbeda karena fingerprint
+grafnya berbeda, jadi cache klien tidak bisa tertukar. Lihat `deploy/README.md`
+bagian 1c.
+
 `/healthz` dan `/version` menjawab "graph dan binary mana yang sedang jalan",
 jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
 `snap_from`/`snap_to` (titik proyeksi di jalan), `snap_from_m`/`snap_to_m`
@@ -370,8 +381,9 @@ memuat `data/java.graph` menjawab 422 dan test menerima itu; homelab memuat
 `java`, `sumatra`, `nusa-tenggara`. Homelab memakai `-rate 15` per menit
 (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang-ulang:
 request identik dengan `If-None-Match` dibalas 304 dan tidak memakan kuota.
-Profil motor di homelab dilayani proses terpisah di port 8081
-(`http://192.168.1.219:8081`), karena satu proses hanya memuat satu profil.
+Di homelab kedua profil ada di satu base URL `http://192.168.1.219:8080`:
+tambahkan `&profile=motor` untuk motor. Port 8081 tidak lagi dipakai klien;
+upstream-nya hanya mendengarkan di loopback homelab (18080/18081).
 
 Kalau dijalankan di emulator/HP, ganti `127.0.0.1` jadi `10.0.2.2` (emulator
 Android) atau IP LAN mesin (`hostname -I`) lewat environment variable.
@@ -608,6 +620,7 @@ jt ekspansi, 19-22 s, jadi pakai `-timeout 60s` untuk kelas ini, bukan default
 ```
 cmd/rid-extract      pbf -> .graph (offline, bulanan)
 cmd/rid-server       HTTP /route, /healthz, /version (prod)
+cmd/rid-gateway      satu base URL, profil dipilih ?profile=mobil|motor
 cmd/rid-route        CLI satu rute (debug)
 cmd/rid-graphinfo    inspeksi header/grid + probe snap & scan lubang data
 docs/ROADMAP.md      north star, budget, milestone

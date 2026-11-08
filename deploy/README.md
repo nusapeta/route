@@ -73,26 +73,51 @@ systemctl status routeid --no-pager
 Unit sudah membatasi `MemoryMax=1200M` dan mengeraskan filesystem
 (`ProtectSystem=strict`, data read-only).
 
-## 1c. Profil motor (port 8081)
+## 1c. Dua profil, satu base URL
 
 Mobil dan motor memakai artefak graf berbeda, dan pemilihan region memakai snap
 terdekat, sehingga dua graf dengan geometri hampir sama tidak boleh berada di
 satu proses: yang satu akan menutupi yang lain. Karena itu compose menjalankan
-dua layanan dari image yang sama, `routeid` (8080, mobil) dan `routeid-motor`
-(8081, hanya `java-motor.graph`).
+tiga container dari image yang sama:
+
+| container | port | isi |
+|---|---|---|
+| `routeid-gateway` | `0.0.0.0:8080` (publik) | proxy pemilih profil |
+| `routeid` | `127.0.0.1:18080` (loopback) | `java`, `sumatra`, `nusa-tenggara` (mobil) |
+| `routeid-motor` | `127.0.0.1:18081` (loopback) | `java-motor` (motor) |
+
+Klien memakai satu base URL dan memilih profil lewat parameter:
 
 ```bash
-make static                                   # bin/static/rid-extract
+curl '127.0.0.1:8080/route?from=-6.1754,106.8272&to=-6.1900,106.8300'                    # mobil
+curl '127.0.0.1:8080/route?from=-6.1754,106.8272&to=-6.1900,106.8300&profile=motor'      # motor
+curl -s 127.0.0.1:8080/healthz | head -c 200        # kedua profil sekaligus (503 bila satu mati)
+curl -s '127.0.0.1:8080/healthz?profile=motor'      # satu profil saja
+```
+
+`profile=mobil|motor` berlaku untuk `/route`, `/version`, dan `/metrics`;
+parameter itu dicopot sebelum diteruskan, jadi yang dicatat upstream adalah
+request apa adanya. Nilai lain dijawab `400`, bukan diam-diam memakai default.
+Respons mendapat header `X-Route-Profile` supaya klien tahu profil mana yang
+melayani. Tanpa parameter, profil mobil yang dipakai (perilaku lama port 8080).
+
+```bash
+make static                                   # bin/static/rid-extract + rid-gateway
 bin/static/rid-extract -pbf data/java-latest.osm.pbf -profile motor \
   -out data/java-motor.graph
-cd deploy && docker compose up -d             # routeid-motor ikut dibuat
-curl -s 127.0.0.1:8081/healthz | head -c 200
+cd deploy && docker compose up -d             # gateway ikut dibuat
+curl -s 127.0.0.1:8080/healthz | head -c 300
 ```
 
 Graf motor memuat jalan/gang yang tidak boleh dilalui mobil (Jawa: +2,3 jt node,
 714 MB), jadi artefaknya lebih besar dan waktu ekstrak lebih lama. Kalau hanya
 mobil yang dipakai, layanan `routeid-motor` boleh dihapus dari compose tanpa
-mengubah yang lain.
+mengubah yang lain; gateway lalu melaporkan profil motor tidak sehat.
+
+Kedua upstream memakai `-trust-proxy` karena rate limit harus memakai IP klien,
+bukan IP gateway: gateway menimpa `X-Forwarded-For` dengan alamat peer-nya
+(bukan menambahkan), jadi nilai dari klien tidak bisa dipakai memilih bucket.
+Port upstream yang loopback-only membuat spoofing butuh akses ke host.
 
 ## 2. Verifikasi
 
@@ -209,20 +234,9 @@ Arti praktisnya:
 - Per IP: 15 permintaan/menit (burst 5) -> `429` + `Retry-After`.
 - `curl localhost:8080/metrics` untuk dashboard.
 
-### Menaruh di belakang Caddy (disarankan)
+### Menaruh Caddy di depan gateway
 
-Sekarang port 8080 dipublikasikan langsung ke LAN, jadi **jangan** pakai
-`-trust-proxy`: `X-Forwarded-For` bisa dipalsukan dan rate limit bisa dilewati.
-Kalau mau pindah ke belakang Caddy:
-
-```yaml
-# deploy/docker-compose.yml
-    ports:
-      - "127.0.0.1:8080:8080"   # hanya proxy di host yang bisa menghubungi
-    command:
-      # ... flag lama ...
-      - -trust-proxy            # ambil IP dari X-Forwarded-For
-```
+Gateway sudah menjadi pintu depan, jadi Caddy hanya perlu meneruskan ke sana:
 
 ```caddyfile
 route.example.com {
@@ -231,5 +245,8 @@ route.example.com {
 }
 ```
 
-Setelah itu `curl http://192.168.1.219:8080` memang tidak menjawab lagi (itu
-tujuannya); akses lewat nama domain Caddy, dan Postman diarahkan ke sana.
+Batasan yang perlu diketahui: gateway mengisi `X-Forwarded-For` dengan alamat
+peer-nya, yaitu Caddy, sehingga rate limit di upstream menjadi satu bucket
+untuk semua klien. Kalau Caddy dipakai, batasi laju di Caddy (`rate_limit`)
+dan jangan mengandalkan `-rate` di server. Port upstream 18080/18081 tetap
+loopback, jadi tidak ada jalur yang melewati gateway.

@@ -7,9 +7,12 @@
 # Format v3 (java-v3.graph.bak) hanya terbaca oleh image pre-m5; untuk rollback
 # simpan image lama: docker tag routeid:local routeid:pre-m5
 #
-# Dua layanan, satu image: pemilihan region memakai snap terdekat, jadi profil
+# Tiga layanan, satu image: pemilihan region memakai snap terdekat, jadi profil
 # mobil dan motor tidak boleh berada di proses yang sama (dua graph dengan
-# geometri hampir identik akan saling menutupi). Motor karena itu di port 8081.
+# geometri hampir identik akan saling menutupi). Kedua proses itu karena itu
+# hanya mendengarkan di loopback (18080/18081, untuk debug langsung), dan
+# `gateway` memegang port publik 8080: profil dipilih lewat ?profile=motor,
+# tanpa parameter dilayani profil mobil.
 x-routeid: &routeid
   image: routeid:local
   restart: unless-stopped
@@ -49,7 +52,8 @@ services:
         BUILT: ${BUILT:-unknown}
     container_name: routeid
     ports:
-      - "8080:8080"
+      # loopback saja: yang publik adalah gateway
+      - "127.0.0.1:18080:8080"
     command:
       - -graph
       - /data/java.graph
@@ -79,13 +83,53 @@ services:
       - "5"
       - -maxage
       - "3600"
+      # Hanya di belakang gateway: rate limit memakai IP asli dari
+      # X-Forwarded-For, dan gateway menimpanya (bukan menambahkan) supaya
+      # klien tidak bisa memilih bucket sendiri.
+      - -trust-proxy
+      - -trust-proxy
+
+  gateway:
+    image: routeid:local
+    container_name: routeid-gateway
+    restart: unless-stopped
+    # Binary yang sama, entrypoint berbeda: satu image untuk server dan gateway.
+    entrypoint: ["/usr/local/bin/rid-gateway"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      - routeid
+      - routeid-motor
+    command:
+      - -addr
+      - :8080
+      - -mobil
+      - http://routeid:8080
+      - -motor
+      - http://routeid-motor:8080
+      - -default
+      - mobil
+    # Cuma proxy: tanpa graf, tanpa tabel A*.
+    mem_limit: 64m
+    memswap_limit: 64m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   routeid-motor:
     <<: *routeid
     container_name: routeid-motor
     ports:
       # port host beda; di dalam container tetap 8080
-      - "8081:8080"
+      - "127.0.0.1:18081:8080"
     command:
       - -graph
       - /data/java-motor.graph
@@ -107,3 +151,7 @@ services:
       - "5"
       - -maxage
       - "3600"
+      # Hanya di belakang gateway: rate limit memakai IP asli dari
+      # X-Forwarded-For, dan gateway menimpanya (bukan menambahkan) supaya
+      # klien tidak bisa memilih bucket sendiri.
+      - -trust-proxy
