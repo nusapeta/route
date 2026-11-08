@@ -156,7 +156,7 @@ itu perbaikan harus menyentuh model biaya, bukan menambah penalti belok
 3. Audit top-20 outlier p95: cek manual apakah routeid atau OSRM yang salah
    (ferry, turn restriction, snap). Setiap outlier masuk daftar uji regresi.
 4. Bila 1-3 tidak mencapai 12%: engine kedua (Valhalla atau GraphHopper, OSM
-   yang sama) untuk triangulasi — bukan untuk "menang", tapi memisahkan siapa
+   yang sama) untuk triangulasi, bukan untuk "menang"; tujuannya memisahkan siapa
    yang menyimpang.
 
 **Lulus bila.** p95 |Δ| <= 12% pada 332 pasangan E1, median <= 0,1%, dan
@@ -225,7 +225,7 @@ jumlah identik).
 
 ## 5. Non-goals rencana ini
 
-- Tidak mengejar "lebih cepat dari OSRM" — targetnya resource dan akurasi.
+- Tidak mengejar "lebih cepat dari OSRM": targetnya resource dan akurasi.
 - Tidak mengganti format graph v4 di fase mana pun; CH (kalau jadi) adalah
   artefak tambahan.
 - Tidak menambah traffic/ETA real-time.

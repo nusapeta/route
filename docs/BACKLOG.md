@@ -54,7 +54,7 @@ diff per pasangan.
 
 ## M2. Akurasi ujung rute
 
-### 4. Snap ke ruas — SELESAI (M)
+### 4. Snap ke ruas (SELESAI, M)
 
 **Masalah.** `internal/graph/snap.go` memilih node terdekat. Di jalan yang
 way-nya jarang titik, titik user jatuh ke node 100-300 m jauhnya -> awal/akhir
@@ -64,7 +64,7 @@ rute terlihat "mundur".
 1. Tambah seksi grid-edge: untuk setiap sel, daftar edge yang menyentuh sel.
 2. Kandidat terbaik = proyeksi tegak lurus ke segmen (a,b), jarak titik-ke-ruas,
    plus parameter t.
-3. Ujung rute: gabungkan rute A* dengan dua bagian parsial — separator dari
+3. Ujung rute: gabungkan rute A* dengan dua bagian parsial: separator dari
    proyeksi ke node awal edge, dan dari node akhir edge ke proyeksi tujuan.
    Jangan membuat pseudo-node (menghindari mutasi graph); sisipkan geometri di
    layer respons.
@@ -79,10 +79,10 @@ Terukur (`RESULTS.md` §9): bucket ruas >150 m, galat 67,3 → 16,1 m (p95 114,0
 Tidak ada perubahan format file.
 
 **Sisa keterbatasan.** Kalau rute tidak keluar lewat ruas yang di-snap (mis. jalan
-satu arah), offset ditambahkan sebagai spur lurus — masih garis menyeberang
+satu arah), offset ditambahkan sebagai spur lurus, masih garis menyeberang
 bangunan sepanjang `Along`. Menghilangkan ini butuh pseudo-node (opsi 2).
 
-### 5. Ukur galat snap, bukan hanya klaim — SELESAI (S)
+### 5. Ukur galat snap, bukan hanya klaim (SELESAI, S)
 
 **Masalah.** Belum ada angka galat ujung sama sekali.
 
@@ -106,8 +106,8 @@ menaikkan RPS tanpa core tambahan hanya mengurangi ekspansi.
    graf berarah juga jarak ke landmark (arah balik).
 3. Heuristik: `max_l max(|d(l,v) - d(l,t)|, |d(v,l) - d(t,l)|)`, di-scale eps.
    Tetap admissible karena Dijkstra penuh.
-4. Ukur: ekspansi, latency, RSS tambahan (16 x 4 B x 22,7 jt = 145 MB untuk Java
-   — **terlalu besar**; alternatif: 8 landmark uint32 = 72 MB, atau simpan
+4. Ukur: ekspansi, latency, RSS tambahan (16 x 4 B x 22,7 jt = 145 MB untuk Java,
+   **terlalu besar**; alternatif: 8 landmark uint32 = 72 MB, atau simpan
    `uint24`, atau landmark hanya untuk node di jalan kelas >= tertiary).
 
 **Status M3: ditunda, dengan angka.** Setelah M3 menurunkan biaya per ekspansi
@@ -135,7 +135,7 @@ heuristik tetap admissible (`(d(v,t)-d(s,v))/2`).
 
 **Status M3: ditunda, biaya memori lebih besar dari perkiraan awal.** CSR balik
 butuh `Rto` uint32 per edge (24 jt x 4 B = 96 MB Sumatra, 187 MB Java) plus
-`Roff` per node (11,9 jt x 4 B = 48 MB Sumatra, 91 MB Java) — total **144 MB
+`Roff` per node (11,9 jt x 4 B = 48 MB Sumatra, 91 MB Java), total **144 MB
 Sumatra / 278 MB Java**, di atas batas RSS beban 350 MB sebelum workspace.
 Dua arah juga menggandakan frontier, jadi penghematan workspace hanya ~25%.
 Opsi berikutnya kalau tetap dikerjakan: reverse CSR sebagai sidecar opt-in
@@ -203,19 +203,19 @@ bila `If-None-Match` cocok; `Cache-Control: public, max-age=60`.
 
 ## M5. Cakupan
 
-### 13. Profil motor (M) — selesai (M5)
+### 13. Profil motor (M), selesai (M5)
 
 **Hasil.** Dua artefak, bukan satu graph dengan bobot ganda: `-profile car|motor`
 saat build. Alasannya diukur: kelas kecepatan motor menambah 2,3 M node / 1,5 M
 edge (jalan/gang yang boleh motor) sehingga `data/java-motor.graph` = 714 MB vs
-693 MB — lebih murah daripada menyimpan dua tabel waktu per edge di runtime.
+693 MB, lebih murah daripada menyimpan dua tabel waktu per edge di runtime.
 
 | rute | mobil | motor | catatan |
 |---|---|---|---|
 | Jakarta-Cikarang 42 km | 42,4 km / 1941 s | 40,8 km / 2525 s | motor menghindari tol, waktu 1,3x |
 | Jakarta-Bandung 148 km | 148,7 km / 6428 s | 167,0 km / 9042 s | tanpa tol: 1,4x waktu, butuh ε 2,0 |
 
-### 13b. Profil motor — sisa pekerjaan (S)
+### 13b. Profil motor: sisa pekerjaan (S)
 
 - `motorcycle:conditional`, `access:conditional` (jam ganjil-genap, dsb) belum.
 - Bobot gang: satu `footway` = 10 km/h untuk semua; turunkan dari `surface`/
@@ -223,10 +223,10 @@ edge (jalan/gang yang boleh motor) sehingga `data/java-motor.graph` = 714 MB vs
 - Motor belum punya perilaku "menerobos kemacetan" (traffic tidak dimodelkan),
   jadi rute motor = rute mobil yang lebih lambat di jalan kecil.
 
-### 14. Konektor ferry (M) — selesai (M5)
+### 14. Konektor ferry (M), selesai (M5)
 
 **Hasil.** Tidak perlu sub-graph: `route=ferry` sudah jadi edge biasa (sejak
-awal), yang kurang hanya (a) waktu dari tag `duration` — sekarang dipakai
+awal), yang kurang hanya (a) waktu dari tag `duration`, sekarang dipakai
 (`Merak-Bakauheni` 2 jam, bukan 30 km / 20 km/jam) dan (b) penanda. Penanda
 disimpan sebagai **daftar edge sparse** (`uint32[ferryCount]`, ~10 rb entri
 se-Indonesia), bukan array penuh: percobaan pertama (bit di `GL` uint16/edge)
@@ -234,10 +234,10 @@ menambah 93 MB di Java tanpa manfaat. Respons memuat `ferry_m`, `has_ferry`,
 `ferry_spans` (rentang indeks ke `points`/polyline).
 
 Sisa: ferry yang way-nya terpotong batas extract Geofabrik (node ujung tidak
-tersambung ke jalan) masih butuh graph nasional atau stitching antar-file —
+tersambung ke jalan) masih butuh graph nasional atau stitching antar-file;
 lihat item 17b.
 
-### 15. Kecilkan artefak (M) — selesai (M5)
+### 15. Kecilkan artefak (M), selesai (M5)
 
 **Hasil.** Format v4: `Off` uint32 (-4 B/node), `Len` uint16 satuan 4 m
 (-2 B/edge), section `Time` dihapus -> `Cls` uint8 (-3 B/edge). Java 1.019 ->
@@ -275,18 +275,18 @@ lalu detail di sekitar ujung), bukan menaikkan `maxExpansions`.
 (OK), tapi banyak lintasan kecil tanpa tag sama sekali (jatuh ke 20 km/jam).
 Kalau akurasi ferry penting, tabel statis per lintasan lebih jujur daripada OSM.
 
-### 15b. Profil motor untuk 7 region — selesai (M5)
+### 15b. Profil motor untuk 7 region, selesai (M5)
 
 Ketujuh region punya artefak motor: Java 682 MB, Sumatra 349, Kalimantan 207,
 Sulawesi 167, Bali-Nusra 148, Maluku 25, Papua 35. Total 1,6 GB untuk 7 region
 (dibangun 1m09s..3m53s per region, 4 worker).
 
-Sisa: server belum bisa mengalihkan profil per-request — satu proses = satu
+Sisa: server belum bisa mengalihkan profil per-request; satu proses = satu
 profil (dua file graph, dua container, atau buka dua region dengan nama
 `java-motor`). Kalau perlu satu proses dua profil, `region` harus menyimpan
 pasangan graph dan `pickSnap` memilih berdasarkan param `profile`.
 
-### 16a. Restriction per kelas kendaraan — selesai (E1 audit)
+### 16a. Restriction per kelas kendaraan, selesai (E1 audit)
 **Hasil.** Pemilihan tag kini mengikuti profil: car `restriction:motorcar` ->
 `restriction:motor_vehicle` -> `restriction`; motor `restriction:motorcycle` ->
 `restriction:motor_vehicle` -> `restriction`; `except` dievaluasi per profil.
@@ -301,7 +301,7 @@ jendela waktu per ban di format v5 + evaluasi jam lokal request, (c) terapkan
 larangan tanpa syarat (konservatif, bisa menutup jalan di luar jam).
 **Lulus bila.** Pilihan eksplisit + angka dampak pada 30 pasangan yang
 melintasi jalan dengan conditional.
-### 16c. Penalti belok — selesai sebagian (keputusan produk: 0,25x)
+### 16c. Penalti belok, selesai sebagian (keputusan produk: 0,25x)
 **Masalah.** routeid meminimalkan waktu murni; OSRM meminimalkan `weight`
 (durasi + penalti belok + preferensi kelas). Akibatnya p95 selisih jarak E1
 21,05% walau rute routeid 1-3% lebih cepat di modelnya sendiri

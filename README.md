@@ -42,7 +42,7 @@ dan preprocess, bukan latency.
 1. **Footprint kecil & deterministik.** Idle **12,8 MB** dengan Java + Sumatra
    termuat (v4; **17 MB** untuk Java saja di E1), image 24 MB, start sampai
    `/healthz` 200 dalam **10 ms**; OSRM idle 2,36 GiB. Cocok untuk homelab atau
-   sidecar — setelah 600 query campuran di E1 RSS naik ke 815 MB, jadi box
+   sidecar; setelah 600 query campuran di E1 RSS naik ke 815 MB, jadi box
    1 GB terlalu mepet untuk beban itu. Kenaikan itu **bukan** halaman graf:
    tabel workspace 12 B/slot tumbuh mengikuti edge unik yang dikunjungi rute
    terpanjang dan tidak mengecil sampai proses restart (lihat butir 4).
@@ -55,12 +55,12 @@ dan preprocess, bukan latency.
 4. **Idle kecil karena graf `mmap` belum tersentuh; biaya sebenarnya tabel
    pencarian.** Graph 1,06 GB (Java 693 MB + Sumatra 364 MB) di-`mmap`, jadi
    idle 12,8 MB dan puncak **399 MB** pada 4 rute 148 km paralel (`-conc 4`),
-   **815 MB** setelah 600 pasangan campuran di E1 — OSRM 2,45 GiB untuk beban
-   yang sama. Pengukuran ulang (3 region, `-conc 4`): halaman file/mmap yang
-   resident hanya ~45 MB; sisa RSS adalah tabel workspace `keys`/`gs`/`came`
-   12 B/slot. Sejak pool bersama + shrink, tabel = `-conc` (bukan region ×
-   `-conc`) dan mengecil sendiri: A/B 600 pasangan yang sama, graf Java
-   dimuat 3x, `-conc 2` (`paper/RESULTS.md` §17) turun dari 322 MB menjadi
+   **815 MB** setelah 600 pasangan campuran di E1, sementara OSRM 2,45 GiB
+   untuk beban yang sama. Pengukuran ulang (3 region, `-conc 4`): halaman
+   file/mmap yang resident hanya ~45 MB; sisa RSS adalah tabel workspace
+   `keys`/`gs`/`came` 12 B/slot. Sejak pool bersama + shrink, tabel = `-conc`
+   (bukan region × `-conc`) dan mengecil sendiri: A/B 600 pasangan yang sama,
+   graf Java dimuat 3x, `-conc 2` (`paper/RESULTS.md` §17) turun dari 322 MB menjadi
    **213 MB anon** (−34%) dengan 519 rute identik. Frontier heap A* cuma ~25
    ribu item.
 5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
@@ -103,7 +103,7 @@ dan preprocess, bukan latency.
 
 ## Roadmap
 
-North star proyek ini: **alternatif OSRM / Google Routes yang paling ringan** —
+North star proyek ini: **alternatif OSRM / Google Routes yang paling ringan**,
 puluhan MB, bukan gigabyte, dan tetap <0,5 s untuk rute <=50 km di perangkat
 murah. Budget-nya mengikat, bukan slogan: RSS idle <= 20 MB, image <= 25 MB,
 p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
@@ -129,7 +129,7 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
 
 - **Node = setiap node OSM** → geometri jalan persis, tanpa shape point terpisah.
 - **CSR** adjacency (Off/To/Len/Cls), koordinat fixed point 1e-7. Format v4:
-  `Off` uint32, `Len` uint16 satuan 4 m, waktu **tidak** disimpan — dihitung
+  `Off` uint32, `Len` uint16 satuan 4 m, waktu **tidak** disimpan, dihitung
   dari `Len` + kelas kecepatan per edge (`Cls` = km/h x 2), dan ferry disimpan
   sebagai daftar edge sparse (bukan array penuh). 12 B/node + 7 B/edge.
 - **Hilbert curve ordering**: node diurutkan geografis → A* tetap page-local
@@ -181,7 +181,7 @@ Response:
 Polyline: precision **5** (~1.1 m), decode di Dart standar.
 
 **Geometri mulai dan berakhir di jalan** (titik proyeksi `snap_from`/`snap_to`),
-bukan di pin mentah — tidak ada garis spur menyeberang bangunan. Pin user tetap
+bukan di pin mentah; tidak ada garis spur menyeberang bangunan. Pin user tetap
 digambar dari koordinat yang dikirim klien. Kalau butuh perilaku lama (garis
 menyambung pin ke jalan), tambahkan `&pin=1`.
 
@@ -254,14 +254,14 @@ bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
 
 ## Integrasi Flutter
 
-Server: `GET /route` (query string) atau `POST /route` (JSON) — dua-duanya
+Server: `GET /route` (query string) atau `POST /route` (JSON), dua-duanya
 menerima `"lat,lng"` maupun `{"lat":..,"lng":..}`. Respons berisi
 `distance_m`, `duration_s`, `polyline` (precision 5), `bbox` (siap dipakai
 `CameraUpdate.newLatLngBounds`), `points_n`, dan `snap_from`/`snap_to`.
 
 Polyline sudah menyusur jalan sampai ujungnya: titik pertama/terakhir adalah
 proyeksi ke ruas (`snap_from`/`snap_to`), bukan pin mentah. Gambar marker dari
-koordinat asli yang lo kirim, garis dari `points` — hasilnya pin di lokasi user,
+koordinat asli yang lo kirim, garis dari `points`; hasilnya pin di lokasi user,
 rute mulai di jalan. Kalau butuh garis menyambung pin (perilaku lama), kirim
 `'pin': true`.
 
@@ -305,7 +305,7 @@ List<LatLng> decodePolyline(String s) {
 ```
 
 Catatan lapangan:
-- **Emulator Android** tidak bisa `127.0.0.1` — pakai `10.0.2.2:8080`.
+- **Emulator Android** tidak bisa `127.0.0.1`: pakai `10.0.2.2:8080`.
 - **HP fisik** pakai IP LAN laptop (`ip addr`), pastikan `-addr :8080` (bukan
   `127.0.0.1`) dan firewall lokal mengizinkan.
 - **flutter web** sudah aman: CORS `*` + preflight `OPTIONS` ditangani server.
@@ -313,7 +313,7 @@ Catatan lapangan:
 - Respons 422 dengan `{"error":...}` untuk kasus normal (di luar Indonesia,
   tidak ada jalan dalam radius snap, dua titik beda region). Tampilkan apa
   adanya saat development.
-- Field `fallback: true` berarti larangan belok dilepas agar rute ketemu —
+- Field `fallback: true` berarti larangan belok dilepas agar rute ketemu;
   berguna untuk telemetri, bukan untuk user.
 
 ### Coba tanpa app (Bruno / Hoppscotch / Postman / curl)
@@ -349,7 +349,7 @@ jadi tidak muncul `Invalid URL`.
 Request di folder "Region lain" butuh graf region tsb: server lokal yang hanya
 memuat `data/java.graph` menjawab 422 dan test menerima itu; homelab memuat
 `java`, `sumatra`, `nusa-tenggara`. Homelab memakai `-rate 15` per menit
-(burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang-ulang —
+(burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang-ulang:
 request identik dengan `If-None-Match` dibalas 304 dan tidak memakan kuota.
 
 Kalau dijalankan di emulator/HP, ganti `127.0.0.1` jadi `10.0.2.2` (emulator
@@ -406,9 +406,9 @@ scripts/polyline-decode.py rp.json > r.geojson     # siap tempel ke geojson.io
 **Peringatan `polyline`:** encoding polyline Google memakai seluruh rentang
 karakter printable, termasuk `\` (backslash). Di JSON karakter itu tampil
 sebagai `\\`, dan banyak decoder (termasuk situs decoder online) berhenti
-atau melompat di titik itu — garis jadi terpotong di tengah jalan tanpa error
+atau melompat di titik itu, garis jadi terpotong di tengah jalan tanpa error
 apa pun. Polyline hanya ada kalau request memakai `format=polyline`, dan
-jangan copy-paste teks JSON mentah — ekstrak lewat JSON parser:
+jangan copy-paste teks JSON mentah; ekstrak lewat JSON parser:
 
 ```bash
 curl -s "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline" \
@@ -510,7 +510,7 @@ Catatan penting:
 
 ## Deploy (homelab)
 
-Docker Compose dan systemd unit siap pakai ada di `deploy/` — lihat
+Docker Compose dan systemd unit siap pakai ada di `deploy/`; lihat
 [`deploy/README.md`](deploy/README.md) untuk langkah lengkap, batas memori,
 dan catatan keamanan. Ringkasnya:
 
@@ -570,7 +570,7 @@ kalau kedua ujung ada di satu graph:
 | Jakarta -> Medan (`indonesia.graph`) | 2004,5 km / 25,8 jam, `ferry_m=29072`, `relaxed=true` |
 
 Kalau titiknya jatuh di dua file region berbeda, server tetap membalas `422`
-("cross-region route not supported") — stitching antar-file ada di BACKLOG 17b.
+("cross-region route not supported"), stitching antar-file ada di BACKLOG 17b.
 Untuk melayani lintas pulau hari ini: bangun graph nasional
 (`scripts/build-national.sh`, 8 menit, `GOMEMLIMIT=4GiB` di box 7 GB) atau
 taruh banyak region di satu server dan terima batas itu.
@@ -579,7 +579,7 @@ taruh banyak region di satu server dan terima batas itu.
 mencoba ulang dengan heuristik lebih rakus (ε 2,0 lalu 3,0) dan menandai hasil
 `relaxed=true` + `epsilon`. Ongkosnya: Jakarta-Bandung ε 2,0 = 148,62 km
 (+0,07%), ε 2,5 = 155,3 km (+4,4%). Jakarta -> Medan (2004 km) butuh ε 3,0, 4,8
-jt ekspansi, 19-22 s — jadi pakai `-timeout 60s` untuk kelas ini, bukan default
+jt ekspansi, 19-22 s, jadi pakai `-timeout 60s` untuk kelas ini, bukan default
 10 s.
 
 ## Repo layout
@@ -615,7 +615,7 @@ round-trip provenance v3, snapping ruas (proyeksi, trim, spur), dan **golden tes
 48 pasangan node + 48 pasangan snap**: kota sintetis 30x30
 ditulis ke disk, di-snap, dirutekan, lalu dibandingkan per pasangan
 (`dist_m`, `time_ds`, jumlah node, hash FNV urutan node). Perubahan tak sengaja
-pada profil, snapping, atau A* langsung tampak sebagai diff — sudah diverifikasi
+pada profil, snapping, atau A* langsung tampak sebagai diff, sudah diverifikasi
 tidak vakum: mengubah satu kecepatan 8,0 -> 8,5 m/s menggagalkan 3 pasangan.
 
 CI (GitHub Actions) menjalankan vet + test + build di tiap push.
@@ -658,7 +658,7 @@ via-way (termasuk rantai beberapa via-way) didukung.
 Yang **tidak** dimodelkan (dan dilaporkan di statistik): `restriction:conditional`
 (berbasis waktu), `except=` untuk moda selain mobil, dan via-way yang tidak bisa
 dirantai. Via-way dilarang secara konservatif (blokir masuk via-way dari arah
-yang dibatasi) — kalau ini membuat tujuan tak terjangkau, router otomatis ulang
+yang dibatasi); kalau ini membuat tujuan tak terjangkau, router otomatis ulang
 tanpa restriction dan menandai `"fallback": true` di respons.
 
 Biaya format: 8 B per pasangan. Jawa: ~4.1 k pasangan = **32 KB** (0,003% dari
@@ -681,7 +681,7 @@ buruk daripada error jelas): jalankan ulang extractor, 1-8 menit per region.
 
 ## Lisensi
 
-Kode: MIT (lihat `LICENSE`). Data: © OpenStreetMap contributors, ODbL —
+Kode: MIT (lihat `LICENSE`). Data: © OpenStreetMap contributors, ODbL,
 wajib tampilkan atribusi "© OpenStreetMap contributors" di app, dan turunan
 database (file `.graph`) tetap ODbL.
 Update: ekstrak ulang bulanan lalu swap file + restart (74 s untuk Java).

@@ -83,7 +83,7 @@ Rencana:
 Target yang bisa dijanjikan di paper: **median selisih jarak <5 %, p95 <12 %**.
 Kalau tidak tercapai, perbaiki dulu (E3/E4) sebelum submit.
 
-## E3. Turn restriction — SELESAI (kode + pengukuran)
+## E3. Turn restriction (SELESAI: kode + pengukuran)
 
 Implementasi: state A* = edge (bukan node), tabel sparse pasangan terlarang di
 format v2 (`Ban`) dan pasangan yang diizinkan untuk `only_*` (`Only`).
@@ -115,7 +115,7 @@ Dua jalur:
 Yang dilaporkan: apakah graph nasional ≈ 2× Java (node/edge/disk) dan apakah
 p50/p95 latency tidak berubah (search terbatas radius, jadi seharusnya tidak).
 
-## E6. Statistik & reproduksibilitas — SELESAI (format v3 + golden test)
+## E6. Statistik dan reproduksibilitas (SELESAI: format v3 + golden test)
 
 Metadata graph + golden test: `docs/BACKLOG.md` item 1-3 (milestone M1).
 
@@ -133,7 +133,7 @@ khas Jawa, plus satu kota padat (Bandung/Surabaya) untuk bucket 10–25 km.
 
 ## Catatan venue
 
-- Preprint: arXiv (cs.DC / cs.PF) — paling cepat.
+- Preprint: arXiv (cs.DC / cs.PF), paling cepat.
 - Workshop: ACM SIGSPATIAL IWCTS (short paper, cocok untuk studi kasus).
 - Jurnal lokal: JUTI, SINERGI, atau IJECE (versi diperluas dengan E1–E6).
 

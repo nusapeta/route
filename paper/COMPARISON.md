@@ -36,7 +36,7 @@ Valhalla/GraphHopper/OSRM CH masih butuh run sendiri sebelum masuk tabel.
 | E1 cakupan | 81/600 routeid `422` (72 snap >3 km); OSRM 0 error, snap tujuan pada 81 itu p50 14,7 km | idem | terukur |
 
 Catatan M2: galat snapping sudah terukur (ledger di atas), tetapi itu galat
-menempelkan titik ke jalan — bukan bukti bahwa jarak rute benar. Klaim akurasi rute
+menempelkan titik ke jalan, bukan bukti bahwa jarak rute benar. Klaim akurasi rute
 tetap menunggu E2.
 
 ## 2. Yang **tidak** boleh diklaim sekarang
@@ -49,7 +49,7 @@ tetap menunggu E2.
 | "siap untuk seluruh Indonesia" | tujuh pulau sudah terbangun, tapi rute antar-file masih ditolak (`422`) kecuali satu graph nasional 1.650 MB dipakai |
 | "hemat memori" tanpa kualifikasi | tabel workspace 12 B/slot tumbuh mengikuti edge unik rute terpanjang, dikali region x `-conc`, dan bertahan sampai restart; E1: 815 MB setelah 600 pasangan campuran |
 
-## 3. Worksheet E1 (OSRM MLD, mesin sama) — terisi
+## 3. Worksheet E1 (OSRM MLD, mesin sama), terisi
 
 Run: 2026-11-07, AMD Ryzen 5 5600G (6C/12T), 16 GB RAM, 30 GiB swap.
 PBF dan set pasangan identik (`paper/results/pairs-java.csv`, 600 pasang).
@@ -88,7 +88,7 @@ Isi dengan `scripts/m6-compare.py` (jarak + latency per bucket + snap) dan
 `scripts/m6-osrm.sh extract` (waktu + peak RSS tiap tahap); angka di atas dari
 run terakhir yang menghasilkan `paper/results/m6-osrm-vs-routeid.csv`.
 
-Perintah acuan — sudah dibungkus jadi skrip, resep lengkap di `docs/M6.md`:
+Perintah acuan sudah dibungkus jadi skrip; resep lengkap di `docs/M6.md`:
 
 ```bash
 scripts/m6-osrm.sh extract data/java-latest.osm.pbf   # + wall & peak RSS tiap tahap
@@ -109,11 +109,11 @@ scripts/m6-compare.py --pairs paper/results/pairs-java.csv \
 
 Peringatan RAM: `osrm-extract` Jawa terukur **peak 6.254 MB**; mesin 16 GB cukup,
 mesin 8 GB wajib swap. Jangan dijalankan bersamaan dengan `rid-extract` atau
-load test — waktu dan RSS jadi sampah. E1 dijalankan di Ryzen 5 5600G; belum
+load test: waktu dan RSS jadi sampah. E1 dijalankan di Ryzen 5 5600G; belum
 dicoba di i5-7360U 7,8 GB.
 
 Catatan metodologi: OSRM MLD di sini memakai `car.lua` (maxspeed), routeid
-memakai tabel kecepatan per kelas jalan — jadi **durasi tidak sebanding**.
+memakai tabel kecepatan per kelas jalan, jadi **durasi tidak sebanding**.
 Yang dibandingkan: jarak rute (akurasi relatif), latency, memori, ukuran artefak.
 
 ## 4. Worksheet E2 (ground truth)
@@ -125,7 +125,7 @@ Butuh referensi independen; OSRM bukan ground truth (dua-duanya graf OSM).
 | Google Maps manual | 60 pasangan | jarak rute + waktu, screenshot | ~2 jam kerja |
 | Google Routes API | 200-500 pasangan, tersebar | `distanceMeters`, `duration`, `polyline` | perlu API key (~$1 untuk 200-500 query) |
 
-Status: **belum ada** — tidak ada API key di mesin pengembangan, dan OSRM tidak
+Status: **belum ada**; tidak ada API key di mesin pengembangan, dan OSRM tidak
 bisa dipakai sebagai pengganti (dua-duanya graf OSM). Limitation eksplisit sudah
 ditulis di abstrak + `main.tex` §Threats~(ii): tidak ada klaim akurasi. Urutan
 kerja dan definisi selesai ada di `docs/M6.md` §E2.

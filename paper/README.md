@@ -1,4 +1,4 @@
-# Paper draft — RouteID
+# Paper draft: RouteID
 
 Status: **draf lengkap, siap dikompilasi; E1 (baseline OSRM) selesai 2026-11-07,
 E2 (ground truth) belum.**

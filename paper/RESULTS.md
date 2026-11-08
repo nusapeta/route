@@ -90,7 +90,7 @@ Puncak **bukan** halaman mmap. Yang tumbuh adalah heap Go (`RssAnon`): ruang
 kerja A* (open set open-addressing berisi `keys`, `gen`, `gs`, `came`, 16 B per
 slot) membesar mengikuti rute terpanjang yang pernah dilayani, lalu di-pool per
 slot konkurensi dan **tidak menyusut**. `RssFile` (halaman graph hasil `mmap`)
-tetap kecil karena hanya sebagian file yang tersentuh dan sifatnya clean —
+tetap kecil karena hanya sebagian file yang tersentuh dan sifatnya clean;
 bagian itu saja yang bisa direklaim kernel.
 
 Konsekuensinya untuk deployment: anggaran memori ditentukan rute terpanjang ×
@@ -190,7 +190,7 @@ yang bisa dirutekan, mesin yang sama):
 | longgar (tanpa restriction) | **3.414 (95,79%)** | 0 | 0 | 2 µs |
 
 `non_vacuous = 3.414 / 3.564 = 95,79%`: pada 95,79% kasus, rute terpendek
-memang **ingin** mengambil belokan terlarang — jadi uji ini tidak vakum.
+memang **ingin** mengambil belokan terlarang, jadi uji ini tidak vakum.
 Fallback = kasus di mana larangan (umumnya via-way konservatif) membuat tujuan
 tak terjangkau; router mengulang tanpa restriction dan menandai
 `"fallback": true`.
@@ -266,8 +266,8 @@ perilaku, bukan sekadar lulus.
 ## 9. Akurasi snapping: node vs ruas (M2)
 
 `rid-snapcheck -graph data/sumatra.graph -bbox -0.6,100.0,0.4,101.0 -n 5000 -offset 40`
-— 5.000 titik simulasi digeser tegak lurus 0–40 m dari sebuah ruas (Sumatra barat,
-1.020.007 edge dalam bbox):
+Metodenya: 5.000 titik simulasi digeser tegak lurus 0–40 m dari sebuah ruas (Sumatra
+barat, 1.020.007 edge dalam bbox):
 
 | panjang ruas | n | node p50 | node p95 | ruas p50 | ruas p95 |
 |---|---|---|---|---|---|
@@ -326,13 +326,13 @@ Yang diubah, semuanya di jalur panas tanpa menyentuh format graph:
    dibulatkan ke bawah) + satu `sqrt`, memakai skala meter teraman
    (`110540` m/° lintang, `111320·cos(max|lat|)` m/° bujur) dan margin 0,99.
    Selisih flat-earth vs great-circle orde dua (≈0,15% pada 10°, 1,4% pada 30°),
-   jadi heuristik tetap batas bawah—dibuktikan `TestHeuristicAdmissible`.
+   jadi heuristik tetap batas bawah, dibuktikan `TestHeuristicAdmissible`.
 2. **Workspace 12 B/slot.** Kunci dan cap generasi berbagi satu `uint32`
    (`gen<<nodeBits | edge+1`), nodeBits dari jumlah edge (Java 25 bit → 7 bit
    generasi, tabel dibersihkan tiap 128 query, biaya ~0,05 ms/query). Sebelumnya
    kunci dan generasi adalah dua array terpisah (16 B/slot).
 3. **Turn restriction sekali per ekspansi.** `Graph.Span(e)` mengembalikan rentang
-   `ban`/`only` lewat dua `sort.Search`, lalu pengecekan tetangga linear—bukan
+   `ban`/`only` lewat dua `sort.Search`, lalu pengecekan tetangga linear, bukan
    empat pencarian biner per ekspansi seperti sebelumnya.
 4. **Heap 4-ary** dan load factor tabel 0,7 → 0,8.
 
@@ -355,12 +355,12 @@ Throughput lewat `rid-server -conc 2`, satu rute 41,7 km, `scripts/loadtest.py
 | p95 server | 88 ms | 52 ms | 1,69x |
 
 Catatan metodologi: box uji ini (2 core/4 thread) mengalami throttling saat uji
-panjang—p50 lama bisa bergeser 400→800 ms antar-runs, jadi yang bermakna adalah
+panjang; p50 lama bisa bergeser 400→800 ms antar-runs, jadi yang bermakna adalah
 rasio yang diukur bergantian, bukan angka absolut.
 
 **Ekspansi hampir tidak berubah** (rata-rata 815.579 → 817.551, +0,2% karena
 heuristik sedikit lebih longgar). Artinya kemenangan 1,9–2,0x datang murni dari
-biaya per ekspansi, bukan dari pencarian yang lebih pintar—persis yang tidak
+biaya per ekspansi, bukan dari pencarian yang lebih pintar, persis yang tidak
 bisa dicapai ALT tanpa tambahan memori (lihat ROADMAP M3).
 
 **Kualitas rute**: pada 601 pasang Java, waktu tempuh **537/537 sama** (hanya
@@ -390,7 +390,7 @@ Rute 41,7 km (`-7.685807,111.504115` -> `-7.968214,111.468762`),
 | 3 | 21,70 | 39,89 | 176 ms | 95 ms |
 
 Sesudah promosi (container hidup, tiga ronde lagi): **36,1 / 38,9 / 38,6 RPS**,
-p50 96-102 ms, p95 105-123 ms — naik **~2,05x** dari median pre-m3 (18,8 RPS).
+p50 96-102 ms, p95 105-123 ms, naik **~2,05x** dari median pre-m3 (18,8 RPS).
 p95 400 ms yang jadi target M4 sudah lewat jauh di angka ini.
 
 Memori terukur (`docker stats`, setelah beban yang sama):
@@ -492,7 +492,7 @@ Setelah limiter dipindah ke belakang pengecekan `ETag`:
 | 1 rute penuh lalu 7 revalidasi | `200 304 304 304 304 304 304 304` |
 | 6 rute penuh (`If-None-Match` basi) | `200 200 200 429 429 429` |
 
-Jadi klien yang memakai cache-nya dengan benar tidak pernah kena limit — dan
+Jadi klien yang memakai cache-nya dengan benar tidak pernah kena limit, dan
 justru itu yang diinginkan: revalidasi tidak menyentuh workspace, jadi tidak
 perlu "dibayar" dengan token.
 
@@ -666,7 +666,7 @@ klaim.
 Dari 81 routeid 422: 72 `no road within snap distance` (radius server 3 km),
 7 `search space exhausted`, 2 `no route`. OSRM tidak gagal di satu pun, tetapi
 pada 81 pasangan itu titik snap tujuan OSRM berjarak **median 14,7 km, p90
-32,7 km, max 44,6 km** dari koordinat input — rute OSRM valid secara internal
+32,7 km, max 44,6 km** dari koordinat input; rute OSRM valid secara internal
 tetapi bukan pembanding yang setara. Routeid menolak titik seperti itu;
 OSRM menempel sejauh apa pun.
 
@@ -770,7 +770,7 @@ perbedaan fungsi biaya, bukan akurasi.
 - Gerbang "p95 selisih jarak < 12%" di `COMPARISON.md` **tidak sah sebagai
   gerbang akurasi**; ia hanya mengukur kemiripan rute. Statusnya tetap gagal,
   tetapi tidak boleh dipakai untuk menyimpulkan routeid salah.
-- Klaim akurasi tetap menunggu E2 (Google) — hanya referensi independen yang
+- Klaim akurasi tetap menunggu E2 (Google): hanya referensi independen yang
   bisa memutuskan rute mana yang lebih baik.
 - Untuk menurunkan selisih jarak: tambahkan penalti belok dan/atau preferensi
   kelas jalan (mengubah perilaku routing, harus diikuti E1 ulang), atau ubah
@@ -818,7 +818,7 @@ Bacaan:
   naik ke 22,02% pada 1x. Ekor distribusi tidak ditentukan oleh jumlah belok.
 - 1x memperbaiki outlier ekstrem (−48,30% -> −17,03%; p99 43,65% -> 40,97%)
   tetapi merusak banyak pasangan menengah, sehingga mean dan p75 memburuk.
-  Contoh 0-5 km: 3.786 m/530,5 s menjadi 5.314 m/582,2 s — rute optimum di
+  Contoh 0-5 km: 3.786 m/530,5 s menjadi 5.314 m/582,2 s; rute optimum di
   model baru memang 54 s waktu tempuh lebih mahal, ditebus penalti belok.
 - 0,25x menggeser seluruh badan distribusi sedikit ke arah OSRM (mean −0,10
   poin, p75 −0,21, p90 −0,64) dengan 111 rute berubah dan ETA +1,6% median.
@@ -870,7 +870,7 @@ yang jaraknya <= 40 km dengan build yang sekarang dikirim (penalti belok 0,25x,
 - `-conc 2` memberi p50 sepertiga `-conc 4` (32,9 vs 73,6 ms) pada RPS sama,
   jadi untuk batas 40 km `-conc 2` cukup dan antrean lebih pendek.
 - RSS 805 MB steady, puncak 859 MB (limit heap 768 MiB) dengan tiga region.
-- Seluruh 600 pasang (tanpa batas): p50 92,6 ms, p95 1.550,7 ms — ekor itu dari
+- Seluruh 600 pasang (tanpa batas): p50 92,6 ms, p95 1.550,7 ms; ekor itu dari
   pasangan panjang dan `422`, bukan dari rute <= 40 km.
 
 ### 16c. Akurasi pada segmen <= 40 km (E1, 324 pasang OSRM <= 40 km)
@@ -885,7 +885,7 @@ GOMEMLIMIT=768MiB bin/rid-server -graph data/java.graph -graph data/sumatra.grap
 # 600 pasang dari paper/results/pairs-java.csv via HTTP keep-alive; saring distance_m <= 40000
 ```
 
-Catatan: angka latency E1 (§13c) untuk segmen ini tidak dipakai — sebagian
+Catatan: angka latency E1 (§13c) untuk segmen ini tidak dipakai: sebagian
 baris 0-5 km/30-50 km tercatat 1-4 ms (terkontaminasi cache/alat ukur), jadi
 tabel di atas adalah pengukuran ulang bersih di mesin yang sama dengan deploy.
 
@@ -897,7 +897,7 @@ sebelum (`f9693f8`) vs sesudah (pool bersama `-conc` + anggaran `-workspace-mb`
 + shrink histeresis 8x, `docs/PLAN-resource-accuracy.md` W1).
 
 ### 17a. Metode
-- Mesin: AMD Ryzen 5 5600G (12 thread), 15 GB, Linux 7.2.15, Go 1.27.3 —
+- Mesin: AMD Ryzen 5 5600G (12 thread), 15 GB, Linux 7.2.15, Go 1.27.3,
   **bukan** mesin deploy, jadi yang dibandingkan adalah delta antar build di
   mesin yang sama, bukan angka absolut i3-6100T.
 - Graph: `data/java.graph` (`5d3fdd1b`, 22,71 jt node, 46,68 jt edge, 693 MB)
@@ -935,14 +935,14 @@ sebelum (`f9693f8`) vs sesudah (pool bersama `-conc` + anggaran `-workspace-mb`
 ### 17c. Anggaran `-workspace-mb`
 Dengan `-workspace-mb 256 -conc 2` (128 MB/slot), himpunan pasangan <= 40 km
 (298 rute, `-max-route-km` default) berhenti di **126 MB** tabel (2 x 5.242.880 slot,
-`grows_total` 150, `shrinks_total` 60) — di
-bawah anggaran, jadi 40 km tidak menyentuh plafon. Bila plafon tersentuh, klien
+`grows_total` 150, `shrinks_total` 60), di bawah anggaran, jadi 40 km tidak
+menyentuh plafon. Bila plafon tersentuh, klien
 menerima `422 {"error":"search space exhausted (route too long)"}`, bukan OOM:
 `-conc 1 -workspace-mb 1` (87.381 slot) untuk rute 42 km menjawab **422 dalam
 57 ms** dengan tabel tetap 65.536 slot (0,75 MB), `grows_total` 0.
 
 Catatan implementasi: anggaran bukan pangkat dua (87.381) sempat diteruskan
-sebagai `maxSlots`, sedangkan probe memakai `i = (i+1) & mask` — tabel tidak
+sebagai `maxSlots`, sedangkan probe memakai `i = (i+1) & mask`; tabel tidak
 pernah penuh merata, probe berputar tanpa henti, dan request menggantung
 (terukur: tidak ada jawaban dalam 300 s). Perbaikan: `floorPow2` pada anggaran
 dan slot awal `min(initialSlots, maxSlots)`; regresi dikunci
