@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -14,15 +15,8 @@ import (
 	"time"
 
 	"routeid/internal/graph"
+	"routeid/internal/stats"
 )
-
-type sample struct {
-	wantKM float64
-	distKM float64
-	ms     float64
-	expand int
-	failed bool
-}
 
 func main() {
 	graphPath := flag.String("graph", "map.graph", "graph file")
@@ -31,7 +25,7 @@ func main() {
 	turnPenalty := flag.Float64("turn-penalty", 0.25, "turn cost multiplier; 0 = pure edge time")
 	seed := flag.Int64("seed", 42, "rng seed")
 	csvOut := flag.String("csv", "", "write raw samples to CSV")
-	pairsIn := flag.String("pairs", "", "route fixed pairs from CSV (from_lat,from_lon,to_lat,to_lon)")
+	pairsIn := flag.String("pairs", "", "route fixed pairs from CSV (bucket,from_lat,from_lon,to_lat,to_lon)")
 	pairsOut := flag.String("emit-pairs", "", "write the sampled coordinate pairs and exit")
 	noStrict := flag.Bool("no-restrictions", false, "ignore turn restrictions (baseline)")
 	cpuProf := flag.String("cpuprofile", "", "write CPU profile")
@@ -40,17 +34,17 @@ func main() {
 	if *cpuProf != "" {
 		f, err := os.Create(*cpuProf)
 		if err != nil {
-			panic(err)
+			die(err)
 		}
 		if err := pprof.StartCPUProfile(f); err != nil {
-			panic(err)
+			die(err)
 		}
 		defer func() { pprof.StopCPUProfile(); f.Close() }()
 	}
 
 	g, err := graph.Open(*graphPath)
 	if err != nil {
-		panic(err)
+		die(err)
 	}
 	defer g.Close()
 	r := graph.NewRouter(g, 1)
@@ -80,19 +74,16 @@ func main() {
 	if *pairsOut != "" {
 		f, err := os.Create(*pairsOut)
 		if err != nil {
-			panic(err)
+			die(err)
 		}
 		fmt.Fprintln(f, "bucket,from_lat,from_lon,to_lat,to_lon")
 		for _, b := range buckets {
 			for i := 0; i < *n; i++ {
-				src, ok := randomNode(g, rng)
+				src, tLat, tLon, _, ok := samplePair(g, rng, b.lo, b.hi)
 				if !ok {
 					continue
 				}
 				lat, lon := g.Coords(src)
-				dKM := b.lo + rng.Float64()*(b.hi-b.lo)
-				bearing := rng.Float64() * 2 * math.Pi
-				tLat, tLon := offset(lat, lon, dKM, bearing)
 				fmt.Fprintf(f, "%s,%.6f,%.6f,%.6f,%.6f\n", b.name, lat, lon, tLat, tLon)
 			}
 		}
@@ -105,27 +96,22 @@ func main() {
 	if *csvOut != "" {
 		csv, err = os.Create(*csvOut)
 		if err != nil {
-			panic(err)
+			die(err)
 		}
 		defer csv.Close()
 		fmt.Fprintln(csv, "bucket,want_km,route_km,ms,expansions,failed")
 	}
 
-	fmt.Printf("%-9s %5s %8s %8s %9s %9s %10s %10s\n",
-		"bucket", "n", "route_km", "p50_ms", "p95_ms", "p99_ms", "mean_exp", "fail")
+	printTableHeader()
 	for _, b := range buckets {
 		var ms, expands []float64
 		var sumKM float64
 		fails := 0
 		for i := 0; i < *n; i++ {
-			src, ok := randomNode(g, rng)
+			src, tLat, tLon, dKM, ok := samplePair(g, rng, b.lo, b.hi)
 			if !ok {
 				continue
 			}
-			lat, lon := g.Coords(src)
-			dKM := b.lo + rng.Float64()*(b.hi-b.lo)
-			bearing := rng.Float64() * 2 * math.Pi
-			tLat, tLon := offset(lat, lon, dKM, bearing)
 			dst, _, ok := g.Nearest(tLat, tLon, 5000)
 			if !ok {
 				fails++
@@ -149,24 +135,50 @@ func main() {
 			}
 		}
 		if len(ms) == 0 {
-			fmt.Printf("%-9s %5d %8s %8s %8s %8s %10s %10d\n", b.name, 0, "-", "-", "-", "-", "-", fails)
+			printRow(b.name, 0, 0, 0, 0, 0, 0, fails)
 			continue
 		}
 		sort.Float64s(ms)
 		sort.Float64s(expands)
-		fmt.Printf("%-9s %5d %8.1f %8.1f %9.1f %9.1f %10.0f %10d\n",
-			b.name, len(ms), sumKM/float64(len(ms)),
-			pct(ms, 0.50), pct(ms, 0.95), pct(ms, 0.99),
-			expands[len(expands)/2], fails)
+		printRow(b.name, len(ms), sumKM/float64(len(ms)),
+			stats.Percentile(ms, 0.50), stats.Percentile(ms, 0.95), stats.Percentile(ms, 0.99),
+			stats.Percentile(expands, 0.50), fails)
 	}
 }
 
-func pct(sorted []float64, p float64) float64 {
-	if len(sorted) == 0 {
-		return 0
+func printTableHeader() {
+	fmt.Printf("%-9s %5s %8s %8s %9s %9s %10s %10s\n",
+		"bucket", "n", "route_km", "p50_ms", "p95_ms", "p99_ms", "p50_exp", "fail")
+}
+
+// printRow writes one bucket summary; n == 0 leaves the statistics blank.
+func printRow(bucket string, n int, km, p50, p95, p99, p50exp float64, fail int) {
+	if n == 0 {
+		fmt.Printf("%-9s %5d %8s %8s %8s %8s %10s %10d\n", bucket, 0, "-", "-", "-", "-", "-", fail)
+		return
 	}
-	i := int(math.Round(p * float64(len(sorted)-1)))
-	return sorted[i]
+	fmt.Printf("%-9s %5d %8.1f %8.1f %9.1f %9.1f %10.0f %10d\n",
+		bucket, n, km, p50, p95, p99, p50exp, fail)
+}
+
+func die(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// samplePair draws a random source node and a target dKM away along a random
+// bearing, with dKM in [lo,hi).
+func samplePair(g *graph.Graph, rng *rand.Rand, lo, hi float64) (src uint32, tLat, tLon, dKM float64, ok bool) {
+	src, ok = randomNode(g, rng)
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	lat, lon := g.Coords(src)
+	dKM = lo + rng.Float64()*(hi-lo)
+	bearing := rng.Float64() * 2 * math.Pi
+	tLat, tLon = offset(lat, lon, dKM, bearing)
+	return src, tLat, tLon, dKM, true
 }
 
 func randomNode(g *graph.Graph, rng *rand.Rand) (uint32, bool) {
@@ -191,14 +203,14 @@ func offset(lat, lon, dKM, bearing float64) (float64, float64) {
 func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
 	f, err := os.Open(path)
 	if err != nil {
-		panic(err)
+		die(err)
 	}
 	defer f.Close()
 	var csv *os.File
 	if csvOut != "" {
 		csv, err = os.Create(csvOut)
 		if err != nil {
-			panic(err)
+			die(err)
 		}
 		defer csv.Close()
 		fmt.Fprintln(csv, "bucket,route_km,ms,expansions,failed,from_lat,from_lon,to_lat,to_lon,time_ds")
@@ -211,17 +223,33 @@ func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
 	byBucket := map[string]*acc{}
 	var order []string
 	sc := bufio.NewScanner(f)
-	sc.Scan() // header
+	line := 0
 	for sc.Scan() {
-		parts := strings.Split(strings.TrimSpace(sc.Text()), ",")
-		if len(parts) < 5 {
+		line++
+		if line == 1 {
 			continue
 		}
-		bucket := parts[0]
-		fla, _ := strconv.ParseFloat(parts[1], 64)
-		flo, _ := strconv.ParseFloat(parts[2], 64)
-		tla, _ := strconv.ParseFloat(parts[3], 64)
-		tlo, _ := strconv.ParseFloat(parts[4], 64)
+		text := strings.TrimSpace(sc.Text())
+		if text == "" {
+			continue
+		}
+		parts := strings.Split(text, ",")
+		if len(parts) != 5 {
+			die(fmt.Errorf("%s:%d: want 5 columns bucket,from_lat,from_lon,to_lat,to_lon, got %d", path, line, len(parts)))
+		}
+		bucket := strings.TrimSpace(parts[0])
+		if bucket == "" {
+			die(fmt.Errorf("%s:%d: empty bucket", path, line))
+		}
+		var coord [4]float64
+		for i := range coord {
+			v, err := strconv.ParseFloat(strings.TrimSpace(parts[i+1]), 64)
+			if err != nil {
+				die(fmt.Errorf("%s:%d: %v", path, line, err))
+			}
+			coord[i] = v
+		}
+		fla, flo, tla, tlo := coord[0], coord[1], coord[2], coord[3]
 		a := byBucket[bucket]
 		if a == nil {
 			a = &acc{}
@@ -253,7 +281,8 @@ func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
 				float64(res.DistanceM)/1000, el, res.Expansions, fla, flo, tla, tlo, res.TimeDs)
 		}
 	}
-	fmt.Printf("%-9s %5s %8s %8s %9s %9s %10s %10s\n", "bucket", "n", "route_km", "p50_ms", "p95_ms", "p99_ms", "mean_exp", "fail")
+	die(sc.Err())
+	printTableHeader()
 	for _, b := range order {
 		a := byBucket[b]
 		if len(a.ms) == 0 {
@@ -261,8 +290,8 @@ func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
 		}
 		sort.Float64s(a.ms)
 		sort.Float64s(a.exp)
-		fmt.Printf("%-9s %5d %8.1f %8.1f %9.1f %9.1f %10.0f %10d\n",
-			b, a.n, a.km/float64(a.n), pct(a.ms, 0.5), pct(a.ms, 0.95), pct(a.ms, 0.99),
-			a.exp[len(a.exp)/2], a.fail)
+		printRow(b, a.n, a.km/float64(a.n),
+			stats.Percentile(a.ms, 0.50), stats.Percentile(a.ms, 0.95), stats.Percentile(a.ms, 0.99),
+			stats.Percentile(a.exp, 0.50), a.fail)
 	}
 }

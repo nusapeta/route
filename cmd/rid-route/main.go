@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -10,10 +12,29 @@ import (
 	"routeid/internal/graph"
 )
 
-func pt(s string) (float64, float64) {
-	p := strings.Split(s, ",")
-	la, _ := strconv.ParseFloat(p[0], 64)
-	lo, _ := strconv.ParseFloat(p[1], 64)
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: rid-route -graph map.graph -from lat,lng -to lat,lng")
+}
+
+func pt(name, s string) (float64, float64) {
+	parts := strings.Split(s, ",")
+	if len(parts) != 2 {
+		fmt.Fprintf(os.Stderr, "-%s must be lat,lng: %q\n", name, s)
+		usage()
+		os.Exit(2)
+	}
+	la, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "-%s: %v\n", name, err)
+		usage()
+		os.Exit(2)
+	}
+	lo, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "-%s: %v\n", name, err)
+		usage()
+		os.Exit(2)
+	}
 	return la, lo
 }
 
@@ -24,17 +45,21 @@ func main() {
 	eps := flag.Float64("eps", 1.25, "heuristic weight")
 	turnPenalty := flag.Float64("turn-penalty", 0.25, "turn cost multiplier; 0 = pure edge time")
 	flag.Parse()
+	if *from == "" || *to == "" {
+		usage()
+		os.Exit(2)
+	}
+	fla, flo := pt("from", *from)
+	tla, tlo := pt("to", *to)
 
 	g, err := graph.Open(*graphPath)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	r := graph.NewRouter(g, 1)
 	r.SetEpsilon(float32(*eps))
 	r.SetTurnScale(float32(*turnPenalty))
 
-	fla, flo := pt(*from)
-	tla, tlo := pt(*to)
 	t0 := time.Now()
 	sa, ok1 := g.SnapEdge(fla, flo, 3000)
 	sb, ok2 := g.SnapEdge(tla, tlo, 3000)

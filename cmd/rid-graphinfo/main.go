@@ -84,7 +84,7 @@ func main() {
 	prov := g.Provenance()
 	fmt.Printf("format     : v%d\n", prov.Format)
 	if prov.PBFHash == "" {
-		fmt.Printf("provenance : none (format < 3) — rebuild to record source/profile\n")
+		fmt.Printf("provenance : none (format < 3) - rebuild to record source/profile\n")
 	} else {
 		fmt.Printf("pbf sha256 : %s\n", prov.PBFHash)
 		fmt.Printf("built at   : %s\n", prov.BuiltAt)
@@ -106,8 +106,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-at must be lat,lng")
 		os.Exit(2)
 	}
-	lat, _ := strconv.ParseFloat(parts[0], 64)
-	lon, _ := strconv.ParseFloat(parts[1], 64)
+	lat, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "-at: %v\n", err)
+		os.Exit(2)
+	}
+	lon, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "-at: %v\n", err)
+		os.Exit(2)
+	}
 	for _, lim := range []float64{50, 500, 3000, 20000, 200000} {
 		id, d, ok := g.Nearest(lat, lon, lim)
 		if !ok {
