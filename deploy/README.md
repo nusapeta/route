@@ -49,7 +49,8 @@ docker compose ps                 # STATUS harus (healthy)
 curl -s localhost:8080/healthz
 ```
 
-Batas memori 1 GB (`mem_limit`), graceful stop 25 s, log diputar 3x10 MB.
+Batas memori 1,5 GB (`mem_limit`: RSS memuat halaman `mmap` graf), graceful
+stop 25 s, log diputar 3x10 MB.
 
 ## 1b. systemd (tanpa Docker)
 
@@ -89,7 +90,8 @@ curl -s "127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.9175,107.6191&format=g
 | 20x rute 15 km | 89 MB |
 | 1x rute 148 km | 401 MB |
 | 1x rute 578 km | 613 MB |
-| puncak (banyak rute panjang) | ~850 MB |
+| puncak, 600 pasang campuran (build `8e2dc11`) | ~1,1 GB (`anon` 415 MB) |
+| beban kontrak 40 km, `-conc 4`, `GOMEMLIMIT=1GiB` | 958 MB (`anon` 311 MB) |
 
 CPU 1 core penuh selama satu query: 128 ms (15 km), 3,6 s (148 km),
 1,7 s (578 km). Disk 1,48 GB, wajib SSD (halaman mmap dibaca saat disentuh).
@@ -97,6 +99,24 @@ Startup 10 ms.
 
 Untuk mesin kecil: `-conc 1` (memori ~4x lebih hemat, query diserialkan) dan
 `GOMEMLIMIT=512MiB`.
+
+Dua flag yang dipakai container sejak build `8e2dc11`:
+
+- `-workspace-mb 256` — anggaran total tabel A*, dibagi rata ke `-conc` slot
+  (12 B/slot, jadi 64 MB/slot pada `-conc 4`). Tabel mulai 0,75 MB, tumbuh saat
+  rute panjang, dan menyusut balik bila kapasitas > 8x pemakaian. Bila anggaran
+  habis, klien menerima `422 search space exhausted (route too long)`, bukan
+  OOM. `0` = tanpa anggaran eksplisit (plafon lama 384 MB/slot).
+- `-max-route-km 40` — kontrak aplikasi: rute di atas 40 km (garis lurus lebih
+  dulu, lalu jarak tempuh) ditolak `422`, jadi segmen <= 40 km tetap di p50
+  24-73 ms dan p95 246-705 ms (`paper/RESULTS.md` §16).
+
+Ukur sendiri sesudah beban:
+
+```bash
+scripts/memcheck.sh http://127.0.0.1:8080            # gauge workspace + smaps_rollup
+curl -s http://127.0.0.1:8080/metrics | grep ^routeid_workspace_
+```
 
 ## 3b. Kapasitas (terukur di i3-6100T, 2C/4T)
 

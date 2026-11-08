@@ -889,7 +889,7 @@ Catatan: angka latency E1 (§13c) untuk segmen ini tidak dipakai — sebagian
 baris 0-5 km/30-50 km tercatat 1-4 ms (terkontaminasi cache/alat ukur), jadi
 tabel di atas adalah pengukuran ulang bersih di mesin yang sama dengan deploy.
 
-## 17. Pool workspace bersama + shrink (A/B, Ryzen 5 5600G)
+## 17. Pool workspace bersama + shrink (A/B, Ryzen 5 5600G + i3-6100T)
 
 §5 mengukur tabel workspace sebagai penyebab kenaikan RSS setelah beban, dan
 §16 mencatat RSS 805 MB pada deploy 3 region. Bagian ini mengukur **pengaruhnya**:
@@ -956,3 +956,48 @@ ln -s $PWD/data/java.graph /tmp/g3/java{,2,3}.graph
 grep -E "^Rss:|^Anonymous:" /proc/$(pgrep -x rid-server)/smaps_rollup
 curl -s localhost:PORT/metrics | grep ^routeid_workspace_
 ```
+
+### 17e. Mesin deploy (i3-6100T, tiga region nyata)
+
+§17a-17d mengukur di Ryzen dengan graf yang sama dimuat 3x, jadi pengganda
+region di §17b lebih besar daripada deploy nyata (Java 46,7 jt edge, Sumatra
+24,3 jt, Nusa-Tenggara 10,1 jt). Bagian ini mengulang A/B di box homelab
+(i3-6100T 2C/4T, 7,8 GB) dengan `data/{java,sumatra,nusa-tenggara}.graph`
+(693 + 364 + 153 MB), `-conc 4`, 600 pasang `pairs-java.csv` berurutan
+keep-alive, `-rate 0`; binary `8e2dc11` disalin sebagai `bin/rid-server`,
+pembanding `/tmp/rid-server-old` (build `f9693f8`).
+
+| run | build | flag | kode | wall | anon | RSS | tabel |
+|---|---|---|---|---|---|---|---|
+| A | `f9693f8` | (tanpa flag baru) | 519x200 / 81x422 | 316,8 s | 462 MB | 1.138 MB | 12 tabel, tak terukur |
+| B | `8e2dc11` | — | 518x200 / 82x422 | 270,3 s | **415 MB** | **1.087 MB** | 126 MB (10,5 jt slot) |
+| C | `8e2dc11` | `-max-route-km 40`, `-workspace-mb 256`, `GOMEMLIMIT=1GiB` | 298x200 / 302x422 | 97,4 s | **311 MB** | **958 MB** | 201 MB (16,8 jt slot) |
+
+- A vs B: `anon` -10%, RSS -4% pada beban identik. Jauh lebih kecil dari -34%
+  di §17b karena di deploy hanya region Java yang menghasilkan tabel besar, dan
+  jumlah tabel besar itu sama-sama 4 (satu per slot `-conc`). Pool bersama
+  menghapus pengganda *region*, bukan pengganda `-conc`.
+- C adalah konfigurasi container (`-max-route-km 40`, `-workspace-mb 256`):
+  `anon` 311 MB, tabel 201 MB (setelah 163 grow / 59 shrink), 302 dari 600
+  pasang ditolak lebih awal tanpa menyentuh A*. RSS tetap ~1 GB karena
+  `Rss`/`Pss` memuat halaman `mmap` graf yang tersentuh (1,21 GB berkas, `Pss`
+  ~= `Rss`), bukan memori aplikasi.
+- Gerbang W1 "RSS <= 256 MB" karena itu **tidak** dinyatakan lulus dalam arti
+  RSS; yang bisa dikutip adalah `anon` 415 -> 311 MB dan tabel berbatas
+  256 MB. Perbandingan yang setara dengan §5 (cgroup `anon` 612 MB) adalah
+  `anon` 311 MB pada beban kontrak yang sama.
+- Idle container sesudah beberapa rute: RSS 21,6 MB, `anon` 6,7 MB,
+  `routeid_workspace_bytes` 3.145.728 (4 slot x 65.536).
+- Satu pasang berbeda hasilnya antar run (519 vs 518 x `200`): pasangan itu
+  jatuh di ambang batas garis lurus 40 km dan urutan snap berbeda; tidak ada
+  500/504 di semua run.
+
+Perintah:
+```bash
+# C (setara container, hanya tanpa rate limit)
+GOMEMLIMIT=1GiB bin/rid-server -graph data/java.graph -graph data/sumatra.graph \
+  -graph data/nusa-tenggara.graph -addr 0.0.0.0:18083 -conc 4 -rate 0 \
+  -timeout 10s -workspace-mb 256 -max-route-km 40
+P=$(ss -ltnp | grep 18083 | grep -oP 'pid=\K[0-9]+'); grep -E "^Rss:|^Anonymous:" /proc/$P/smaps_rollup
+```
+

@@ -473,10 +473,24 @@ himpunan pasangan <= 40 km, bukan satu rute contoh: 298 dari 600 pasang
 | 8 | 24,9 | 192,7 ms | 1.205,0 ms |
 
 Plafon ~24-25 RPS di 2 core fisik; `-conc 2` memberi p50 sepertiga `-conc 4`
-pada RPS yang sama, jadi untuk batas 40 km `-conc 2` cukup. RSS 805 MB
-(puncak 859 MB). Untuk segmen ini akurasi E1 juga lulus: p95 selisih jarak
-7,44% (median 0,03%) pada 324 pasang OSRM <= 40 km. Rincian:
-`paper/RESULTS.md` §16.
+pada RPS yang sama, jadi untuk batas 40 km `-conc 2` cukup. Untuk segmen ini
+akurasi E1 juga lulus: p95 selisih jarak 7,44% (median 0,03%) pada 324 pasang
+OSRM <= 40 km. Rincian: `paper/RESULTS.md` §16.
+
+Memori dengan build pool bersama (600 pasang `pairs-java.csv`, tiga region,
+`-conc 4`, sesudah beban; `paper/RESULTS.md` §17e):
+
+| build | beban | anon | RSS | tabel workspace |
+|---|---|---|---|---|
+| `f9693f8` (12 tabel) | 600 pasang, tanpa batas | 462 MB | 1.138 MB | tak terukur |
+| `8e2dc11` (pool 4) | 600 pasang, tanpa batas | **415 MB** | **1.087 MB** | 126 MB |
+| `8e2dc11` | 40 km (`-max-route-km 40`), `GOMEMLIMIT=1GiB` | **311 MB** | **958 MB** | 201 MB dari 256 MB |
+
+RSS di atas menghitung halaman `mmap` graf yang tersentuh (Java+Sumatra+
+Nusa-Tenggara = 1,21 GB berkas, `Pss` ~= `Rss`); bagian yang dikendalikan
+aplikasi adalah `anon`, dan itu turun 10% pada beban yang sama serta 49%
+dibanding `anon` 612 MB pada §5. Idle container sesudah beberapa rute:
+RSS 21,6 MB, `anon` 6,7 MB, `routeid_workspace_bytes` 3,1 MB.
 
 Sebelum M3, saturasi ada di ~11-12 RPS: pada `-conc 4` CPU terpakai ~3,5
 core-ekuivalen (10,9 query x 0,33 s), jadi menambah container tidak menambah RPS

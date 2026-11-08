@@ -36,7 +36,7 @@ butuh argumen eksplisit dan milestone sendiri.
 | Image container | 24 MB (prebuilt alpine) | <= 25 MB | 40 MB |
 | Start sampai `/healthz` 200 | 10 ms | <= 25 ms | 100 ms |
 | Preprocess per pulau | 58 s (v3, 1 worker) / **3m53s** (v4 Java, 4 worker, box berbeban) | <= 90 s di mesin sepi | 5 menit |
-| RSS @ beban 42 km, `-conc 4` | 558 MB | <= 350 MB | 700 MB |
+| RSS @ beban 42 km, `-conc 4` | 558 MB -> **958 MB** (3 region nyata; 1,21 GB graf ter-`mmap`) / anon **311 MB** | <= 350 MB anon | 700 MB anon |
 | Throughput 42 km (i3-6100T) | 10,9 (v3) -> **13,8-16,0 RPS** (v4) | >= 20 RPS | - |
 | Densitas | 19,5 RPS/GB (v3) -> **~240 RPS/GB** (v4: 15 RPS / 64 MB) | >= 45 RPS/GB | - |
 | Artefak graph per pulau | **693 MB** (Java, v4; -32 %) | <= 800 MB | 1 GB |

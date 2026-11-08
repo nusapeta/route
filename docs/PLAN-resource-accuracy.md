@@ -128,10 +128,16 @@ pasangan E1, tidak ada 500/OOM; rute <=50 km tetap 332/332 cocok.
   RSS ikut turun 2004 -> 1895 MB dan 2236 -> 2107 MB (sisa RSS adalah halaman
   `mmap` 3 x 693 MB yang tidak dibandingkan). Hasil rute identik: 519 x 200,
   81 x 422 di keempat run.
-- Gerbang "RSS <= 256 MB di deploy 3 region" **belum** dinyatakan lulus:
-  angka di atas dari mesin uji dengan graf 3x Java. Yang harus diukur adalah
-  container homelab setelah deploy (Java + Sumatra + Nusa-Tenggara), dan itu
-  dicatat di `README.md` §"Homelab uji" pada commit yang sama.
+- Gerbang "RSS <= 256 MB di deploy 3 region" **tidak** dinyatakan lulus dalam
+  arti RSS: di homelab (Java + Sumatra + Nusa-Tenggara, `-conc 4`, 600 pasang,
+  `GOMEMLIMIT=1GiB`, `-max-route-km 40`) terukur `anon` **311 MB**, tabel
+  **201 MB** dari anggaran 256 MB, sedangkan RSS 958 MB karena `Rss`/`Pss`
+  memuat halaman `mmap` graf yang tersentuh (1,21 GB berkas). A/B di box yang
+  sama pada beban identik tanpa batas: `anon` 462 -> 415 MB, RSS 1.138 ->
+  1.087 MB. Delta lebih kecil dari mesin uji karena di deploy hanya region Java
+  yang menghasilkan tabel besar, dan jumlahnya sama-sama `-conc`; pool bersama
+  menghapus pengganda region, bukan pengganda `-conc`. Angka lengkap:
+  `paper/RESULTS.md` §17e.
 
 ### W2. Akurasi B: kejar p95 21% -> <=12%
 

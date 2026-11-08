@@ -12,7 +12,7 @@ Type=simple
 User=routeid
 Group=routeid
 WorkingDirectory=/srv/routeid
-ExecStart=/srv/routeid/bin/rid-server -graph /srv/routeid/data/java.graph -graph /srv/routeid/data/sumatra.graph -addr :8080 -conc 2
+ExecStart=/srv/routeid/bin/rid-server -graph /srv/routeid/data/java.graph -graph /srv/routeid/data/sumatra.graph -addr :8080 -conc 2 -workspace-mb 256 -max-route-km 40
 Environment=GOMEMLIMIT=768MiB
 Restart=always
 RestartSec=2s

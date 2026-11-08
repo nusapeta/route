@@ -30,6 +30,14 @@ services:
       # 2 core fisik: 4 workspace -> throughput ~2,4x dibanding conc 1
       - -conc
       - "4"
+      # Anggaran tabel A*: 256 MB / 4 slot = 64 MB/slot (12 B/slot). Rute <= 40 km
+      # terukur 126 MB untuk 2 slot, jadi 64 MB/slot tidak mengikat kelas rute
+      # yang dilayani (paper/RESULTS.md §17).
+      - -workspace-mb
+      - "256"
+      # Kontrak aplikasi: rute > 40 km ditolak 422 (garis lurus + jarak tempuh).
+      - -max-route-km
+      - "40"
       # M4: batas waktu per request, rate limit per IP, cache browser/app.
       - -timeout
       - 10s
