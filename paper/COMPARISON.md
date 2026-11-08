@@ -39,7 +39,7 @@ Catatan M2: galat snapping sudah terukur (ledger di atas), tetapi itu galat
 menempelkan titik ke jalan, bukan bukti bahwa jarak rute benar. Klaim akurasi rute
 tetap menunggu E2.
 
-## 2. Yang **tidak** boleh diklaim sekarang
+## 2. Yang tidak boleh diklaim sekarang
 
 | klaim | kenapa |
 |---|---|

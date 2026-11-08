@@ -82,7 +82,7 @@ Tidak ada perubahan format file.
 satu arah), offset ditambahkan sebagai spur lurus, masih garis menyeberang
 bangunan sepanjang `Along`. Menghilangkan ini butuh pseudo-node (opsi 2).
 
-### 5. Ukur galat snap, bukan hanya klaim (SELESAI, S)
+### 5. Ukur galat snap terhadap oracle (SELESAI, S)
 
 **Masalah.** Belum ada angka galat ujung sama sekali.
 

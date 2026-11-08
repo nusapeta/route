@@ -1,7 +1,7 @@
 # Roadmap routeid
 
 **North star:** alternatif OSRM / Google Routes yang paling ringan:
-router jalan Indonesia yang memakai puluhan MB, bukan gigabyte, dan tetap
+router jalan Indonesia yang memakai puluhan MB, dan tetap
 menjawab rute <=50 km di bawah setengah detik di perangkat murah.
 
 Rencana eksekusi aktif (memori + akurasi, terukur 2026-11-08):
@@ -195,14 +195,13 @@ pengecekan `ETag`, sehingga revalidasi ikut memakai token. Sekarang limiter
 dipanggil *setelah* `ETag`: hit cache tidak memakai budget rute, karena ia juga
 tidak menyentuh workspace.
 
-Artinya deadline bukan cuma mengubah status: ia mengembalikan slot ke antrean,
-jadi satu klien yang meminta rute 148 km tidak lagi "menyandera" server selama
-beberapa detik.
+Artinya deadline mengembalikan slot ke antrean, jadi satu klien yang meminta rute
+148 km tidak lagi "menyandera" server selama beberapa detik.
 
 ### M5. Cakupan (SELESAI, kecuali stitching antar-file, BACKLOG 17b)
 
 - [x] Profil motor (`-profile motor`): tabel kecepatan sendiri, `motorcycle=no`
-      menang atas apa pun, `motor_vehicle=no` **tidak** memblokir motor (motor
+      menang atas apa pun, `motor_vehicle=no` tidak memblokir motor (motor
       bukan motor_vehicle), tol dibuang kecuali `motorcycle=yes`, dan
       `path`/`footway`/`cycleway` boleh dipakai kalau ditandai untuk motor.
 - [x] Semua pulau besar: Java, Sumatra, Kalimantan, Sulawesi, Bali-Nusra,

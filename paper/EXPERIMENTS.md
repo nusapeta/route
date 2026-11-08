@@ -4,7 +4,7 @@ Urut berdasarkan dampak ke kredibilitas.
 
 ## E1. Baseline OSRM di mesin yang sama (WAJIB)
 
-Paper sekarang **tidak** punya pembanding terkontrol. Tanpa ini, klaim
+Paper sekarang tidak punya pembanding terkontrol. Tanpa ini, klaim
 "lebih ringan" hanya sebanding dengan angka yang dilaporkan orang lain.
 
 **Status (2026-11-07): sudah dijalankan** di Ryzen 5 5600G (6C/12T, 16 GB),
