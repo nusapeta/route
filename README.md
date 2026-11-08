@@ -359,6 +359,8 @@ memuat `data/java.graph` menjawab 422 dan test menerima itu; homelab memuat
 `java`, `sumatra`, `nusa-tenggara`. Homelab memakai `-rate 15` per menit
 (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang-ulang:
 request identik dengan `If-None-Match` dibalas 304 dan tidak memakan kuota.
+Profil motor di homelab dilayani proses terpisah di port 8081
+(`http://192.168.1.219:8081`), karena satu proses hanya memuat satu profil.
 
 Kalau dijalankan di emulator/HP, ganti `127.0.0.1` jadi `10.0.2.2` (emulator
 Android) atau IP LAN mesin (`hostname -I`) lewat environment variable.
