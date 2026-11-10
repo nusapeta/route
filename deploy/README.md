@@ -84,13 +84,15 @@ tiga container dari image yang sama:
 |---|---|---|
 | `routeid-gateway` | `0.0.0.0:8080` (publik) | proxy pemilih profil |
 | `routeid` | `127.0.0.1:18080` (loopback) | `java`, `sumatra`, `nusa-tenggara` (mobil) |
-| `routeid-motor` | `127.0.0.1:18081` (loopback) | `java-motor` (motor) |
+| `routeid-motor` | `127.0.0.1:18081` (loopback) | `java-motor`, `sumatra-motor`, `nusa-tenggara-motor` (motor) |
 
 Klien memakai satu base URL dan memilih profil lewat parameter:
 
 ```bash
 curl '127.0.0.1:8080/route?from=-6.1754,106.8272&to=-6.1900,106.8300'                    # mobil
 curl '127.0.0.1:8080/route?from=-6.1754,106.8272&to=-6.1900,106.8300&profile=motor'      # motor
+curl '127.0.0.1:8080/route?from=3.5952,98.6722&to=3.6424,98.8853&profile=motor'          # motor Sumatra
+curl '127.0.0.1:8080/route?from=-8.6563,115.2167&to=-8.7950,115.2280&profile=motor'      # motor Bali
 curl -s 127.0.0.1:8080/healthz | head -c 200        # kedua profil sekaligus (503 bila satu mati)
 curl -s '127.0.0.1:8080/healthz?profile=motor'      # satu profil saja
 ```
@@ -103,16 +105,26 @@ melayani. Tanpa parameter, profil mobil yang dipakai (perilaku lama port 8080).
 
 ```bash
 make static                                   # bin/static/rid-extract + rid-gateway
-bin/static/rid-extract -pbf data/java-latest.osm.pbf -profile motor \
-  -out data/java-motor.graph
+for r in java sumatra nusa-tenggara; do
+  make graph REGION=$r PROFILE=motor          # data/$r-motor.graph
+done
 cd deploy && docker compose up -d             # gateway ikut dibuat
 curl -s 127.0.0.1:8080/healthz | head -c 300
 ```
 
-Graf motor memuat jalan/gang yang tidak boleh dilalui mobil (Jawa: +2,3 jt node,
-714 MB), jadi artefaknya lebih besar dan waktu ekstrak lebih lama. Kalau hanya
-mobil yang dipakai, layanan `routeid-motor` boleh dihapus dari compose tanpa
-mengubah yang lain; gateway lalu melaporkan profil motor tidak sehat.
+Graf motor memuat jalan/gang yang tidak boleh dilalui mobil. Angka dari
+`/healthz?profile=motor` homelab, 2026-11-10:
+
+| region | node | edge | file |
+|---|---|---|---|
+| Jawa | 23.366.670 | 48.199.022 | 682 MiB |
+| Sumatra | 11.932.931 | 24.464.359 | 349 MiB |
+| Nusa Tenggara + Bali | 5.051.959 | 10.220.481 | 148 MiB |
+
+Satu proses memuat ketiganya: VmRSS idle 11,75 MB, RssAnon 19,80 MB setelah
+tiga rute lintas region. Kalau hanya mobil yang dipakai, layanan `routeid-motor`
+boleh dihapus dari compose tanpa mengubah yang lain; gateway lalu melaporkan
+profil motor tidak sehat.
 
 Kedua upstream memakai `-trust-proxy` karena rate limit harus memakai IP klien,
 bukan IP gateway: gateway menimpa `X-Forwarded-For` dengan alamat peer-nya

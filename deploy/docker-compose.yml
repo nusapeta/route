@@ -1,9 +1,10 @@
-# Homelab deploy: Jawa + Sumatra + Bali/Nusra (mobil), plus Jawa motor.
+# Homelab deploy: Jawa + Sumatra + Bali/Nusra (mobil), plus ketiga region itu
+# untuk motor.
 #   cd deploy && docker compose up -d --build
 # Graph dibangun sekali di host (butuh RAM lebih besar dari saat run):
 #   make java sumatra nusa-tenggara        (mobil)
-#   bin/static/rid-extract -pbf data/java-latest.osm.pbf -profile motor \
-#     -out data/java-motor.graph           (motor)
+#   make graph REGION=java PROFILE=motor   (motor, ulangi sumatra/nusa-tenggara)
+#     -> data/java-motor.graph, data/sumatra-motor.graph, data/nusa-tenggara-motor.graph
 # Format v3 (java-v3.graph.bak) hanya terbaca oleh image pre-m5; untuk rollback
 # simpan image lama: docker tag routeid:local routeid:pre-m5
 #
@@ -133,6 +134,10 @@ services:
     command:
       - -graph
       - /data/java-motor.graph
+      - -graph
+      - /data/sumatra-motor.graph
+      - -graph
+      - /data/nusa-tenggara-motor.graph
       - -addr
       - :8080
       # Sisa flag sengaja ditulis ulang, bukan dibiarkan default: nilai default
