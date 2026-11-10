@@ -456,7 +456,7 @@ yang tersimpan; 116 aturan yang dilonggarkan tidak masuk sampel.
 
 ## Demo publik
 
-### 18. Peta coba publik (M), selesai (kode)
+### 18. Peta coba publik (M), selesai sebagian (kode + LAN)
 
 **Masalah.** Saat ini orang hanya bisa mencoba routeid lewat curl/Bruno/Postman
 atau integrasi Flutter. Belum ada halaman yang bisa dibuka di browser dan
@@ -490,9 +490,16 @@ memulihkan rute, dan panel hasil hanya menampilkan field respons. Verifikasi
 lokal di Chromium: rute Jakarta 2,39 km, 3 mnt, snap 4/16 m; ponsel 320 dan 360
 px tanpa overflow, tombol 44 px, rute tetap di atas panel.
 
-**Sisa deploy.** Langkah 7 belum dijalankan di homelab. Sebelum publik,
-`/metrics` harus ditutup di reverse proxy tanpa memutus monitoring internal,
-rate limit edge dipasang, dan image serta graph baru dibangun.
+**Deploy LAN (2026-11-10).** Stack Compose aktif di homelab pada
+`http://192.168.1.19:8080/`, image `routeid:local` dari commit `c92f187`.
+`/healthz` melaporkan profil mobil dan motor sehat. `/route` mobil 31 ms dan
+motor 81 ms untuk rute 2,39 km; peta memuat aset dan rute di Chromium tanpa
+error console. `/metrics` masih menjawab `200` dari LAN.
+
+**Sisa deploy.** Belum ada reverse proxy, HTTPS, atau tunnel, jadi ini belum
+endpoint internet. Sebelum port dibuka ke internet: pasang edge TLS, blokir
+`/metrics` dari publik tanpa memutus monitoring internal, dan pasang rate limit
+edge. Image serta graph sudah dibangun ulang.
 
 **Lulus bila.** Dari browser ponsel, buka `/`, klik dua titik, dan dapat garis
 serta jarak/durasi < 2 s untuk rute 10 km. Toggle mobil/motor mengubah rute; URL

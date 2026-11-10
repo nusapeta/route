@@ -1,5 +1,6 @@
 bin/**
 !bin/rid-server
+!bin/rid-gateway
 data/
 .git/
 paper/results/
