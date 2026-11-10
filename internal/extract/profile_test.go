@@ -26,7 +26,7 @@ func TestWayProfileProfiles(t *testing.T) {
 	}{
 		{"car residential", ProfileCar, tags("highway", "residential"), true, 25, false},
 		{"motor residential", ProfileMotor, tags("highway", "residential"), true, 28, false},
-		{"motorway car ok", ProfileCar, tags("highway", "motorway"), true, 100, false},
+		{"motorway car ok", ProfileCar, tags("highway", "motorway"), true, 90, false},
 		{"motorway bike banned", ProfileMotor, tags("highway", "motorway"), false, 0, false},
 		{"motorway bike allowed", ProfileMotor, tags("highway", "motorway", "motorcycle", "yes"), true, 90, false},
 		{"motorcycle=no beats all", ProfileMotor, tags("highway", "primary", "motorcycle", "no"), false, 0, false},

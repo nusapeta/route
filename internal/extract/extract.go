@@ -128,20 +128,21 @@ type Options struct {
 	Progress       func(phase string, n int64)
 }
 
-// defaultSpeedKMH is the fallback speed per highway class, tuned for Indonesia
-// (traffic-calmed residential, slow service roads; no traffic modelling).
+// defaultSpeedKMH is the fallback speed per highway class. It follows the
+// OSRM car profile defaults so E1 compares route choice, not table drift;
+// explicit maxspeed and surface tags still win.
 var defaultSpeedKMH = map[string]float64{
-	"motorway":       100,
-	"motorway_link":  60,
-	"trunk":          80,
-	"trunk_link":     50,
-	"primary":        60,
-	"primary_link":   45,
-	"secondary":      50,
-	"secondary_link": 40,
+	"motorway":       90,
+	"motorway_link":  45,
+	"trunk":          85,
+	"trunk_link":     40,
+	"primary":        65,
+	"primary_link":   30,
+	"secondary":      55,
+	"secondary_link": 25,
 	"tertiary":       40,
-	"tertiary_link":  35,
-	"unclassified":   30,
+	"tertiary_link":  20,
+	"unclassified":   25,
 	"residential":    25,
 	"living_street":  10,
 	"service":        15,

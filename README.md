@@ -86,19 +86,15 @@ dan preprocess.
   satu graph (mis. ferry Ketapang-Gilimanuk di `java.graph`); rute antar-file
   (Merak -> Bakauheni dengan `java.graph` + `sumatra.graph`) masih `422`.
 - Restriction per kelas kendaraan diterapkan (`restriction:motorcar`/`motor_vehicle` untuk car, `motorcycle`/`motor_vehicle` untuk motor); 167 `restriction:conditional` (jam sekolah/pasar) tetap di-skip karena graf statis.
-- **E1 sudah dijalankan; E2 belum.** E1 membandingkan OSRM MLD di mesin yang
-  sama: median selisih jarak −0,005% (lulus gerbang <5%) tetapi p95 21,05%
-  (gerbang <12% gagal), dan OSRM ~25x lebih cepat p50. Audit (`paper/RESULTS.md`
-  §14) menunjukkan p95 jarak bukan akibat restriction yang di-skip,
-  melainkan perbedaan fungsi biaya: routeid meminimalkan waktu murni (termasuk
-  `track`), OSRM meminimalkan `weight` (durasi + penalti belok + preferensi
-  kelas jalan). Penalti belok sudah dikirim (default `-turn-penalty 0.25`,
-  tabel 2/7,5/20 s dibagi empat) dan diukur ulang pada 0/0,25/1/2x: p95 jarak
-  tetap 21,12%, mean 3,60% -> 3,50%, p90 11,20% -> 10,56% (`paper/RESULTS.md`
-  §15). Sisa selisih berasal dari tabel kecepatan kelas. Jadi README ini tidak
-  mengklaim "tercepat" maupun "paling akurat"; yang terukur baru biaya per
-  rute dan perbandingan antar-engine.
-  Ground truth independen (E2) masih terbuka; resepnya di `docs/M6.md`.
+- **E1 sudah dijalankan; E2 belum.** Per 2026-11-10, setelah tabel kecepatan
+  mobil disamakan dengan `car.lua` OSRM dan graph Java dibangun ulang,
+  332 pasangan E1 yang lolos filter snap menghasilkan median |selisih| 0,23%,
+  p95 14,49% (gerbang <12% gagal), maksimum 70,44%. D4 mengganti metrik primer
+  ke p95 durasi absolut 10,22%; ini keputusan metrik, bukan klaim akurat.
+  Riwayat p95 21,05% dan uji penalti belok ada di `paper/RESULTS.md` §14-15.
+  Audit 20 outlier menunjukkan sisa selisih berasal dari akses/restriksi dan
+  pilihan rute OSRM, bukan hanya tabel. Ground truth E2 masih terbuka;
+  resepnya di `docs/M6.md`.
 - Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
 
 ## Roadmap

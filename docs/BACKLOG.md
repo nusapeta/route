@@ -372,6 +372,13 @@ sebagai `maxspeed` + `car.lua`) berbeda jauh pada jalan kolektor/lokal.
 `car.lua`; kalibrasi tabel dari data E1/E2 (bukan dari intuisi); ukur ulang
 p95 jarak + durasi. Perubahan tabel mengubah `ProfileHash` tetapi bukan format
 graf, jadi rebuild hanya perlu bila `Len`/`Cls` berubah.
+**Status 2026-11-10.** Tabel mobil disamakan dengan `car.lua` OSRM dan graph
+Java, Sumatra, serta Nusa Tenggara dibangun ulang (`profile_sha256=c2240e41...`).
+Pada 332 pasangan E1: median |selisih| 0,23%, p95 14,49%, maksimum 70,44%.
+Gerbang jarak belum lulus; D4 mengganti metrik primer ke p95 durasi absolut
+10,22% secara eksplisit. Audit 20 outlier ada di
+`paper/results/e1-outliers-2026-11-10.csv`.
+
 **Lulus bila.** p95 selisih jarak < 12% pada 332 pasangan E1 tanpa menaikkan
 durasi median > 2%, atau metrik primer E1 diganti durasi secara eksplisit.
 ### 16. Restriction via-way (M)
