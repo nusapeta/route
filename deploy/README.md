@@ -223,6 +223,10 @@ routeid.lan {
 }
 ```
 
+`GET /` dan `/assets/*` sekarang dilayani gateway untuk demo peta. `/metrics`
+tetap diteruskan gateway; di reverse proxy publik, tutup path itu dan akses
+metrics langsung dari localhost agar dashboard internal tidak ikut terbuka.
+
 ## 4. Keamanan
 
 Server ini **tanpa autentikasi**, `Access-Control-Allow-Origin: *`, dan rate

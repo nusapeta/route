@@ -208,6 +208,10 @@ respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
 | `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `route_cross_region_resnapped_total`, `route_cross_region_stitched_total`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
 
+`GET /` menyajikan demo peta untuk mencoba rute dari browser. Aset Leaflet,
+CSS, dan JS di-embed ke binary gateway dan dilayani dari `/assets/*`; halaman
+memanggil `/route` same-origin tanpa API key.
+
 **Dua profil lewat satu base URL.** Satu proses memuat satu profil (snap
 terdekat membuat dua graf hampir identik saling menutupi), jadi compose
 menjalankan dua server di loopback dan `rid-gateway` memegang port publik:

@@ -456,7 +456,7 @@ yang tersimpan; 116 aturan yang dilonggarkan tidak masuk sampel.
 
 ## Demo publik
 
-### 18. Peta coba publik (M), ide
+### 18. Peta coba publik (M), selesai (kode)
 
 **Masalah.** Saat ini orang hanya bisa mencoba routeid lewat curl/Bruno/Postman
 atau integrasi Flutter. Belum ada halaman yang bisa dibuka di browser dan
@@ -482,6 +482,17 @@ manual dan menempel GeoJSON ke geojson.io.
    daripada menambah tile server ke repo.
 7. Deploy di belakang HTTPS (Caddy/tunnel yang sama dengan gateway). `/metrics`
    tidak diekspos ke publik; rate limit 15/menit per IP tetap berlaku.
+
+**Status (2026-11-10).** Langkah 1-6 selesai. `web/` di-embed ke `rid-gateway`;
+`GET /` dan `/assets/*` dilayani same-origin dengan CSP dan `no-cache`, tanpa
+container baru. Leaflet 1.9.4 di-vendor, tile OSM memakai atribusi, URL state
+memulihkan rute, dan panel hasil hanya menampilkan field respons. Verifikasi
+lokal di Chromium: rute Jakarta 2,39 km, 3 mnt, snap 4/16 m; ponsel 320 dan 360
+px tanpa overflow, tombol 44 px, rute tetap di atas panel.
+
+**Sisa deploy.** Langkah 7 belum dijalankan di homelab. Sebelum publik,
+`/metrics` harus ditutup di reverse proxy tanpa memutus monitoring internal,
+rate limit edge dipasang, dan image serta graph baru dibangun.
 
 **Lulus bila.** Dari browser ponsel, buka `/`, klik dua titik, dan dapat garis
 serta jarak/durasi < 2 s untuk rute 10 km. Toggle mobil/motor mengubah rute; URL

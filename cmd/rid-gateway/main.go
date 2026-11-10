@@ -116,6 +116,9 @@ func newGateway(mobil, motor, def string) *gateway {
 }
 
 func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if g.serveStatic(w, r) {
+		return
+	}
 	if r.URL.Path == "/healthz" && r.URL.Query().Get("profile") == "" {
 		g.health(w, r)
 		return

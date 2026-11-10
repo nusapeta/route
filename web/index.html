@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>RouteID: peta rute mobil dan motor</title>
+<meta name="description" content="Coba rute mobil dan motor RouteID langsung dari peta. Pilih dua titik, lalu lihat jarak, waktu, dan geometri rute.">
+<link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<main class="app">
+  <aside class="panel" aria-labelledby="page-title">
+    <header class="masthead">
+      <h1 id="page-title">RouteID</h1>
+      <p>Peta rute mobil dan motor. Pilih titik awal dan tujuan, lalu hitung rutenya.</p>
+    </header>
+
+    <div class="control">
+      <span class="control-label" id="profile-label">Profil kendaraan</span>
+      <div class="segmented" role="group" aria-labelledby="profile-label">
+        <button type="button" class="segment" data-profile="mobil" aria-pressed="true">Mobil</button>
+        <button type="button" class="segment" data-profile="motor" aria-pressed="false">Motor</button>
+      </div>
+    </div>
+
+    <div class="points" aria-label="Titik rute">
+      <div class="point">
+        <span class="point-key point-key--from" aria-hidden="true">A</span>
+        <span class="point-copy">
+          <span class="point-role">Titik awal</span>
+          <span class="point-coord" id="from-coord">Belum dipilih</span>
+        </span>
+      </div>
+      <div class="point">
+        <span class="point-key point-key--to" aria-hidden="true">B</span>
+        <span class="point-copy">
+          <span class="point-role">Titik tujuan</span>
+          <span class="point-coord" id="to-coord">Belum dipilih</span>
+        </span>
+      </div>
+    </div>
+
+    <p class="hint" id="hint">Klik peta untuk memilih titik awal.</p>
+
+    <div class="actions">
+      <button type="button" class="button button--primary" id="route-button" disabled>Hitung rute</button>
+      <button type="button" class="button" id="reset-button" disabled>Ulangi</button>
+      <button type="button" class="button" id="share-button" disabled>Salin tautan</button>
+    </div>
+
+    <div class="status" id="status" role="status" aria-live="polite" aria-atomic="true">Pilih titik awal dan tujuan di peta.</div>
+    <noscript><p class="status" data-tone="error">Peta membutuhkan JavaScript.</p></noscript>
+
+    <section class="result" id="result" aria-labelledby="result-title" hidden>
+      <div class="result-head">
+        <h2 id="result-title">Hasil rute</h2>
+        <span class="region" id="result-region" hidden></span>
+      </div>
+      <dl class="metrics">
+        <div class="metric">
+          <dt>Jarak</dt>
+          <dd id="result-distance">Tidak tersedia</dd>
+        </div>
+        <div class="metric">
+          <dt>Perkiraan waktu</dt>
+          <dd id="result-duration">Tidak tersedia</dd>
+        </div>
+      </dl>
+      <dl class="meta">
+        <div>
+          <dt>Jarak ke jalan A</dt>
+          <dd id="result-snap-from">Tidak tersedia</dd>
+        </div>
+        <div>
+          <dt>Jarak ke jalan B</dt>
+          <dd id="result-snap-to">Tidak tersedia</dd>
+        </div>
+      </dl>
+      <div class="badges" id="result-badges" hidden></div>
+      <p class="result-note" id="result-note" hidden></p>
+    </section>
+
+    <p class="fineprint">Rute dihitung dari data OpenStreetMap. Hasil dapat berbeda dari navigasi produksi.</p>
+  </aside>
+
+  <div class="map-shell">
+    <div id="map" role="application" aria-label="Peta titik rute" aria-describedby="map-help"></div>
+    <p id="map-help" class="sr-only">Gunakan tombol panah untuk menggeser peta, tombol plus dan minus untuk memperbesar, dan Enter untuk memilih titik di tengah peta.</p>
+  </div>
+</main>
+<script src="/assets/vendor/leaflet/leaflet.js"></script>
+<script src="/assets/app.js"></script>
+</body>
+</html>
