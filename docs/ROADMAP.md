@@ -344,6 +344,9 @@ mengetahui apakah perubahannya benar.
   sudah memberi hasil yang sama dengan memori jauh lebih kecil.
 - **Hierarki dua tingkat** (highway/core) baru dipertimbangkan jika ada kebutuhan
   rute >60 km atau <20 ms; CH/MLD penuh tetap ditolak.
+- **Peta coba publik** (`BACKLOG.md` 18): halaman statis yang di-embed ke
+  gateway untuk mencoba rute dari browser. Belum menjadi milestone sampai ada
+  waktu deploy dan keputusan sumber tile.
 
 ## Cara mengukur (jangan improvisasi)
 

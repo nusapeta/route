@@ -454,6 +454,46 @@ yang tersimpan; 116 aturan yang dilonggarkan tidak masuk sampel.
 
 ---
 
+## Demo publik
+
+### 18. Peta coba publik (M), ide
+
+**Masalah.** Saat ini orang hanya bisa mencoba routeid lewat curl/Bruno/Postman
+atau integrasi Flutter. Belum ada halaman yang bisa dibuka di browser dan
+langsung menunjukkan rute di peta, jadi calon pengguna harus menulis query
+manual dan menempel GeoJSON ke geojson.io.
+
+**Rencana.**
+1. Halaman statis di `web/` (HTML + JS + CSS, Leaflet di-vendor, tanpa CDN) yang
+   di-embed ke `rid-gateway` lewat `go:embed`; `GET /` menyajikan peta dan
+   `/assets/*` menyajikan aset. Tidak ada container baru.
+2. Interaksi: klik pertama = asal, klik kedua = tujuan; marker bisa digeser;
+   tombol Rute memanggil `/route?format=geojson&from=...&to=...&profile=...`
+   di origin yang sama, tanpa CORS dan tanpa API key.
+3. Panel hasil: jarak, durasi, jarak snap, serta badge `fallback`, `relaxed`,
+   dan `ferry`; error 422/429/504 tampil sebagai pesan, bukan JSON mentah.
+4. URL state: `/?from=lat,lng&to=lat,lng&profile=motor` diperbarui lewat
+   `replaceState` dan tombol salin tautan; membuka ulang URL memulihkan peta
+   dan rute.
+5. Mobile: layout satu kolom, target sentuh >= 44 px, peta tetap bisa digeser,
+   panel hasil tidak menutupi tombol.
+6. Tile raster OSM dengan atribusi, tanpa prefetch dan tanpa geocoder. Ini demo
+   kecil; kalau trafik naik, pindah ke PMTiles/Protomaps atau tile berbayar
+   daripada menambah tile server ke repo.
+7. Deploy di belakang HTTPS (Caddy/tunnel yang sama dengan gateway). `/metrics`
+   tidak diekspos ke publik; rate limit 15/menit per IP tetap berlaku.
+
+**Lulus bila.** Dari browser ponsel, buka `/`, klik dua titik, dan dapat garis
+serta jarak/durasi < 2 s untuk rute 10 km. Toggle mobil/motor mengubah rute; URL
+yang dibagikan memulihkan titik dan profil; 422/429/504 tampil jelas; `go test`
+tetap lulus dan binary tetap satu file. Tidak ada API key di client.
+
+**Biaya.** M.
+**Risiko.** Kebijakan tile OSM dan kuota publik; mitigasi: atribusi, tanpa
+prefetch, batas zoom, dan siap pindah tile source.
+
+---
+
 ## Catatan lintas item
 
 - **Format berubah** di item 1, 4, 6, 13, 14, 15. Naikkan versi sekali di M1 dan
