@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"math"
 	"testing"
 
 	"github.com/paulmach/osm"
@@ -164,22 +165,39 @@ func TestMotorGoldenRules(t *testing.T) {
 		{"footway mc yes", tags("highway", "footway", "motorcycle", "designated"), true, 10, 0, false},
 		{"cycleway mc yes", tags("highway", "cycleway", "motorcycle", "permissive"), true, 15, 0, false},
 		{"pedestrian mc yes", tags("highway", "pedestrian", "motorcycle", "official"), true, 8, 0, false},
-		{"steps mc yes", tags("highway", "steps", "motorcycle", "yes"), true, 4, 0, false},
+		{"steps mc yes", tags("highway", "steps", "motorcycle", "yes"), true, 5, 0, false},
+		{"path gravel", tags("highway", "path", "motorcycle", "yes", "surface", "gravel"), true, 7.2, 0, false},
+		{"path smoothness bad", tags("highway", "path", "motorcycle", "yes", "smoothness", "bad"), true, 6, 0, false},
+		{"path gravel + bad hits floor", tags("highway", "path", "motorcycle", "yes", "surface", "gravel", "smoothness", "bad"), true, 5, 0, false},
+		{"path sand hits floor", tags("highway", "path", "motorcycle", "yes", "surface", "sand"), true, 5, 0, false},
+		{"footway paving stones", tags("highway", "footway", "motorcycle", "yes", "surface", "paving_stones"), true, 8, 0, false},
+		{"path asphalt neutral", tags("highway", "path", "motorcycle", "yes", "surface", "asphalt"), true, 12, 0, false},
+		{"path destination weak", tags("highway", "path", "access", "no", "motorcycle", "destination"), true, 12, 0, false},
 		{"track", tags("highway", "track"), true, 18, 0, false},
 		{"residential", tags("highway", "residential"), true, 28, 0, false},
 		{"service", tags("highway", "service"), true, 20, 0, false},
 		{"living_street", tags("highway", "living_street"), true, 12, 0, false},
+		{"residential ignores surface", tags("highway", "residential", "surface", "gravel"), true, 28, 0, false},
+		{"track ignores smoothness", tags("highway", "track", "smoothness", "horrible"), true, 18, 0, false},
 		{"motor_vehicle=no is not a bike ban", tags("highway", "primary", "motor_vehicle", "no"), true, 55, 0, false},
 		{"access=no blocks", tags("highway", "primary", "access", "no"), false, 0, 0, false},
 		{"access=private blocks", tags("highway", "primary", "access", "private"), false, 0, 0, false},
 		{"access=destination allowed", tags("highway", "primary", "access", "destination"), true, 55, 0, false},
 		{"motorcycle=no blocks", tags("highway", "primary", "motorcycle", "no"), false, 0, 0, false},
-		{"motorcycle=destination currently allowed", tags("highway", "primary", "motorcycle", "destination"), true, 55, 0, false},
-		{"oneway:motorcycle currently ignored", tags("highway", "primary", "oneway", "yes", "oneway:motorcycle", "no"), true, 55, 1, false},
+		{"motorcycle=destination weak permission", tags("highway", "primary", "access", "no", "motorcycle", "destination"), true, 55, 0, false},
+		{"motorcycle=destination beats private", tags("highway", "primary", "access", "private", "motorcycle", "destination"), true, 55, 0, false},
+		{"oneway:motorcycle=no overrides oneway", tags("highway", "primary", "oneway", "yes", "oneway:motorcycle", "no"), true, 55, 0, false},
+		{"oneway:motorcycle=-1 overrides oneway", tags("highway", "primary", "oneway", "yes", "oneway:motorcycle", "-1"), true, 55, -1, false},
+		{"oneway:motorcycle=yes overrides oneway=no", tags("highway", "primary", "oneway", "no", "oneway:motorcycle", "yes"), true, 55, 1, false},
+		{"oneway:motorcycle schedule ignored", tags("highway", "primary", "oneway", "yes", "oneway:motorcycle", "yes @ (Mo-Fr)"), true, 55, 1, false},
+		{"oneway:motorcycle=no on roundabout", tags("highway", "primary", "junction", "roundabout", "oneway:motorcycle", "no"), true, 55, 0, false},
 		{"oneway=-1", tags("highway", "primary", "oneway", "-1"), true, 55, -1, false},
 		{"roundabout", tags("highway", "primary", "junction", "roundabout"), true, 55, 1, false},
 		{"unparsable maxspeed", tags("highway", "primary", "maxspeed", "0"), true, 55, 0, false},
 		{"ferry ignores motor_vehicle=no", tags("route", "ferry", "motor_vehicle", "no"), true, 20, 0, true},
+		{"ferry motorcycle=no blocks", tags("route", "ferry", "motorcycle", "no"), false, 0, 0, false},
+		{"ferry access=no blocks", tags("route", "ferry", "access", "no"), false, 0, 0, false},
+		{"ferry destination weak", tags("route", "ferry", "access", "no", "motorcycle", "destination"), true, 20, 0, true},
 	}
 	for _, c := range cases {
 		inf, ok := wayProfile(ProfileMotor, c.tags)
@@ -190,8 +208,8 @@ func TestMotorGoldenRules(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if inf.speed != c.kmh {
-			t.Errorf("%s: speed = %.1f, want %.1f", c.name, inf.speed, c.kmh)
+		if math.Abs(inf.speed-c.kmh) > 1e-9 {
+			t.Errorf("%s: speed = %.3f, want %.3f", c.name, inf.speed, c.kmh)
 		}
 		if inf.dir != c.dir {
 			t.Errorf("%s: dir = %d, want %d", c.name, inf.dir, c.dir)
@@ -199,5 +217,24 @@ func TestMotorGoldenRules(t *testing.T) {
 		if inf.ferry != c.ferry {
 			t.Errorf("%s: ferry = %v, want %v", c.name, inf.ferry, c.ferry)
 		}
+	}
+}
+
+func TestMotorOnlyRulesLeaveCarAlone(t *testing.T) {
+	oneway := tags("highway", "primary", "oneway", "yes", "oneway:motorcycle", "no")
+	car, ok := wayProfile(ProfileCar, oneway)
+	if !ok || car.dir != 1 {
+		t.Fatalf("car dir = %d, ok = %v; want 1, true", car.dir, ok)
+	}
+
+	rough := tags("highway", "path", "motorcycle", "yes", "surface", "gravel")
+	if _, ok := wayProfile(ProfileCar, rough); ok {
+		t.Fatal("car must still skip path, even with motorcycle=yes")
+	}
+
+	road := tags("highway", "residential", "surface", "gravel", "smoothness", "bad")
+	carRoad, ok := wayProfile(ProfileCar, road)
+	if !ok || carRoad.speed != 25 {
+		t.Fatalf("car residential speed = %.1f, ok = %v; want 25, true", carRoad.speed, ok)
 	}
 }

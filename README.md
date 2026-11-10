@@ -143,6 +143,11 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
 - **Profil** dipilih saat build: `car` (default, tabel mobil) atau `motor`
   (tabel motor: service/gang lebih permisif, tol dibuang kecuali
   `motorcycle=yes`, `path`/`footway` dipakai kalau ditandai boleh motor).
+  Untuk motor, `oneway:motorcycle=yes|no|-1` menimpa `oneway` dan
+  `motorcycle=destination` adalah izin lemah; `surface`/`smoothness` hanya
+  menggeser kecepatan kelas tambahan (`path`, `footway`, `cycleway`,
+  `pedestrian`, `steps`). Tag `*:conditional` dihitung `rid-tagstats` tetapi
+  tidak dievaluasi karena graph statis.
 - **Ferry** (`route=ferry`) ikut jadi edge; waktu pakai tag `duration` kalau ada
   (Merak-Bakauheni 2 jam ≠ 30 km / 20 km/jam), dan respons menandai segmennya.
 

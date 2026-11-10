@@ -54,7 +54,28 @@ func ProfileHash(p Profile) string {
 	for _, k := range skip {
 		fmt.Fprintf(h, "skip %s\n", k)
 	}
+	if p == ProfileMotor {
+		// Hash the rules that only the motor profile reads. Bump the version
+		// when access or direction semantics change without a table change.
+		fmt.Fprintln(h, "motor rules 2")
+		hashFactors(h, "extra", motorExtraKMH)
+		hashFactors(h, "surface", motorSurfaceFactor)
+		hashFactors(h, "smoothness", motorSmoothnessFactor)
+		fmt.Fprintln(h, "oneway:motorcycle")
+		fmt.Fprintln(h, "motorcycle=destination")
+	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func hashFactors(h io.Writer, name string, m map[string]float64) {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Fprintf(h, "%s %s %.3f\n", name, k, m[k])
+	}
 }
 
 // fileSHA256 streams the whole file through SHA-256.
@@ -162,8 +183,24 @@ var motorSpeedKMH = map[string]float64{
 // only when the way says so (motorcycle=yes/designated/permissive). Kampung
 // alleys and shortcuts are frequently mapped as path/footway in Indonesia, so
 // without this the bike graph is systematically disconnected at the last mile.
+//
+// The base speed is scaled by motorSurfaceFactor and motorSmoothnessFactor;
+// only these extra classes are affected, so the car profile stays unchanged.
 var motorExtraKMH = map[string]float64{
 	"path": 12, "footway": 10, "cycleway": 15, "pedestrian": 8, "steps": 4,
+}
+
+var motorSurfaceFactor = map[string]float64{
+	"paved": 1.0, "asphalt": 1.0, "concrete": 1.0,
+	"paving_stones": 0.8, "compacted": 0.8, "fine_gravel": 0.8,
+	"gravel": 0.6, "dirt": 0.6, "ground": 0.6, "earth": 0.6, "unpaved": 0.6,
+	"sand": 0.4, "mud": 0.4,
+}
+
+var motorSmoothnessFactor = map[string]float64{
+	"excellent": 1.0, "good": 0.9, "intermediate": 0.75, "bad": 0.5,
+	"very_bad": 0.4, "horrible": 0.3, "very_horrible": 0.25,
+	"impassable": 0.25,
 }
 
 // Profile selects the vehicle assumptions baked into a graph.
@@ -587,6 +624,8 @@ type wayTags struct {
 	motorcycle, motorVehicle   string
 	motorcar                   string
 	maxspeed, oneway, junction string
+	onewayMotorcycle           string
+	surface, smoothness        string
 }
 
 func readWayTags(t osm.Tags) wayTags {
@@ -609,6 +648,12 @@ func readWayTags(t osm.Tags) wayTags {
 			w.maxspeed = kv.Value
 		case "oneway":
 			w.oneway = kv.Value
+		case "oneway:motorcycle":
+			w.onewayMotorcycle = kv.Value
+		case "surface":
+			w.surface = kv.Value
+		case "smoothness":
+			w.smoothness = kv.Value
 		case "junction":
 			w.junction = kv.Value
 		}
@@ -622,6 +667,7 @@ func wayProfile(p Profile, tags osm.Tags) (wayInfo, bool) {
 	t := readWayTags(tags)
 	ferry := t.route == "ferry"
 	mcOK := permitted(t.motorcycle)
+	mcAllowed := mcOK || t.motorcycle == "destination"
 
 	if p == ProfileMotor {
 		// A motorcycle tag is the most specific statement about this way, so
@@ -631,6 +677,9 @@ func wayProfile(p Profile, tags osm.Tags) (wayInfo, bool) {
 		switch {
 		case banned(t.motorcycle):
 			return wayInfo{}, false
+		case t.motorcycle == "destination":
+			// Weak permission, like access=destination for cars: enter to
+			// reach a destination even when access=no/private would block.
 		case mcOK:
 			// allowed regardless of access=no / motor_vehicle=no
 		case banned(t.access):
@@ -653,12 +702,9 @@ func wayProfile(p Profile, tags osm.Tags) (wayInfo, bool) {
 		switch {
 		case ferry:
 			kmh = 20
-		case p == ProfileMotor && mcOK:
+		case p == ProfileMotor && mcAllowed:
 			// motorbike shortcut through a kampung alley / footpath
-			kmh = motorExtraKMH[t.highway]
-			if kmh == 0 {
-				kmh = 10
-			}
+			kmh = motorExtraSpeed(t)
 		default:
 			return wayInfo{}, false
 		}
@@ -670,10 +716,30 @@ func wayProfile(p Profile, tags osm.Tags) (wayInfo, bool) {
 
 	return wayInfo{
 		speed:  kmh,
-		dir:    direction(t),
+		dir:    direction(t, p),
 		durSec: ferryDuration(ferry, tags),
 		ferry:  ferry,
 	}, true
+}
+
+// motorExtraSpeed applies surface and smoothness quality to the classes that
+// only motorcycles may use. Unknown tags count as neutral, and the result never
+// drops below 5 km/h.
+func motorExtraSpeed(t wayTags) float64 {
+	kmh := motorExtraKMH[t.highway]
+	if kmh == 0 {
+		kmh = 10
+	}
+	if f, ok := motorSurfaceFactor[t.surface]; ok {
+		kmh *= f
+	}
+	if f, ok := motorSmoothnessFactor[t.smoothness]; ok {
+		kmh *= f
+	}
+	if kmh < 5 {
+		kmh = 5
+	}
+	return kmh
 }
 
 // permitted / banned classify the OSM access vocabulary we care about.
@@ -693,7 +759,20 @@ func banned(v string) bool {
 	return false
 }
 
-func direction(t wayTags) int8 {
+func direction(t wayTags, p Profile) int8 {
+	if p == ProfileMotor {
+		// oneway:motorcycle is more specific than oneway. Scheduled values
+		// (for example "yes @ (Mo-Fr)") are deliberately ignored: the graph
+		// has no clock.
+		switch t.onewayMotorcycle {
+		case "yes", "true", "1":
+			return 1
+		case "-1", "reverse":
+			return -1
+		case "no", "false", "0":
+			return 0
+		}
+	}
 	switch t.oneway {
 	case "yes", "true", "1":
 		return 1
