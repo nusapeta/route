@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/paulmach/osm"
+
+	"routeid/internal/graph"
 )
 
 func TestChainViaOrdering(t *testing.T) {
@@ -43,7 +45,7 @@ func TestStatsString(t *testing.T) {
 			RestrictionStats{Relations: 10, Usable: 9, Missing: 1, ViaNode: 5, Ban: 7, Only: 2},
 			"restrictions: seen=10 usable=9 via_node=5 via_way=0 ban=7 only=2 " +
 				"skipped{not_car=0 not_class=0 missing=1 conditional=0 except=0 bad_type=0 " +
-				"unresolved=0 chain=0 via_way_missing=0 " +
+				"unresolved=0 chain=0 via_way_missing=0 relaxed=0 reach_cap=0 " +
 				"why{no_node=0 not_on_way=0 no_in=0 no_out=0}}",
 		},
 		{
@@ -51,7 +53,7 @@ func TestStatsString(t *testing.T) {
 			RestrictionStats{Relations: 3, Missing: 2, ViaWayMissing: 1},
 			"restrictions: seen=3 usable=0 via_node=0 via_way=0 ban=0 only=0 " +
 				"skipped{not_car=0 not_class=0 missing=2 conditional=0 except=0 bad_type=0 " +
-				"unresolved=0 chain=0 via_way_missing=1 " +
+				"unresolved=0 chain=0 via_way_missing=1 relaxed=0 reach_cap=0 " +
 				"why{no_node=0 not_on_way=0 no_in=0 no_out=0}}",
 		},
 	}
@@ -62,6 +64,67 @@ func TestStatsString(t *testing.T) {
 		if got := c.s.Usable + c.s.Skipped(); got != c.s.Relations {
 			t.Errorf("%s: usable+skipped = %d, want Relations %d", c.name, got, c.s.Relations)
 		}
+	}
+}
+
+func TestHasDetour(t *testing.T) {
+	// 0 -> 1 -> 2, with 0 -> 1 the only way out of the source.
+	v := &restView{
+		off: []uint32{0, 1, 2, 3, 3},
+		to:  []uint32{1, 2, 3},
+	}
+	banned := map[uint64]struct{}{graph.PackTurn(0, 1): {}}
+	if ok, capped := v.hasDetour(0, 0, 1, banned, nil); ok || capped {
+		t.Fatalf("detour through the banned transition: ok=%v capped=%v", ok, capped)
+	}
+	// 0 -> 4 -> 1 -> 2 leaves the source without taking 0 -> 1.
+	v = &restView{
+		off: []uint32{0, 2, 3, 4, 4, 5},
+		to:  []uint32{1, 4, 2, 3, 1},
+	}
+	banned = map[uint64]struct{}{graph.PackTurn(0, 2): {}}
+	if ok, capped := v.hasDetour(0, 0, 2, banned, nil); !ok || capped {
+		t.Fatalf("detour not found: ok=%v capped=%v", ok, capped)
+	}
+}
+
+func TestViaWayRelaxesWithoutDetour(t *testing.T) {
+	v := &restView{
+		wayIDs:   []int64{10, 11, 12},
+		wayIndex: map[int64]int32{10: 0, 11: 1, 12: 2},
+		flat:     []int64{0, 1, 1, 2, 2, 3},
+		wayOff:   []int{0, 2, 4, 6},
+		off:      []uint32{0, 1, 2, 3, 3},
+		to:       []uint32{1, 2, 3},
+		ids:      []int64{0, 1, 2, 3},
+	}
+	res := restResult{stats: RestrictionStats{Relations: 1, Usable: 1, ViaWay: 1}}
+	if !res.addViaWay(v, 0, 2, []int64{11}, false) {
+		t.Fatal("addViaWay failed")
+	}
+	res.filterDetours(v)
+	if res.stats.Relaxed != 1 || res.stats.Ban != 0 || res.stats.ViaWay != 0 || len(res.ban) != 0 {
+		t.Fatalf("stats=%+v ban=%v", res.stats, res.ban)
+	}
+}
+
+func TestViaWayKeepsBanWithDetour(t *testing.T) {
+	v := &restView{
+		wayIDs:   []int64{10, 11, 12},
+		wayIndex: map[int64]int32{10: 0, 11: 1, 12: 2},
+		flat:     []int64{0, 1, 1, 2, 2, 3},
+		wayOff:   []int{0, 2, 4, 6},
+		off:      []uint32{0, 2, 3, 4, 4, 5},
+		to:       []uint32{1, 4, 2, 3, 1},
+		ids:      []int64{0, 1, 2, 3, 4},
+	}
+	res := restResult{stats: RestrictionStats{Relations: 1, Usable: 1, ViaWay: 1}}
+	if !res.addViaWay(v, 0, 2, []int64{11}, false) {
+		t.Fatal("addViaWay failed")
+	}
+	res.filterDetours(v)
+	if res.stats.Ban != 1 || res.stats.ViaWay != 1 || len(res.ban) != 1 || res.ban[0] != graph.PackTurn(0, 2) {
+		t.Fatalf("stats=%+v ban=%v", res.stats, res.ban)
 	}
 }
 

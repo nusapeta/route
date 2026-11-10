@@ -13,8 +13,9 @@ import (
 )
 
 // RestrictionStats counts how the OSM restriction relations were handled.
-// Usable counts stored rules only, and every other counter is a skip reason,
-// so Usable + Skipped() == Relations.
+// Usable counts stored rules only; every reason a rule was not stored is part
+// of Skipped(), so Usable + Skipped() == Relations. ReachCap counts searches
+// that hit the edge-state cap; those bans are relaxed conservatively.
 type RestrictionStats struct {
 	Relations     uint32 // type=restriction relations seen
 	Usable        uint32 // from+to resolved and the rule stored in ban/only list
@@ -31,6 +32,8 @@ type RestrictionStats struct {
 	Unresolved    uint32 // via node not present in the graph / no matching edge
 	ChainFail     uint32 // multi via-way chain could not be ordered
 	ViaWayMissing uint32 // a via way is absent from the graph
+	Relaxed       uint32 // ban omitted because no alternate path exists
+	ReachCap      uint32 // reachability search hit its state limit
 
 	// fine-grained reasons behind Unresolved
 	RNoNode   uint32 // via node id absent from the graph
@@ -55,6 +58,8 @@ func (s *RestrictionStats) String() string {
 		" unresolved=" + u(s.Unresolved) +
 		" chain=" + u(s.ChainFail) +
 		" via_way_missing=" + u(s.ViaWayMissing) +
+		" relaxed=" + u(s.Relaxed) +
+		" reach_cap=" + u(s.ReachCap) +
 		" why{no_node=" + u(s.RNoNode) +
 		" not_on_way=" + u(s.RNotOnWay) +
 		" no_in=" + u(s.RNoIn) +
@@ -74,10 +79,17 @@ type restView struct {
 	to       []uint32
 	ids      []int64  // osm node ids, sorted (pre-permutation order)
 	perm     []uint32 // pre-rank -> final rank, nil when order=osm
+
+	// scratch for the build-time restriction reachability check
+	seen  []uint32
+	gen   uint32
+	queue []uint32
 }
 
 type restResult struct {
 	ban, only []uint64
+	banSrc    []uint32 // tail of the banned from-edge
+	banKind   []uint8  // 1 via-node, 2 via-way
 	stats     RestrictionStats
 	prof      Profile
 }
@@ -115,6 +127,7 @@ func buildRestrictions(ctx context.Context, f *os.File, workers int, progress fu
 	for _, r := range rels {
 		res.addRelation(v, r)
 	}
+	res.filterDetours(v)
 
 	res.ban = graph.SortUniquePacked(res.ban)
 	res.only = graph.SortUniquePacked(res.only)
@@ -341,11 +354,19 @@ func (res *restResult) addViaNode(v *restView, wf, wt int32, viaID int64, only b
 		s.RNoOut++
 		return false
 	}
+	src := via
+	if i > 0 {
+		src = fr[i-1]
+	} else if i+1 < len(fr) {
+		src = fr[i+1]
+	}
 	if only {
 		res.only = append(res.only, graph.PackTurn(in, out))
 		s.Only++
 	} else {
 		res.ban = append(res.ban, graph.PackTurn(in, out))
+		res.banSrc = append(res.banSrc, uint32(src))
+		res.banKind = append(res.banKind, 1)
 		s.Ban++
 	}
 	return true
@@ -378,7 +399,7 @@ func (res *restResult) addViaWay(v *restView, wf, wt int32, viaIDs []int64, only
 	// The via way can share either endpoint with the from way, and the
 	// junction need not sit at the end of the from way.
 	fr := v.wayNodes(wf)
-	var start int64
+	var start, src int64
 	var in uint32
 	found := false
 	for _, seq := range seqs {
@@ -392,6 +413,11 @@ func (res *restResult) addViaWay(v *restView, wf, wt int32, viaIDs []int64, only
 			}
 			if e, ok := v.inEdge(fr, i); ok {
 				start, in = node, e
+				if i > 0 {
+					src = fr[i-1]
+				} else {
+					src = fr[i+1]
+				}
 				found = true
 				break
 			}
@@ -415,8 +441,151 @@ func (res *restResult) addViaWay(v *restView, wf, wt int32, viaIDs []int64, only
 		return false
 	}
 	res.ban = append(res.ban, graph.PackTurn(in, first))
+	res.banSrc = append(res.banSrc, uint32(src))
+	res.banKind = append(res.banKind, 2)
 	s.Ban++
 	return true
+}
+
+// filterDetours drops bans whose endpoints cannot be connected without the
+// banned transition once every other ban and only_* rule is enforced. Keeping
+// such a ban would make the router fall back to an unrestricted search.
+func (res *restResult) filterDetours(v *restView) {
+	if len(res.ban) == 0 {
+		return
+	}
+	s := &res.stats
+	banned := make(map[uint64]struct{}, len(res.ban))
+	for _, k := range res.ban {
+		banned[k] = struct{}{}
+	}
+	only := make(map[uint32]map[uint32]struct{})
+	for _, k := range res.only {
+		in, out := graph.UnpackTurn(k)
+		m := only[in]
+		if m == nil {
+			m = make(map[uint32]struct{})
+			only[in] = m
+		}
+		m[out] = struct{}{}
+	}
+	srcOf := make(map[uint64]uint32, len(res.ban))
+	for i, k := range res.ban {
+		if _, ok := srcOf[k]; !ok {
+			srcOf[k] = res.banSrc[i]
+		}
+	}
+	keep := make(map[uint64]bool, len(res.ban))
+	seen := make(map[uint64]struct{}, len(res.ban))
+	for _, k := range res.ban {
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		in, out := graph.UnpackTurn(k)
+		ok, capped := v.hasDetour(srcOf[k], in, out, banned, only)
+		if capped {
+			// A million edge states without a detour is treated as no usable
+			// detour: keeping the ban would force the runtime fallback.
+			s.ReachCap++
+			ok = false
+		}
+		keep[k] = ok
+	}
+	keptBan := res.ban[:0]
+	keptSrc := res.banSrc[:0]
+	keptKind := res.banKind[:0]
+	for i, k := range res.ban {
+		if keep[k] {
+			keptBan = append(keptBan, k)
+			keptSrc = append(keptSrc, res.banSrc[i])
+			keptKind = append(keptKind, res.banKind[i])
+			continue
+		}
+		s.Ban--
+		s.Usable--
+		s.Relaxed++
+		if res.banKind[i] == 2 {
+			s.ViaWay--
+		} else {
+			s.ViaNode--
+		}
+	}
+	res.ban, res.banSrc, res.banKind = keptBan, keptSrc, keptKind
+}
+
+// hasDetour reports whether src can reach the head of out without taking the
+// banned transition in -> out. The search is over directed edge states, so it
+// enforces every other ban and only_* rule in the graph.
+func (v *restView) hasDetour(src, in, out uint32, banned map[uint64]struct{}, only map[uint32]map[uint32]struct{}) (found, capped bool) {
+	const limit = 1 << 20
+	if int(src) >= len(v.off)-1 || int(in) >= len(v.to) || int(out) >= len(v.to) {
+		return false, false
+	}
+	dst := v.to[out]
+	if src == dst {
+		return true, false
+	}
+	if v.seen == nil {
+		v.seen = make([]uint32, len(v.to))
+	}
+	if v.queue == nil {
+		v.queue = make([]uint32, 0, 1<<16)
+	}
+	v.gen++
+	if v.gen == 0 {
+		clear(v.seen)
+		v.gen = 1
+	}
+	seen := v.seen
+	q := v.queue[:0]
+	add := func(e uint32) bool {
+		if seen[e] == v.gen {
+			return true
+		}
+		seen[e] = v.gen
+		if len(q) >= limit {
+			return false
+		}
+		q = append(q, e)
+		return true
+	}
+	for e := v.off[src]; e < v.off[src+1]; e++ {
+		if v.to[e] == dst {
+			return true, false
+		}
+		if !add(e) {
+			return false, true
+		}
+	}
+	for head := 0; head < len(q); head++ {
+		e := q[head]
+		u := v.to[e]
+		m := only[e]
+		for f := v.off[u]; f < v.off[u+1]; f++ {
+			if e == in && f == out {
+				continue
+			}
+			if _, ok := banned[graph.PackTurn(e, f)]; ok {
+				continue
+			}
+			if m != nil {
+				if _, ok := m[f]; !ok {
+					continue
+				}
+			}
+			if v.to[f] == dst {
+				return true, false
+			}
+			if !add(f) {
+				return false, true
+			}
+		}
+	}
+	if cap(q) > cap(v.queue) {
+		v.queue = q[:0]
+	}
+	return false, false
 }
 
 // chainVia orders the via ways so that each one starts where the previous one
@@ -466,5 +635,5 @@ func buildWayIndex(wayIDs []int64) map[int64]int32 {
 
 // Skipped is the number of restrictions that could not be represented.
 func (s *RestrictionStats) Skipped() uint32 {
-	return s.NotCar + s.NotClass + s.Missing + s.Conditional + s.Except + s.BadType + s.Unresolved + s.ChainFail + s.ViaWayMissing
+	return s.NotCar + s.NotClass + s.Missing + s.Conditional + s.Except + s.BadType + s.Unresolved + s.ChainFail + s.ViaWayMissing + s.Relaxed
 }

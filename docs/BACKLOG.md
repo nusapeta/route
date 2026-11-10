@@ -390,34 +390,8 @@ Gerbang jarak belum lulus; D4 mengganti metrik primer ke p95 durasi absolut
 
 **Lulus bila.** p95 selisih jarak < 12% pada 332 pasangan E1 tanpa menaikkan
 durasi median > 2%, atau metrik primer E1 diganti durasi secara eksplisit.
-### 16. Restriction via-way (M)
 
-**Rencana.** Tabel kecepatan kedua (motor 30-50 km/h di kelas kecil), akses:
-`motorcycle=no` ditolak, `motor_vehicle` dihormati, `service` dan gang lebih
-permisif. Pilih lewat param `profile=motorcar|motorcycle`; graph tetap satu,
-bobot dibaca dari tabel berbeda (butuh waktu tempuh per edge per profil: simpan
-`Time` mobil saja, hitung motor dari `Len` + kelas jalan saat load).
-
-**Lulus bila.** Contoh rute gang sempit di Yogyakarta mengembalikan rute yang
-tidak memutar lewat jalan arteri, dan tabel kecepatan terdokumentasi di README.
-
-### 14. Konektor ferry (M)
-
-**Rencana.** Ekstrak relasi `route=ferry` menjadi edge dengan atribut `ferry=1`
-dan durasi jadwal kasar; hubungkan graf per region pada node pelabuhan. Batasi
-hanya lintasan yang didefinisikan.
-
-**Lulus bila.** Jakarta -> Medan mengembalikan rute dengan penanda ferry, dan
-rute tanpa ferry tidak berubah (golden).
-
-### 15. Kecilkan artefak (M)
-
-**Rencana.** `Time` (uint32, 4 B/edge) diturunkan dari `Len` + 1 B kelas jalan
--> hemat 187 MB di Java. `GO`/`GL` digabung varint. Naikkan versi format.
-
-**Lulus bila.** Graph Java <= 800 MB, waktu muat & latency tidak berubah > 5%.
-
-### 16. Restriction via-way (M)
+### 16. Restriction via-way (M), selesai (E1)
 
 **Masalah.** 3,17% pasangan jadi tak terjangkau karena via-way dimodelkan
 konservatif, lalu server retry tanpa larangan (`fallback`).
@@ -426,7 +400,18 @@ konservatif, lalu server retry tanpa larangan (`fallback`).
 alternatif dari edge masuk ke edge keluar. Kalau tidak ada, tandai relaksasi
 sejak awal (tanpa retry saat runtime).
 
+**Hasil 2026-11-10.** `buildRestrictions` mengumpulkan semua kandidat ban, lalu
+`filterDetours` menjalankan BFS edge-state dari tail edge masuk ke head edge
+keluar. BFS menegakkan seluruh ban dan aturan `only_*` lain, dengan batas 1 juta
+edge-state. Ban tanpa jalur alternatif, termasuk yang mencapai batas, dibuang
+dan dihitung `relaxed=`; pencarian yang mencapai batas dihitung `reach_cap=`.
+Pada Java: 4.654 relasi, 3.962 aturan tersimpan, 3.808 ban, 154 `only_*`,
+116 relaksasi (57 karena cap). `rid-restcheck`: 3.463 sampel, 0 pelanggaran,
+0 fallback, 0 error (sebelumnya 113 fallback = 3,17%). Harness hanya menguji ban
+yang tersimpan; 116 aturan yang dilonggarkan tidak masuk sampel.
+
 **Lulus bila.** Fallback <= 1% pada harness `rid-restcheck`, pelanggaran tetap 0.
+**Status: lulus (0%).**
 
 ---
 

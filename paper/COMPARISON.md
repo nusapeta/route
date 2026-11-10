@@ -20,8 +20,8 @@ Valhalla/GraphHopper/OSRM CH masih butuh run sendiri sebelum masuk tabel.
 | Throughput 42 km | v3 9,97-10,58 RPS -> v4 **13,79-16,02 RPS** @4 klien (A/B bergantian) | `scripts/loadtest.py` (i3-6100T) | terukur |
 | Throughput 7/15/148 km | **74,6** / 16,9 / 0,59 RPS (i3-6100T, 4 klien) | idem | terukur |
 | Memori vs beban | 15 -> 399 MB (4x 148 km serentak, v4) | `/proc` per tahap | terukur |
-| Turn restriction | **3.790 ban / 593 di-skip** (build `5d3fdd1b`); 0 pelanggaran setelah enforcement | `rid-restcheck` | terukur |
-| Fallback restriction | 3,17% | idem | terukur |
+| Turn restriction | **3.693 ban / 692 di-skip** (build `5d3fdd1b`); 0 pelanggaran setelah enforcement | `rid-restcheck` | terukur |
+| Fallback restriction | **0%** (116 ban dilonggarkan saat build) | idem | terukur |
 | Hilbert vs id OSM | RSS metropolitan **1.225 → 675 MB** (1,8x), p50 7-20 % lebih cepat | `rid-bench -order osm` | terukur |
 | eps=1.5 vs 1.0 | **1,4x** lebih cepat (rasio p50 0,72), rute identik 526/526 | `rid-bench -eps` | terukur |
 | Image container | 24 MB (prebuilt, alpine) | `docker image inspect` | terukur |

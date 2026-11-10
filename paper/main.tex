@@ -399,19 +399,21 @@ requests per minute for the 42\,km worst case, or 1{,}400 per minute for the
 capped mix.
 
 \subsection{Turn-restriction compliance}
-The Java extract contains 4{,}653 \texttt{type=restriction} relations; 4{,}203
-survive the car profile, resolving to 3{,}794 forbidden transitions and 155
-permit-lists (31.6\,KB, i.e. 0.003\,\% of the 1{,}019\,MB graph; a dense CSR
-over edges would need 374\,MB). We route the tail of the incoming edge to the
-head of the outgoing edge for every restriction and check whether the returned
-path still contains the forbidden transition. Without enforcement 95.8\,\% of
-the 3{,}564 routable restrictions are violated, which shows the harness is not
-vacuous (the shortest path really wants that turn); with enforcement the
-violation count is \textbf{0}. For 3.2\,\% of cases enforcing the restriction
-makes the pair unreachable, mostly because a via-way restriction is modelled
-conservatively; the server then retries unrestricted and flags the response
-(\texttt{fallback}). Median latency changes by less than a millisecond per
-bucket and expansion counts by 0.1\,\%.
+The Java extract contains 4{,}654 \texttt{type=restriction} relations; 3{,}962
+remain after the car profile and reachability filter, resolving to 3{,}808
+forbidden transitions and 154 permit-lists (30.1\,KB, i.e. 0.004\,\% of the
+693\,MB graph; a dense CSR over edges would need 374\,MB). We route the tail of
+the incoming edge to the head of the outgoing edge for every stored restriction
+and check whether the returned path still contains the forbidden transition.
+Without enforcement 96.7\,\% of the 3{,}463 routable restrictions are violated,
+which shows the harness is not vacuous (the shortest path really wants that
+turn); with enforcement the violation count is \textbf{0} and the fallback
+count is \textbf{0}. A build-time edge-state search relaxes 116 bans whose
+endpoints have no alternative path once every other ban and permit-list is
+enforced; the 57 searches that hit the one-million-state cap are relaxed too.
+The harness tests only stored bans, so those 116 rules are outside its sample.
+Median latency changes by less than a millisecond per bucket and expansion
+counts by 0.1\,\%.
 
 \subsection{Snapping accuracy}
 \begin{table}[t]
@@ -493,7 +495,7 @@ and no runtime dependency, so a monthly OSM rebuild is a one-minute job per isla
 and the artefact is reproducible. (iii)~Auditability of compliance: turn
 restrictions are compiled into the graph and reported at \texttt{/healthz}
 (bans, permit-lists, skipped via-way), and the harness shows 0 violations after
-enforcement versus 95.8\,\% without it. (iv)~Predictable memory: growth is bounded
+enforcement versus 96.7\,\% without it. (iv)~Predictable memory: growth is bounded
 by longest route $\times$ \texttt{-conc}, so deployment sizing is a division, not
 a guess.
 
@@ -513,7 +515,8 @@ What remains, in order: (i) the spur case, where the path leaves the anchor away
 from the snapped segment and the offset becomes a straight line; (ii) no
 time-dependent data --- \texttt{restriction:conditional} and vehicle-class
 restrictions are counted but not applied, and via-way restrictions are enforced
-conservatively; (iii) static speeds, so durations ignore congestion.
+conservatively with build-time relaxation when no alternative exists; (iii)
+static speeds, so durations ignore congestion.
 
 \paragraph{Long routes.}
 Without a hierarchy the search degrades super-linearly: at 100\,km road distance

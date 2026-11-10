@@ -1,3 +1,3 @@
-{"graph":"data/java.graph","bans":3794,"only":155,"samples":3564,
-"strict_violations":0,"strict_errors":0,"strict_fallbacks":113,"loose_violations":3414,"loose_errors":0,"non_vacuous":3414,
-"strict_violation_pct":0.0000,"loose_violation_pct":95.7912}
+{"graph":"data/java.graph","bans":3693,"only":154,"samples":3463,
+"strict_violations":0,"strict_errors":0,"strict_fallbacks":0,"loose_violations":3349,"loose_errors":0,"non_vacuous":3349,
+"strict_violation_pct":0.0000,"loose_violation_pct":96.7081}

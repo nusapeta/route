@@ -91,13 +91,15 @@ Implementasi: state A* = edge (bukan node), tabel sparse pasangan terlarang di
 format v2 (`Ban`) dan pasangan yang diizinkan untuk `only_*` (`Only`).
 Ekstraksi: `internal/extract/restriction.go`. Uji kepatuhan: `cmd/rid-restcheck`.
 
-Hasil Jawa (lihat `RESULTS.md` §7): 4.653 relasi → 4.203 usable, 3.794 pasangan
-terlarang + 155 aturan `only_*` (32 KB). Kepatuhan: 0 pelanggaran dari 3.564
-sampel (dengan restriction) vs 95,79% pelanggaran tanpa restriction.
-Sisa 3,17% sampel jatuh ke fallback tanpa restriction (data OSM/rantai via-way).
+Hasil Jawa (lihat `RESULTS.md` §7): 4.654 relasi → 3.962 aturan tersimpan,
+3.808 pasangan terlarang + 154 aturan `only_*` (30 KB). Kepatuhan: 0 pelanggaran
+dan 0 fallback dari 3.463 sampel (dengan restriction) vs 96,71% pelanggaran
+tanpa restriction. Sebanyak 116 ban tanpa jalur alternatif (57 di antaranya
+mencapai batas pencarian) dilonggarkan saat build.
 
 Sisa pekerjaan untuk versi jurnal: `restriction:conditional` (berbasis waktu)
-dan via-way yang dilarang konservatif (butuh state machine / edge splitting).
+dan via-way yang masih dilarang konservatif (butuh state machine / edge
+splitting).
 
 ## E4. Snap ke edge, bukan node
 

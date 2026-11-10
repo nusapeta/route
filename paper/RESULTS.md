@@ -168,32 +168,37 @@ Ekstraksi relasi `type=restriction` dari `java-latest.osm.pbf`:
 
 | kategori | jumlah |
 |---|---|
-| relasi `type=restriction` | 4.653 |
-| usable (from+to way ada di profil mobil) | 4.203 (90,3%) |
-| via-node (berhasil di-resolve) | 2.808 |
-| via-way (berhasil di-resolve) | 1.258 |
-| pasangan terlarang (`no_*`) | 3.794 |
-| aturan izin (`only_*`) | 155 |
+| relasi `type=restriction` | 4.654 |
+| usable setelah filter reachability | 3.962 (85,1%) |
+| via-node tersimpan | 2.750 |
+| via-way tersimpan | 1.212 |
+| pasangan terlarang (`no_*`) | 3.808 |
+| aturan izin (`only_*`) | 154 |
 | gagal: no_in / no_out / no_node | 11 / 38 / 1 |
-| gagal: rantai via-way / `only_*` + via-way | 29 |
-| tidak dimodelkan: conditional / except / bad_type / not_car | 2 / 16 / 184 / 227 |
+| gagal: rantai via-way | 8 |
+| via way tidak ada di graf | 36 |
+| relaksasi tanpa jalur alternatif | 116 (57 karena cap) |
+| tidak dimodelkan: not_car / not_class / missing | 200 / 14 / 62 |
+| tidak dimodelkan: conditional / except / bad_type | 167 / 16 / 1 |
 
-Ukuran tambahan pada graf: 3.949 pasangan × 8 B = **31,6 KB** (0,003% dari
-1.019 MB). Alternatif CSR penuh akan butuh 8 B × 46,7 jt edge = 374 MB.
+Ukuran tambahan pada graf: 3.847 pasangan × 8 B = **30,1 KB** (0,004% dari
+693 MB). Alternatif CSR penuh akan butuh 8 B × 46,7 jt edge = 374 MB.
 
-Kepatuhan (`bin/rid-restcheck -graph data/java.graph`, seluruh 3.564 pasangan
+Kepatuhan (`bin/rid-restcheck -graph data/java.graph`, seluruh 3.463 pasangan
 yang bisa dirutekan, mesin yang sama):
 
 | | pelanggaran | fallback | error | mean latensi |
 |---|---|---|---|---|
-| strict (default) | 0 (0,00%) | 113 (3,17%) | 0 | 81,2 ms |
-| longgar (tanpa restriction) | 3.414 (95,79%) | 0 | 0 | 2 µs |
+| strict (default) | 0 (0,00%) | 0 (0,00%) | 0 | 170 µs |
+| longgar (tanpa restriction) | 3.349 (96,71%) | 0 | 0 | 1 µs |
 
-`non_vacuous = 3.414 / 3.564 = 95,79%`: pada 95,79% kasus, rute terpendek
+`non_vacuous = 3.349 / 3.463 = 96,71%`: pada 96,71% kasus, rute terpendek
 memang **ingin** mengambil belokan terlarang, jadi uji ini tidak vakum.
-Fallback = kasus di mana larangan (umumnya via-way konservatif) membuat tujuan
-tak terjangkau; router mengulang tanpa restriction dan menandai
-`"fallback": true`.
+Fallback sebelumnya 113 (3,17%). Sekarang `buildRestrictions` membuang ban yang
+tidak punya jalur alternatif setelah seluruh ban dan aturan `only_*` lain
+ditegakkan, termasuk yang pencariannya mencapai batas 1 juta edge-state; ban
+seperti itu dilaporkan sebagai `relaxed=`. Harness hanya menguji ban yang
+tersimpan, jadi 116 aturan yang dilonggarkan tidak masuk sampel.
 
 Biaya latensi (Java, ε=1.5, 60 pasang per bucket, strict vs longgar):
 

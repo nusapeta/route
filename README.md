@@ -65,7 +65,8 @@ dan preprocess.
    ribu item.
 5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
    dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
-   hanya 3,17% pada data uji.
+   0% pada data uji, setelah 116 aturan tanpa jalur alternatif dilonggarkan
+   saat build.
 6. **Dua optimisasi yang terbukti:** Hilbert ordering memangkas RSS
    metropolitan 1.225 -> 675 MB (1,8x) dan p50 7-20% lebih cepat; weighted A*
    `eps=1.5` 28% lebih cepat dari `eps=1.0` dengan 526/526 panjang rute identik.
@@ -733,7 +734,8 @@ diperiksa terhadap larangan belok.
 
 ```bash
 bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
-#   restrictions: seen=4653 usable=4203 via_node=2808 via_way=1258 #                 ban=3911 only=155 skipped{...unresolved=67}
+#   restrictions: seen=4654 usable=3962 via_node=2750 via_way=1212
+#                 ban=3808 only=154 skipped{...relaxed=116}
 bin/rid-restcheck -graph data/java.graph        # uji kepatuhan
 bin/rid-bench -graph data/java.graph -no-restrictions   # baseline A/B
 ```
@@ -746,10 +748,14 @@ via-way (termasuk rantai beberapa via-way) didukung.
 Yang tidak dimodelkan (dan dilaporkan di statistik): `restriction:conditional`
 (berbasis waktu), `except=` untuk moda selain mobil, dan via-way yang tidak bisa
 dirantai. Via-way dilarang secara konservatif (blokir masuk via-way dari arah
-yang dibatasi); kalau ini membuat tujuan tak terjangkau, router otomatis ulang
-tanpa restriction dan menandai `"fallback": true` di respons.
+yang dibatasi). Saat build, setiap ban diuji reachability: ban dibuang bila
+endpoint-nya tidak bisa dihubungkan tanpa transisi terlarang dengan seluruh ban
+dan aturan `only_*` lain tetap berlaku, atau bila BFS mencapai batas 1 juta
+edge-state. Jumlahnya dilaporkan sebagai `relaxed=` dan `reach_cap=`. Jalur
+runtime tanpa restriction tetap ada sebagai jaring pengaman, tetapi pada data
+uji tidak terpakai (`"fallback": false`).
 
-Biaya format: 8 B per pasangan. Jawa: ~4.1 k pasangan = **32 KB** (0,003% dari
+Biaya format: 8 B per pasangan. Jawa: 3.847 pasangan = **30 KB** (0,004% dari
 graf). Bandingkan tabel CSR penuh: 8 B x 46,7 jt edge = 374 MB.
 
 ## Format file
