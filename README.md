@@ -82,9 +82,12 @@ dan preprocess.
   4,2 s di v3), dan koridor >800 km masih menabrak batas ekspansi (`ErrTooFar`).
 - Satu graf = satu profil: mobil dan motor adalah dua artefak terpisah
   (`data/java.graph` vs `data/java-motor.graph`), bukan parameter query.
-- Satu region per rute. Lintas selat dilayani hanya kalau kedua ujung jatuh di
-  satu graph (mis. ferry Ketapang-Gilimanuk di `java.graph`); rute antar-file
-  (Merak -> Bakauheni dengan `java.graph` + `sumatra.graph`) masih `422`.
+- Satu proses boleh memuat beberapa file region, tetapi rute lintas file hanya
+  dilayani untuk pasangan ferry yang terdaftar: Merak-Bakauheni
+  (`java` + `sumatra`) dan Ketapang-Gilimanuk (`java` + `nusa-tenggara`). Rute
+  dijalankan per leg lalu digabung dengan `legs[]`; pasangan lain tetap `422`.
+  Batas `-max-route-km` default 40 km tetap berlaku, jadi rute antarpulau perlu
+  `-max-route-km 0` secara eksplisit. Lihat "Rute lintas selat".
 - Restriction per kelas kendaraan diterapkan (`restriction:motorcar`/`motor_vehicle` untuk car, `motorcycle`/`motor_vehicle` untuk motor); 167 `restriction:conditional` (jam sekolah/pasar) tetap di-skip karena graf statis.
 - **E1 sudah dijalankan; E2 tidak dikerjakan.** Per 2026-11-10, setelah tabel kecepatan
   mobil disamakan dengan `car.lua` OSRM dan graph Java dibangun ulang,
@@ -201,7 +204,7 @@ respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
 | `GET /route?from=lat,lng&to=lat,lng` | rute. Opsional: `format=json\|points\|geojson\|polyline`, `simplify=<m>`, `pin=1`, `restrictions=0` |
 | `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan provenance (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile_sha256`) |
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
-| `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
+| `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `route_cross_region_resnapped_total`, `route_cross_region_stitched_total`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
 
 **Dua profil lewat satu base URL.** Satu proses memuat satu profil (snap
 terdekat membuat dua graf hampir identik saling menutupi), jadi compose
@@ -221,6 +224,13 @@ jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
 `ferry_m`, `has_ferry`, `ferry_spans` (rentang indeks ke `points`/polyline yang
 bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
 `X-Route-Region`, `X-Route-Trim`.
+
+Rute stitched juga memuat `legs[]` dengan tiga entri berurutan (road, ferry,
+road). Setiap leg membawa `mode`, `distance_m`, `duration_s`, `from`, `to`,
+`point_start`, `point_end`, dan `region` atau `name`. `point_start`/`point_end`
+adalah indeks inklusif ke `points` setelah `simplify`; keduanya bisa hilang bila
+tidak ada sampel leg yang tersisa. Region gabungan ditulis `java+sumatra`.
+`legs` tidak dikirim untuk rute satu region.
 
 **Snap cadangan saat ruas terdekat buntu.** Snap hanya melihat geometri, jadi
 pin di taman, halaman berpagar, atau jalan buntu bisa mendarat di ujung yang
@@ -259,7 +269,9 @@ pertama gagal, jadi jalur normal tidak berubah. Keberhasilannya dihitung di
   setelah validasi koordinat, sebelum ETag/rate-limit/snap/A*; lalu jarak
   tempuh hasil rute dicek lagi setelah `RouteSnapCtx` supaya rute pendek yang
   berbelok jauh tetap ditolak. Keduanya menaikkan `reason="too_far"` di
-  `/metrics` dan batasnya ikut masuk fingerprint ETag.
+  `/metrics` dan batasnya ikut masuk fingerprint ETag. Rute stitched antarpulau
+  tidak dikecualikan diam-diam: operator harus menaikkan flag ini (`0` atau nilai
+  yang cukup) dan itu terlihat di fingerprint.
 - **Biaya belok `-turn-penalty` (default 0,25, `0` = waktu murni).** Biaya
   belok dibaca dari sudut antara arah datang dan arah keluar
   (22,5°/67,5°/135° → 2/7,5/20 s, dikali flag) dan masuk ke `duration_s`,
@@ -600,19 +612,34 @@ Uji yang sudah lolos di satu proses (java + sumatra): Jakarta->Bandung
 (175.0 km), Banda Aceh->Medan (578.7 km), RSS total 357 MB (mmap).
 
 **Rute lintas selat.** Ferry adalah edge biasa, jadi rute menyeberang keluar
-kalau kedua ujung ada di satu graph:
+kalau kedua ujung ada di satu graph. Extract yang tumpang tindih (Java memuat
+Lampung dan Bali) membuat titik terminal sering tetap satu region:
 
 | query | hasil |
 |---|---|
-| Ketapang -> Gilimanuk (`java.graph`) | 15,1 km, `ferry_m=4180`, `ferry_spans=[[321,329]]` |
-| Merak -> Bakauheni (`indonesia.graph`) | 29,2 km / 1,45 jam, `ferry_m=28535` |
-| Jakarta -> Medan (`indonesia.graph`) | 2004,5 km / 25,8 jam, `ferry_m=29072`, `relaxed=true` |
+| Ketapang -> Gilimanuk (`java.graph`) | 4,7 km, `region=java`, `ferry_m=4180` |
+| Merak -> Bakauheni (`java.graph,sumatra.graph`) | 28,1 km, `region=sumatra`, `ferry_m=28079`, tanpa `legs` |
 
-Kalau titiknya jatuh di dua file region berbeda, server tetap membalas `422`
-("cross-region route not supported"), stitching antar-file ada di BACKLOG 17b.
-Untuk melayani lintas pulau hari ini: bangun graph nasional
-(`scripts/build-national.sh`, 8 menit, `GOMEMLIMIT=4GiB` di box 7 GB) atau
-taruh banyak region di satu server dan terima batas itu.
+Bila ujungnya benar-benar berbeda, server memakai tabel connector statis,
+merutekan tiap leg di graph masing-masing, lalu menyambung ferry:
+
+| query (`-max-route-km 0`) | hasil |
+|---|---|
+| Jakarta -> Palembang (`java.graph,sumatra.graph`) | 533,5 km, `region=java+sumatra`, 3 `legs`, `ferry_m=28535`, 0,35 s |
+| Jakarta -> Medan (`java.graph,sumatra.graph`) | 1.941,9 km / 86.568 s, 3 `legs`, `ferry_m=28775`, `relaxed=true`, sekitar 3,2 s |
+
+`ferry_m` Jakarta -> Medan mencakup 28.535 m crossing tabel dan 240 m edge ferry
+di dalam leg Sumatra. `relaxed=true` muncul karena leg Sumatra 1.797 km masih
+menabrak batas ekspansi yang sama seperti graph nasional; W5 tidak mengubah
+heuristik atau batas itu. Tanpa `-max-route-km 0`, precheck Haversine menolak
+kedua query dengan `422` `too_far` sebelum snap. Default produk tetap 40 km.
+
+Hanya pasangan yang terdaftar yang dilayani. Pasangan lain, misalnya
+Jakarta -> Pontianak, tetap `422` dengan pesan
+`no ferry connector between java and kalimantan`; tidak ada pencarian ferry
+otomatis. Jalur graph nasional masih ada di `scripts/build-national.sh`
+(1.650 MB, 8 menit) untuk deployment yang memang menghendaki satu artefak,
+tetapi bukan default karena melewati batas 800 MB per file.
 
 **Koridor panjang = `relaxed`.** Sebelum menyerah dengan `ErrTooFar`, router
 mencoba ulang dengan heuristik lebih rakus (ε 2,0 lalu 3,0) dan menandai hasil

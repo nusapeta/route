@@ -587,6 +587,21 @@ server mengulang snap di kedua kandidat region dan menghitung
 `route_cross_region_resnapped_total`. Ketapang -> Gilimanuk: `200` dari
 `java.graph` (15,2 km, `ferry_m=4284`).
 
+### 12f. Stitching antar-file (2026-11-10)
+
+Dua file region (`java.graph` 662 MB, `sumatra.graph` 347 MB) dipasang dalam
+satu proses dengan `-max-route-km 0`. Tabel connector statis Merak-Bakauheni
+dipakai saat satu graph tidak dapat melayani kedua ujung:
+
+| query | hasil |
+|---|---|
+| Jakarta -> Palembang | 533.478 m / 25.711,6 s, `region=java+sumatra`, 3 leg, `ferry_m=28535`, 0,35 s, tanpa `relaxed` |
+| Jakarta -> Medan | 1.941.974 m / 86.568,3 s, `region=java+sumatra`, 3 leg, `ferry_m=28775`, 3,2 s, `relaxed=true`, `epsilon=2` |
+
+Leg Sumatra Jakarta -> Medan 1.797 km masih melewati batas ekspansi 6 juta;
+W5 tidak mengubah heuristik. Default `-max-route-km 40` tetap menolak kedua
+query sebelum snap. Ini bukti fungsional, bukan klaim akurasi.
+
 ## 13. E1: routeid vs OSRM MLD, mesin yang sama
 
 Berbeda dari §1-§12 (Intel i5-7360U, 2C/4T, 7 GB), bagian ini diukur di

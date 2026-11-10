@@ -271,8 +271,8 @@ menambah 93 MB di Java tanpa manfaat. Respons memuat `ferry_m`, `has_ferry`,
 `ferry_spans` (rentang indeks ke `points`/polyline).
 
 Sisa: ferry yang way-nya terpotong batas extract Geofabrik (node ujung tidak
-tersambung ke jalan) masih butuh graph nasional atau stitching antar-file;
-lihat item 17b.
+tersambung ke jalan) ditangani tabel connector statis di item 17b; tidak ada
+deteksi ferry otomatis.
 
 ### 15. Kecilkan artefak (M), selesai (M5)
 
@@ -285,19 +285,28 @@ Sisa (ide v5, kalau 800 MB per region mau ditekan lagi): koordinat 24-bit
 offset per region (-2 B/node), `GNodes` grid 3 B/node (-1 B/node), atau
 delta+varint per blok 64k dengan indeks blok (butuh desain akses acak).
 
-### 17b. Stitching antar-file (M)
+### 17b. Stitching antar-file (M), selesai dengan catatan
 
 **Masalah.** `-graph data/java.graph,data/sumatra.graph` memilih region dari snap
 dan membalas `422` kalau kedua ujung beda region, padahal ferry Merak-Bakauheni
 ada di salah satu file.
 
-**Rencana.** Tabel connector per pasangan region (node pelabuhan A, node
-pelabuhan B, jarak/waktu ferry), lalu rute dijalankan per-leg dan digabung jadi
-satu respons (satu polyline, `legs[]`). Alternatif: satu graph nasional
-(1,65 GB, sudah terbukti bisa dibangun 8 menit) untuk deployment besar.
+**Hasil.** Tabel connector statis berisi Merak-Bakauheni dan Ketapang-Gilimanuk.
+Handler mencoba satu graph lebih dulu (extract yang tumpang tindih), lalu
+merutekan start -> pelabuhan A dan pelabuhan B -> tujuan, menyambung ferry, dan
+menggabung satu polyline dengan `legs[]` serta `ferry_spans`. Pasangan lain tetap
+`422 no ferry connector`. Metric baru: `route_cross_region_stitched_total`.
 
-**Lulus bila.** Jakarta -> Medan 200 tanpa file >800 MB tanpa `relaxed=true`
-kalau bisa dihindari.
+Smoke `java.graph,sumatra.graph` dengan `-max-route-km 0`: Jakarta -> Palembang
+200, 533,5 km, 3 leg, 0,35 s, tanpa `relaxed`; Jakarta -> Medan 200, 1.941,9 km,
+3 leg, 3,2 s, `relaxed=true`. Leg Sumatra 1.797 km masih menabrak batas
+ekspansi, jadi kriteria "tanpa relaxed kalau bisa dihindari" belum lulus tanpa
+pekerjaan W6. Default `-max-route-km 40` tidak diubah; rute antarpulau harus
+menaikkan flag.
+
+**Sisa.** Konektor baru butuh entri tabel dan verifikasi koordinat pelabuhan;
+tidak ada pencarian ferry otomatis. Graph nasional tetap alternatif deployment
+besar (1,65 GB, 8 menit).
 
 ### 13c. Budget ekspansi & hierarki (M)
 

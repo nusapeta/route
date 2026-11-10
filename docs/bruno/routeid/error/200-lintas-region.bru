@@ -1,0 +1,39 @@
+meta {
+  name: 200 lintas region
+  type: http
+  seq: 18
+}
+
+get {
+  url: {{baseUrl}}/route?from=-6.2088,106.8456&to=-2.9761,104.7754
+  body: none
+  auth: none
+}
+
+docs {
+  Server harus memuat java.graph + sumatra.graph dan dijalankan dengan
+  -max-route-km 0. Default 40 km menjawab 422 too_far sebelum snap.
+  Respons harus 200 dengan region java+sumatra dan tiga leg: road, ferry, road.
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+  test("region gabungan", function () {
+    expect(j.region).to.equal("java+sumatra");
+  });
+  test("tiga leg", function () {
+    expect(j.legs).to.be.an("array").with.lengthOf(3);
+    expect(j.legs[0].mode).to.equal("road");
+    expect(j.legs[1].mode).to.equal("ferry");
+    expect(j.legs[2].mode).to.equal("road");
+  });
+  test("ferry dan jarak", function () {
+    expect(j.ferry_m).to.be.above(0);
+    expect(j.ferry_spans).to.be.an("array").that.is.not.empty;
+    const sum = j.legs.reduce((m, leg) => m + leg.distance_m, 0);
+    expect(sum).to.equal(j.distance_m);
+  });
+}

@@ -2,7 +2,7 @@
   "info": {
     "name": "routeid",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "HTTP API routeid. Ganti environment untuk berpindah host: 'routeid - local' (http://127.0.0.1:8080) atau 'routeid - homelab' (http://192.168.1.219:8080). Tanpa environment, koleksi memakai collection variable baseUrl = http://127.0.0.1:8080.\n\nCatatan: homelab membatasi -rate 15/menit (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang kali; server lokal biasanya tanpa rate limit.\n\nRequest di folder 'Region lain' butuh graf region tsb; kalau environment hanya memuat Java hasilnya 422 dan test menerima itu."
+    "description": "HTTP API routeid. Ganti environment untuk berpindah host: 'routeid - local' (http://127.0.0.1:8080) atau 'routeid - homelab' (http://192.168.1.219:8080). Tanpa environment, koleksi memakai collection variable baseUrl = http://127.0.0.1:8080.\n\nCatatan: homelab membatasi -rate 15/menit (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang kali; server lokal biasanya tanpa rate limit.\n\nRequest di folder 'Region lain' butuh graf region tsb; kalau environment hanya memuat Java hasilnya 422 dan test menerima itu. Rute lintas region butuh java.graph + sumatra.graph dan -max-route-km 0; dengan cap default test menerima 422 too_far."
   },
   "variable": [
     {
@@ -683,20 +683,14 @@
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "4. Kasus error",
-      "description": "Respons error yang harus tetap terbaca klien.",
-      "item": [
+        },
         {
-          "name": "422 lintas region",
+          "name": "Jakarta - Palembang lintas region",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/route?from=-6.2088,106.8456&to=3.5952,98.6722",
+              "raw": "{{baseUrl}}/route?from=-6.2088,106.8456&to=-2.9761,104.7754",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -710,27 +704,28 @@
                 },
                 {
                   "key": "to",
-                  "value": "3.5952,98.6722"
+                  "value": "-2.9761,104.7754"
                 }
               ]
             }
           },
-          "description": "Harus 422 cross-region bila kedua region termuat; server satu region menjawab 422 snap.",
+          "description": "Butuh java.graph + sumatra.graph dan -max-route-km 0. Dengan cap default 40 km, precheck Haversine menjawab 422 too_far. Bila 200: region java+sumatra, tiga leg road/ferry/road, dan jumlah distance_m leg sama dengan total.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": [
-                  "pm.test('422', () => pm.response.to.have.status(422));",
-                  "const e = pm.response.json().error;",
-                  "pm.test('ada pesan error', () => pm.expect(e).to.be.a('string').and.not.empty);",
-                  "console.log(e);"
-                ]
+                "exec": "const code = pm.response.code;\npm.test('200 dengan -max-route-km 0, atau 422 bila cap default / graf tidak lengkap', () => pm.expect([200, 422]).to.include(code));\nif (code === 200) {\n  const j = pm.response.json();\n  pm.test('region gabungan', () => pm.expect(j.region).to.equal('java+sumatra'));\n  pm.test('tiga leg road/ferry/road', () => {\n    pm.expect(j.legs).to.be.an('array').with.lengthOf(3);\n    pm.expect(j.legs.map((l) => l.mode)).to.eql(['road', 'ferry', 'road']);\n  });\n  pm.test('ferry dan jarak', () => {\n    pm.expect(j.ferry_m).to.be.above(0);\n    pm.expect(j.ferry_spans).to.be.an('array').that.is.not.empty;\n    const sum = j.legs.reduce((m, l) => m + l.distance_m, 0);\n    pm.expect(sum).to.equal(j.distance_m);\n  });\n  console.log(j.region, j.distance_m + 'm', j.legs.length + ' leg');\n} else {\n  pm.test('pesan error jelas', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);\n  console.log('422:', pm.response.json().error, '- jalankan server dengan -max-route-km 0');\n}\n"
               }
             }
           ]
-        },
+        }
+      ]
+    },
+    {
+      "name": "4. Kasus error",
+      "description": "Respons error yang harus tetap terbaca klien.",
+      "item": [
         {
           "name": "422 tidak ada jalan dalam radius snap",
           "request": {

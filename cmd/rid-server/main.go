@@ -46,14 +46,15 @@ func (rg *region) contains(lat, lon float64) bool {
 }
 
 type server struct {
-	regions   []*region
-	maxSnapM  float64
-	maxRouteM float64 // straight-line/road distance cap; 0 disables it
-	timeout   time.Duration
-	maxAge    int // Cache-Control max-age for /route, seconds
-	fp        string
-	m         *metrics
-	rl        *limiter
+	regions    []*region
+	connectors []ferryConnector
+	maxSnapM   float64
+	maxRouteM  float64 // straight-line/road distance cap; 0 disables it
+	timeout    time.Duration
+	maxAge     int // Cache-Control max-age for /route, seconds
+	fp         string
+	m          *metrics
+	rl         *limiter
 }
 
 type strList []string
@@ -112,11 +113,12 @@ func main() {
 		},
 	}
 	s := &server{
-		maxSnapM:  *snap,
-		maxRouteM: *maxRouteKm * 1000,
-		timeout:   *timeout,
-		maxAge:    *maxAge,
-		m:         m,
+		connectors: defaultFerryConnectors(),
+		maxSnapM:   *snap,
+		maxRouteM:  *maxRouteKm * 1000,
+		timeout:    *timeout,
+		maxAge:     *maxAge,
+		m:          m,
 	}
 	for _, p := range expand(graphs) {
 		g, err := graph.Open(p)
@@ -329,6 +331,27 @@ const (
 	snapRetryPocket = 512
 )
 
+// failRoute maps a routing error to the documented HTTP contract. Cross-region
+// legs use the same mapping as a single-region search.
+func (s *server) failRoute(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, graph.ErrCanceled):
+		s.m.canceled.Add(1)
+		httpErr(w, 504, "deadline exceeded ("+s.timeout.String()+")")
+	case errors.Is(err, graph.ErrTooFar):
+		s.m.tooFar.Add(1)
+		httpErr(w, 422, err.Error())
+	case errors.Is(err, graph.ErrNoRoute):
+		s.m.errNoRoute.Add(1)
+		httpErr(w, 422, err.Error())
+	default:
+		// Anything else is a server-side failure; the text stays in the log
+		// surface, not the response.
+		log.Printf("route error: %v", err)
+		httpErr(w, 500, "internal error")
+	}
+}
+
 // retryNoRoute retries a failed search from the next-nearest segment snaps.
 // Snapping only looks at geometry, so a pin in a park or inside a forecourt
 // lands on a dead end while a connected road may sit a few dozen metres away;
@@ -437,6 +460,12 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		httpErr(w, 422, "no road within snap distance (region not loaded?)")
 		return
 	}
+	// The deadline follows the client: if it disconnects, req.Context() ends and
+	// the search stops at the next check instead of burning a workspace slot.
+	ctx, cancel := context.WithTimeout(req.Context(), s.timeout)
+	defer cancel()
+
+	var cross *stitchedRoute
 	rg := rgF
 	if rgF != rgT {
 		// Region extracts overlap (the Java file carries Bali, the Nusa Tenggara
@@ -447,44 +476,40 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 			rg, snapF, snapT = rgF, sa, sb
 		} else if sa, sb, ok := s.snapBoth(rgT, fLat, fLon, tLat, tLon); ok {
 			rg, snapF, snapT = rgT, sa, sb
+		} else if c, portF, portT, ok := connectorFor(s.connectors, rgF.name, rgT.name); ok {
+			cross, err = s.routeStitched(ctx, rgF, rgT, snapF, snapT, c, portF, portT, p)
+			if err != nil {
+				s.failRoute(w, err)
+				return
+			}
+			s.m.crossRegionStitched.Add(1)
 		} else {
 			s.m.errCrossRegion.Add(1)
-			httpErr(w, 422, "cross-region route not supported ("+rgF.name+" -> "+rgT.name+")")
+			httpErr(w, 422, "no ferry connector between "+rgF.name+" and "+rgT.name)
 			return
 		}
-		s.m.crossRegionFixed.Add(1)
+		if cross == nil {
+			s.m.crossRegionFixed.Add(1)
+		}
 	}
 
-	// The deadline follows the client: if it disconnects, req.Context() ends and
-	// the search stops at the next check instead of burning a workspace slot.
-	ctx, cancel := context.WithTimeout(req.Context(), s.timeout)
-	defer cancel()
-	res, err := rg.r.RouteSnapCtx(ctx, snapF, snapT, p.restrictions)
-	if err != nil && errors.Is(err, graph.ErrNoRoute) {
-		// A dead-end snap is worth one more look before the client sees 422.
-		if res2, a, b, ok := s.retryNoRoute(ctx, rg, p, fLat, fLon, tLat, tLon, snapF, snapT); ok {
-			res, snapF, snapT, err = res2, a, b, nil
-			s.m.snapRetry.Add(1)
+	var res graph.SnapRoute
+	if cross == nil {
+		res, err = rg.r.RouteSnapCtx(ctx, snapF, snapT, p.restrictions)
+		if err != nil && errors.Is(err, graph.ErrNoRoute) {
+			// A dead-end snap is worth one more look before the client sees 422.
+			if res2, a, b, ok := s.retryNoRoute(ctx, rg, p, fLat, fLon, tLat, tLon, snapF, snapT); ok {
+				res, snapF, snapT, err = res2, a, b, nil
+				s.m.snapRetry.Add(1)
+			}
 		}
 	}
 	if err != nil {
-		switch {
-		case errors.Is(err, graph.ErrCanceled):
-			s.m.canceled.Add(1)
-			httpErr(w, 504, "deadline exceeded ("+s.timeout.String()+")")
-		case errors.Is(err, graph.ErrTooFar):
-			s.m.tooFar.Add(1)
-			httpErr(w, 422, err.Error())
-		case errors.Is(err, graph.ErrNoRoute):
-			s.m.errNoRoute.Add(1)
-			httpErr(w, 422, err.Error())
-		default:
-			// Anything else is a server-side failure; the text stays in the log
-			// surface, not the response.
-			log.Printf("route error: %v", err)
-			httpErr(w, 500, "internal error")
-		}
+		s.failRoute(w, err)
 		return
+	}
+	if cross != nil {
+		res = cross.SnapRoute
 	}
 	if s.maxRouteM > 0 && float64(res.DistanceM) > s.maxRouteM {
 		s.m.tooFar.Add(1)
@@ -501,18 +526,23 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 
 	// Geometry follows the road: it starts and ends at the projected points.
 	// The raw pin can still be requested with &pin=1 (straight spur included).
-	pts := make([][2]float64, 0, len(res.Nodes)+2)
-	if p.pin {
-		pts = append(pts, [2]float64{fLat, fLon})
-	}
-	pts = append(pts, res.Head)
-	for _, n := range res.Nodes {
-		lat, lon := rg.g.Coords(n)
-		pts = append(pts, [2]float64{lat, lon})
-	}
-	pts = append(pts, res.Tail)
-	if p.pin {
-		pts = append(pts, [2]float64{tLat, tLon})
+	var pts [][2]float64
+	if cross != nil {
+		pts = cross.pts
+	} else {
+		pts = make([][2]float64, 0, len(res.Nodes)+2)
+		if p.pin {
+			pts = append(pts, [2]float64{fLat, fLon})
+		}
+		pts = append(pts, res.Head)
+		for _, n := range res.Nodes {
+			lat, lon := rg.g.Coords(n)
+			pts = append(pts, [2]float64{lat, lon})
+		}
+		pts = append(pts, res.Tail)
+		if p.pin {
+			pts = append(pts, [2]float64{tLat, tLon})
+		}
 	}
 	// keep maps each surviving geometry point back to its index before
 	// Simplify, so index-based fixtures (ferry spans) survive the drop.
@@ -521,8 +551,12 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		pts, keep = simplifyIndexed(pts, p.simplify)
 	}
 
+	regionName := rg.name
+	if cross != nil {
+		regionName = cross.region
+	}
 	w.Header().Set("X-Route-Ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
-	w.Header().Set("X-Route-Region", rg.name)
+	w.Header().Set("X-Route-Region", regionName)
 	w.Header().Set("X-Route-Expansions", strconv.Itoa(res.Expansions))
 	w.Header().Set("X-Route-Trim", trimLabel(res.TrimStart, res.TrimEnd))
 	body := map[string]any{
@@ -532,7 +566,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		"to":          []float64{tLat, tLon},
 		"distance_m":  res.DistanceM,
 		"duration_s":  float64(res.TimeDs) / 10,
-		"region":      rg.name,
+		"region":      regionName,
 		"snap_from_m": math.Round(snapF.Dist),
 		"snap_to_m":   math.Round(snapT.Dist),
 		// projected points (on the road) as [lat, lng], for a pin layer
@@ -542,26 +576,39 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	if res.FerryM > 0 {
 		body["ferry_m"] = res.FerryM
 		body["has_ferry"] = true
-		// FerrySpans index the trimmed Nodes; shift past the optional pin and
-		// Head, then through keep when the geometry was simplified.
-		off := 1
-		if p.pin {
-			off = 2
-		}
-		spans := make([][2]int, 0, len(res.FerrySpans))
-		for _, sp := range res.FerrySpans {
-			a0, a1 := int(sp[0])+off, int(sp[1])+off
-			if keep != nil {
-				var ok bool
-				if a0, a1, ok = projectSpan(keep, a0, a1); !ok {
-					continue
-				}
+		if cross != nil {
+			if spans := ferrySpansJSON(cross.ferrySpans, keep); len(spans) > 0 {
+				body["ferry_spans"] = spans
 			}
-			spans = append(spans, [2]int{a0, a1})
+		} else {
+			// FerrySpans index the trimmed Nodes; shift past the optional pin
+			// and Head, then through keep when the geometry was simplified.
+			off := 1
+			if p.pin {
+				off = 2
+			}
+			spans := make([][2]int, 0, len(res.FerrySpans))
+			for _, sp := range res.FerrySpans {
+				a0, a1 := int(sp[0])+off, int(sp[1])+off
+				if keep != nil {
+					var ok bool
+					if a0, a1, ok = projectSpan(keep, a0, a1); !ok {
+						continue
+					}
+				}
+				spans = append(spans, [2]int{a0, a1})
+			}
+			if len(spans) > 0 {
+				body["ferry_spans"] = spans
+			}
 		}
-		if len(spans) > 0 {
-			body["ferry_spans"] = spans
+	}
+	if cross != nil {
+		legs := make([]map[string]any, 0, len(cross.legs))
+		for _, leg := range cross.legs {
+			legs = append(legs, leg.legJSON(keep))
 		}
+		body["legs"] = legs
 	}
 	if res.Relaxed {
 		body["relaxed"] = true

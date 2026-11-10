@@ -206,11 +206,12 @@ from the national extract. A national graph of 53.9\,M nodes and 110.2\,M edges
 was built with \texttt{GOMEMLIMIT=4GiB} on a 7\,GB box (1.65\,GB artifact,
 8\,min, three workers); an unbounded build is estimated at 7--8\,GB from the
 measured per-island peak. \textbf{T2}: one graph per island, served by a
-single process that selects the region by snapping and rejects cross-region
-requests; because the island extracts overlap, bounding boxes alone are
-insufficient and snapping decides. T2 keeps every build inside 3\,GB and permits
-per-island refreshes. T3, a streaming builder with external sorting, is future
-work and would make T1 feasible on 8\,GB machines.
+single process that selects the region by snapping, stitches registered
+cross-file ferry pairs (Merak--Bakauheni and Ketapang--Gilimanuk) from two graph
+legs, and rejects unlisted pairs; because the island extracts overlap, bounding
+boxes alone are insufficient and snapping decides. T2 keeps every build inside
+3\,GB and permits per-island refreshes. T3, a streaming builder with external
+sorting, is future work and would make T1 feasible on 8\,GB machines.
 
 \section{Evaluation}
 \subsection{Setup}

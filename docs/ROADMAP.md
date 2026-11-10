@@ -201,7 +201,7 @@ dari `429` dan semua respons membawa `Vary: Accept-Encoding`.
 Artinya deadline mengembalikan slot ke antrean, jadi satu klien yang meminta rute
 148 km tidak lagi "menyandera" server selama beberapa detik.
 
-### M5. Cakupan (SELESAI, kecuali stitching antar-file, BACKLOG 17b)
+### M5. Cakupan (SELESAI; stitching antar-file selesai dengan catatan)
 
 - [x] Profil motor (`-profile motor`): tabel kecepatan sendiri, `motorcycle=no`
       menang atas apa pun, `motor_vehicle=no` tidak memblokir motor (motor
@@ -216,6 +216,12 @@ Artinya deadline mengembalikan slot ke antrean, jadi satu klien yang meminta rut
 - [x] Format v4 memangkas artefak: `Off` uint32 (−4 B/node), `Len` uint16
       satuan 4 m (−2 B/edge), section `Time` dihapus dan diganti `Cls` uint8
       (−3 B/edge). Total −12 B/node-edge: Java 1.019 → **693 MB**.
+- [x] Stitching antar-file dengan tabel connector statis
+      (Merak-Bakauheni, Ketapang-Gilimanuk), `legs[]`, dan
+      `route_cross_region_stitched_total`. Pasangan tak terdaftar tetap `422`.
+      Default `-max-route-km 40` tidak diubah; rute antarpulau memakai flag
+      eksplisit `-max-route-km 0`. Jakarta -> Medan masih `relaxed=true` pada
+      leg Sumatra, dicatat sebagai batas W6.
 
 **Hasil terukur:**
 
@@ -246,7 +252,9 @@ pencarian jadi ~2x lebih cepat karena `Off` uint32 memangkas trafik memori dan
 satu section hilang.
 
 **Ferry dan rute lintas selat.** Ferry jadi edge biasa, jadi tidak perlu
-sub-graph: kalau kedua ujung ada di satu graph, rutenya keluar apa adanya.
+sub-graph kalau kedua ujung ada di satu graph. Bila ujungnya berbeda file,
+handler memakai tabel connector statis, merutekan per leg, lalu menggabungkannya
+menjadi satu polyline dengan `legs[]`.
 
 | query | hasil | ferry |
 |---|---|---|
