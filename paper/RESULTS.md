@@ -656,7 +656,7 @@ median, gagal di p95**. Selisih besar terkonsentrasi di minoritas pasangan.
 Audit §14 menunjukkan penyebabnya **perbedaan fungsi biaya**, bukan
 restriction: routeid meminimalkan waktu murni (termasuk `track`), OSRM
 meminimalkan `weight` (durasi + penalti belok + preferensi kelas jalan).
-Tidak ada klaim akurasi sampai E2.
+Tidak ada klaim akurasi; E2 tidak dijalankan (D1 2026-11-10: limitation).
 
 Durasi tidak sebanding (routeid memakai tabel kecepatan kelas jalan, OSRM
 `car.lua` memakai maxspeed); rasio durasi r/o 0,93-1,02 hanya dicatat, belum
@@ -771,12 +771,13 @@ perbedaan fungsi biaya, bukan akurasi.
 - Gerbang "p95 selisih jarak < 12%" di `COMPARISON.md` **tidak sah sebagai
   gerbang akurasi**; ia hanya mengukur kemiripan rute. Statusnya tetap gagal,
   tetapi tidak boleh dipakai untuk menyimpulkan routeid salah.
-- Klaim akurasi tetap menunggu E2 (Google): hanya referensi independen yang
-  bisa memutuskan rute mana yang lebih baik.
+- Klaim akurasi dicabut: E2 tidak dijalankan (D1 2026-11-10: opsi limitation),
+  jadi tidak ada referensi independen yang bisa memutuskan rute mana yang lebih
+  baik.
 - Untuk menurunkan selisih jarak: tambahkan penalti belok dan/atau preferensi
   kelas jalan (mengubah perilaku routing, harus diikuti E1 ulang), atau ubah
   metrik primer E1 menjadi durasi. Penalti belok sudah diimplementasikan dan
-  diukur, hasilnya di §15; preferensi kelas jalan belum.
+  diukur (§15); D4 diterapkan dan tabel disamakan dengan `car.lua` (§18).
 - 167 `restriction:conditional` tetap batasan model (butuh evaluasi waktu),
   dicatat di `BACKLOG.md`.
 
@@ -1002,3 +1003,50 @@ GOMEMLIMIT=1GiB bin/rid-server -graph data/java.graph -graph data/sumatra.graph 
 P=$(ss -ltnp | grep 18083 | grep -oP 'pid=\K[0-9]+'); grep -E "^Rss:|^Anonymous:" /proc/$P/smaps_rollup
 ```
 
+
+## 18. Kalibrasi tabel mobil, E1 ulang, dan D4 (2026-11-10)
+
+Tabel fallback mobil di `internal/extract/extract.go` disamakan dengan
+`car.lua` OSRM: motorway 90, motorway_link 45, trunk 85, trunk_link 40,
+primary 65, primary_link 30, secondary 55, secondary_link 25, tertiary 40,
+tertiary_link 20, unclassified 25, residential 25, living_street 10,
+service 15. `maxspeed` dan `surface` eksplisit tetap menang. Graph Java,
+Sumatra, dan Nusa Tenggara dibangun ulang dengan
+`profile_sha256=c2240e41a722a738077666ab699ed73bdd22e4a734edc60616a373085df8bc80`.
+
+E1 pada 332 pasangan yang lolos filter snap: median |selisih| **0,23%**,
+p95 **14,49%**, maksimum **70,44%**, 25/332 >10%, 8/332 >25%. Gerbang p95
+<12% dan median <0,1% tetap gagal. Durasi signed p50 **-1,11%**, signed p95
+**+2,39%**, absolut p95 **10,22%**.
+
+| varian tabel | p50 | p95 | max | >10% | >25% | durasi median |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline | 0,39% | 19,32% | 48,28% | 37 | 10 | 1,0075 |
+| link saja | 0,38% | 19,32% | 48,28% | 35 | 10 | 1,0094 |
+| lokal diperlambat | 0,46% | 26,95% | 70,30% | 49 | 19 | 1,0578 |
+| selaras OSRM | 0,23% | 14,49% | 70,44% | 25 | 8 | 0,9889 |
+
+CSV: `paper/results/e1-baseline-2026-11-10.csv`,
+`e1-links-2026-11-10.csv`, `e1-tuned-2026-11-10.csv`, dan
+`e1-osrm-aligned.csv`. Audit 20 outlier: 11 negatif, 9 positif; negatif
+berarti routeid lebih pendek dan OSRM memutar lewat arteri, positif berarti
+routeid lebih panjang. Contoh terbesar +70,44%: routeid 14,7 km lewat kelas
+65/40, OSRM 8,6 km lewat residential/unclassified. Detail di
+`paper/results/e1-outliers-2026-11-10.csv`. Jadi sisa selisih bukan hanya
+tabel: akses, restriksi, dan pilihan rute OSRM ikut menentukan.
+
+**D4 diterapkan.** Metrik primer E1 menjadi p95 durasi absolut 10,22%, bukan
+p95 jarak; gerbang jarak tetap dicatat gagal. **D1 diterapkan 2026-11-10:**
+E2 tidak dijalankan (opsi limitation). Tidak ada referensi independen dan tidak
+ada klaim akurasi.
+
+Reproduksi:
+
+```bash
+bin/rid-server -graph data/java.graph -addr 127.0.0.1:18085 \
+  -conc 1 -rate 0 -timeout 60s -max-route-km 0
+scripts/m6-compare.py --pairs paper/results/pairs-java.csv \
+  --routeid http://127.0.0.1:18085 --osrm http://127.0.0.1:5000 \
+  --csv paper/results/e1-osrm-aligned.csv
+python3 scripts/e1-stats.py paper/results/e1-osrm-aligned.csv
+```

@@ -34,8 +34,8 @@ negative results too: beyond roughly 60\,km the absence of a hierarchy becomes
 the dominant cost (p95 latency above one second), and turn restrictions (via-way
 rules remain unapplied) are the main remaining accuracy gap. A controlled
 comparison against OSRM's MLD on the same machine agrees at the median route
-distance but deviates by 21\,\% at p95, so we make no accuracy claim pending an
-independent reference.
+distance but deviates by 14.49\,\% at p95; we did not collect an independent
+reference and therefore make no accuracy claim.
 \end{abstract}
 
 \ccsdesc[500]{Information systems~Geographic information systems}
@@ -453,7 +453,7 @@ RSS after 600 pairs      & 815\,MB (measured) & 2.45\,GiB (measured) \\
 preprocessing, 22.7\,M nodes & 28\,s (measured) & 250\,s (measured; peak 6.25\,GB) \\
 p50, 0--5/5--15/15--30/30--50/50--80\,km & 3.6/19.7/54.7/139/397\,ms & 0.7/1.1/1.7/2.2/3.2\,ms \\
 p95, same buckets        & 14.0/68.7/226.7/478.4/1060.9\,ms & 1.1/1.7/2.3/3.0/4.5\,ms \\
-distance delta (332 pairs) & median $-0.005\%$, p95 $21.05\%$ & reference \\
+distance delta (332 pairs) & median $0.23\%$, p95 $14.49\%$ & reference \\
 turn restrictions        & 3{,}790 bans (593 skipped) & \texttt{car.lua} profile \\
 \bottomrule
 \end{tabular}
@@ -523,27 +523,24 @@ design.
 
 \section{Threats to validity}
 (i) One machine, one microarchitecture; the locality result should be re-measured
-on server CPUs with different cache and page sizes. (ii) No ground-truth accuracy
-evaluation: distances were sanity-checked against known itineraries, not compared
-statistically against a reference provider. A controlled head-to-head against
-OSRM MLD has now been run on one machine (600 identical pairs; 332 enter the
-distance statistics after snapping both endpoints within 250\,m and requiring the
-engines' snapped points to agree within 50\,m): the median route-distance
-deviation is $-0.005\%$ but p95 is $21.05\%$ and the maximum is $48.3\%$, so the
-planned accuracy gate (median ${<}5\%$, p95 ${<}12\%$) fails at p95 and this paper
-makes no accuracy claim. That spread is not a restriction defect: an audit of all
-593 skipped restriction relations and of the 38 largest deviations
-(\texttt{paper/RESULTS.md}\,\S14) shows it comes from differing cost functions
---- routeid minimises drive time and keeps \texttt{track} edges, OSRM minimises
-\texttt{weight} --- so distance is a third quantity that neither engine
-optimises. Adding turn costs (a 22.5/67.5/135$^\circ$ table of 2/7.5/20\,s,
-shipped at a quarter of that weight) leaves p95 unchanged at $21.12\%$ and even
-raises it to $22.02\%$ at full weight, while the median deviation and the
-p75/p90 percentiles improve slightly (\texttt{paper/RESULTS.md}\,\S15); the
-remaining spread tracks the per-class speed table. The protocol, failure
-breakdown and reproduction
-commands are in \texttt{paper/RESULTS.md}\,\S13; the independent-reference
-harness (E2) is described in \texttt{paper/EXPERIMENTS.md} but not yet run. (iii) The latency benchmark has
+on server CPUs with different cache and page sizes. (ii) No ground-truth accuracy evaluation: distances were sanity-checked against
+known itineraries, not compared statistically against a reference provider. A
+controlled head-to-head against OSRM MLD has now been run on one machine (600
+identical pairs; 332 enter the distance statistics after snapping both endpoints
+within 250\,m and requiring the engines' snapped points to agree within 50\,m):
+the median route-distance deviation is $0.23\%$ but p95 is $14.49\%$ and the
+maximum is $70.44\%$, so the planned accuracy gate (median ${<}0.1\%$, p95
+${<}12\%$) fails on both and this paper makes no accuracy claim. That spread is
+not a restriction defect: an audit of all 593 skipped restriction relations and
+of the 20 largest deviations (\texttt{paper/RESULTS.md}~\S18) shows it comes
+from differing cost functions and route choice: routeid minimises drive time and
+keeps \texttt{track} edges, OSRM minimises \texttt{weight}. After the fallback
+speed table was aligned with \texttt{car.lua}, p95 fell from $21.05\%$ to
+$14.49\%$, but the tail remains. The independent-reference harness (E2) was not
+run: the owner chose the limitation-only option on 2026-11-10, so no independent
+accuracy claim is possible. The protocol, failure breakdown and reproduction
+commands are in \texttt{paper/RESULTS.md}~\S13 and \S18.
+(iii) The latency benchmark has
 526 successful queries; p99 estimates are therefore weak. (iv) Snap failures
 (coastline, forest) are excluded from percentiles and reported separately, and the
 snapping study uses injected offsets rather than recorded user taps. (v) The

@@ -1,7 +1,7 @@
 # Paper draft: RouteID
 
 Status: **draf lengkap, siap dikompilasi; E1 (baseline OSRM) selesai 2026-11-07,
-E2 (ground truth) belum.**
+E2 (ground truth) tidak dijalankan (D1 2026-11-10: limitation).**
 
 | File | Isi |
 |---|---|
@@ -43,13 +43,15 @@ kolom routeid.
   15 km, 385 MB setelah satu rute 148 km, 607 MB setelah satu rute 579 km.
 - E1 vs OSRM MLD di mesin yang sama (tabel comparison): graf 693 MB vs 5,08 GB,
   preprocess 28 s vs 250 s, p50 35,1 ms vs 1,4 ms, p95 522 ms vs 3,4 ms.
-- Jarak rute pada 332 pasang E1: median −0,005 %, p95 21,05 %, max 48,30 %;
-  gerbang p95 <12 % gagal, sebabnya di `RESULTS.md` §14-§15 (bukan restriction).
+- Jarak rute pada 332 pasang E1: median 0,23 %, p95 14,49 %, max 70,44 %;
+  gerbang p95 <12 % dan median <0,1 % gagal. D4 mengganti metrik primer ke
+  p95 durasi absolut 10,22 %. Sebab sisa selisih ada di `RESULTS.md` §18.
 
 ## Klaim yang **belum** didukung (jangan submit sebelum ini)
 
-- Akurasi jarak/geometri vs referensi independen (Google/Mapbox) (E2). E1 bukan
-  pengganti karena OSRM memakai graf OSM yang sama.
+- Akurasi jarak/geometri vs referensi independen (Google/Mapbox). E2 tidak
+  dijalankan (D1: limitation); E1 bukan pengganti karena OSRM memakai graf OSM
+  yang sama.
 - Pembanding selain OSRM MLD (Valhalla, GraphHopper, OSRM CH).
 - Latency dan akurasi pada graf nasional (E5). Yang sudah terukur hanya build-nya:
   1.650 MB, 8m08s (`docs/ROADMAP.md` §M5).

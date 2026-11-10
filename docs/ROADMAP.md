@@ -56,16 +56,15 @@ sebanyak mungkin rute per detik.
 | M3 biaya per ekspansi | ✅ | latensi ~2x, memori -25 % |
 | M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,2 ms Ryzen / 0,39 ms i3-6100T), `/metrics` |
 | M5 cakupan | ✅ | v4 (Java 693 MB), ferry, motor, 7 pulau, tangga ε |
-| M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 belum |
+| M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 dilewati (D1: limitation) |
 
-Yang belum ada nombornya: ground truth (E2). E1 sudah terukur: median jarak
-−0,005% tetapi p95 21,05% (gerbang 12% gagal); audit `RESULTS.md` §14
-menunjukkan p95 itu perbedaan fungsi biaya, bukan restriction yang di-skip. Itu
-menjadi dasar §15: penalti belok 0,25x dikirim, p95 tidak berubah (sisa selisih
-dari tabel kecepatan kelas), jadi
-README/paper tetap tidak
-boleh mengklaim "tercepat" maupun "paling akurat", hanya biaya per rute
-(memori, artefak, latency) dan perbandingan antar-engine.
+Ground truth E2 tidak dikerjakan: D1 pada 2026-11-10 memilih opsi limitation.
+E1 sudah terukur ulang: median jarak 0,23%, p95 14,49% (gerbang 12% gagal);
+D4 mengganti metrik primer ke p95 durasi absolut 10,22%. Audit `RESULTS.md`
+§18 menunjukkan selisih berasal dari fungsi biaya, akses/restriksi, dan pilihan
+rute, bukan restriction yang di-skip. README/paper tetap tidak boleh mengklaim
+"tercepat" maupun "paling akurat", hanya biaya per rute (memori, artefak,
+latency) dan perbandingan antar-engine.
 
 ## Milestone
 
@@ -283,9 +282,10 @@ pasangan identik. Hasil: `paper/RESULTS.md` §13; worksheet:
 
 Terukur: preprocess 28 s vs 250 s; artefak 693 MB vs 5,08 GB; RSS sebelum query
 17 MB vs 2,36 GiB; p50 35,1 ms vs 1,4 ms; p95 522 ms vs 3,4 ms. Jarak (332
-pasang setelah filter snap): median −0,005%, p95 21,05%, max 48,30%; 81/600
+pasang setelah filter snap): median 0,23%, p95 14,49%, max 70,44%; 81/600
 routeid `422` (72 karena snap >3 km) dan pada pasangan itu OSRM menempel ke
-target p50 14,7 km. Gerbang p95 <12% tidak lulus → tidak ada klaim akurasi.
+target p50 14,7 km. Gerbang p95 <12% dan median <0,1% tidak lulus; D4 memakai
+p95 durasi absolut 10,22% sebagai metrik primer. Tidak ada klaim akurasi.
 
 - [x] Audit p95: 593 restriction di-skip + 38 outlier (`paper/RESULTS.md` §14);
       hasilnya perbedaan fungsi biaya, bukan restriction; 7 `restriction:motorcar`

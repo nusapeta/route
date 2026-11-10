@@ -22,7 +22,7 @@ Angka latency lama (i5-7360U) tetap ada di §1-§12 dan tidak dicampur ke tabel 
 | Preprocess (22,7 jt node) | 28 s (`GOMEMLIMIT=2GiB`) | 250 s (151+83+16 s; peak 6,25 GB) |
 | p50 0-5 / 5-15 / 15-30 / 30-50 / 50-80 km | 3,6 / 19,7 / 54,7 / 139,0 / 397,3 ms | 0,7 / 1,1 / 1,7 / 2,2 / 3,2 ms |
 | p95 bucket yang sama | 14,0 / 68,7 / 226,7 / 478,4 / 1.060,9 ms | 1,1 / 1,7 / 2,3 / 3,0 / 4,5 ms |
-| Selisih jarak rute (332 pasang) | median −0,005%, p95 21,05%, max 48,30% | referensi; gerbang p95 <12% gagal, bukan gerbang akurasi |
+| Selisih jarak rute (332 pasang) | median 0,23%, p95 14,49%, max 70,44% | referensi; gerbang p95 <12% dan median <0,1% gagal, bukan gerbang akurasi |
 | Cakupan 600 pasangan | 332 cocok, 81 `422`, 187 keluar filter snap | 0 error; pada 81 itu snap tujuan p50 14,7 km |
 | Turn restriction | 3.790 ban / 593 di-skip saat build | `car.lua` |
 | Traffic / ETA real-time | tidak | tidak |
@@ -86,15 +86,16 @@ dan preprocess.
   satu graph (mis. ferry Ketapang-Gilimanuk di `java.graph`); rute antar-file
   (Merak -> Bakauheni dengan `java.graph` + `sumatra.graph`) masih `422`.
 - Restriction per kelas kendaraan diterapkan (`restriction:motorcar`/`motor_vehicle` untuk car, `motorcycle`/`motor_vehicle` untuk motor); 167 `restriction:conditional` (jam sekolah/pasar) tetap di-skip karena graf statis.
-- **E1 sudah dijalankan; E2 belum.** Per 2026-11-10, setelah tabel kecepatan
+- **E1 sudah dijalankan; E2 tidak dikerjakan.** Per 2026-11-10, setelah tabel kecepatan
   mobil disamakan dengan `car.lua` OSRM dan graph Java dibangun ulang,
   332 pasangan E1 yang lolos filter snap menghasilkan median |selisih| 0,23%,
   p95 14,49% (gerbang <12% gagal), maksimum 70,44%. D4 mengganti metrik primer
   ke p95 durasi absolut 10,22%; ini keputusan metrik, bukan klaim akurat.
   Riwayat p95 21,05% dan uji penalti belok ada di `paper/RESULTS.md` §14-15.
   Audit 20 outlier menunjukkan sisa selisih berasal dari akses/restriksi dan
-  pilihan rute OSRM, bukan hanya tabel. Ground truth E2 masih terbuka;
-  resepnya di `docs/M6.md`.
+  pilihan rute OSRM, bukan hanya tabel. Ground truth E2 tidak dikerjakan:
+  pemilik memilih opsi limitation pada 2026-11-10, jadi README ini tidak
+  mengklaim akurasi.
 - Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
 
 ## Roadmap
@@ -111,7 +112,7 @@ p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
 | M3 | biaya per ekspansi (heuristik, workspace 12 B/slot, heap 4-ary); ALT ditunda karena memori | latensi 1,9-2,0x, dalam box uji; RPS i3 menyusul deploy |
 | M4 | timeout, rate limit, `/metrics`, ETag | tak ada request menahan slot >10 s |
 | M5 ✅ | format v4 (Java 693 MB), ferry, profil motor, tangga ε, 7 region | rute lintas pulau `200` dengan penanda ferry |
-| M6 🟡 | baseline OSRM (E1) selesai; ground truth (E2) terbuka | tiap klaim di README punya angka pendukung |
+| M6 🟡 | baseline OSRM (E1) selesai; E2 dilewati dengan limitation eksplisit | tiap klaim di README punya angka pendukung |
 
 Rincian item, kriteria lulus, dan biaya: [`docs/ROADMAP.md`](docs/ROADMAP.md) dan
 [`docs/BACKLOG.md`](docs/BACKLOG.md). Non-goals yang sengaja ditolak (traffic
@@ -677,7 +678,7 @@ Temuan utama (601 pasang tetap, Java):
 
 `paper/` berisi draf short paper (ACM `acmart`), `refs.bib` (DOI terverifikasi),
 `RESULTS.md` (semua angka + cara reproduksi), `EXPERIMENTS.md` (checklist
-kekurangan: ground truth Google, pembanding selain OSRM MLD).
+kekurangan: E2 dilewati dengan limitation, pembanding selain OSRM MLD).
 
 ## Turn restriction
 

@@ -7,20 +7,21 @@ Urut berdasarkan dampak ke kredibilitas.
 Paper sekarang tidak punya pembanding terkontrol. Tanpa ini, klaim
 "lebih ringan" hanya sebanding dengan angka yang dilaporkan orang lain.
 
-**Status (2026-11-07): sudah dijalankan** di Ryzen 5 5600G (6C/12T, 16 GB),
-OSRM v5.26.0 MLD vs routeid, PBF Java yang sama, 600 pasangan identik.
-Hasil lengkap: `RESULTS.md` §13; worksheet: `COMPARISON.md` §3.
+**Status (2026-11-07, dikalibrasi ulang 2026-11-10): sudah dijalankan** di
+Ryzen 5 5600G (6C/12T, 16 GB), OSRM v5.26.0 MLD vs routeid, PBF Java yang
+sama, 600 pasangan identik. Hasil lengkap: `RESULTS.md` §13 dan §18;
+worksheet: `COMPARISON.md` §3.
 
 Ringkas: preprocess 28 s vs 250 s; artefak 693 MB vs 5,08 GB; RSS sebelum query
 17 MB vs 2,36 GiB; p50 35,1 ms vs 1,4 ms; p95 522 ms vs 3,4 ms. Jarak rute
-(332 pasang setelah filter snap): median −0,005% (lulus gerbang <5%), p95
-**21,05%** (gerbang <12% **gagal**), max 48,30%; audit §14 membuktikan p95 ini
-bukan akibat restriction yang di-skip melainkan perbedaan fungsi biaya
-(penalti belok/kelas jalan, `track`). Tindak lanjut §15: penalti belok 0,25x
-sebagai default menurunkan mean/p75/p90 (3,60 -> 3,50 / 3,03 -> 2,82 /
-11,20 -> 10,56) tetapi p95 tetap 21,12%; 1x bahkan 22,02%. 81/600 routeid `422`
+(332 pasang setelah filter snap): median **0,23%**, p95 **14,49%**, max
+70,44%; gerbang p95 <12% dan median <0,1% **gagal**. Audit §18 menunjukkan
+sisa selisih berasal dari fungsi biaya, akses/restriksi, dan pilihan rute,
+bukan restriction yang di-skip. D4 mengganti metrik primer ke p95 durasi
+absolut **10,22%** (signed p50 -1,11%, signed p95 +2,39%). 81/600 routeid `422`
 (72 snap >3 km); OSRM tidak gagal tetapi snap tujuannya p50 14,7 km pada pasangan
-itu. **E1 tidak boleh dipakai untuk klaim akurasi**; itu tugas E2.
+itu. **E1 tidak boleh dipakai untuk klaim akurasi**; E2 tidak dijalankan
+(D1: limitation).
 
 Skrip: `scripts/m6-osrm.sh` (build + peak RSS + ukuran artefak) dan
 `scripts/m6-compare.py` (600 pasangan identik, bergantian, `--max-snap 250
@@ -65,9 +66,10 @@ identik, dengan jumlah query sukses yang sama.
 ## E2. Validasi akurasi terhadap referensi (WAJIB untuk klaim "akurat")
 
 Butuh Google Routes API key + billing (atau Mapbox/HERE sebagai pembanding kedua).
-Status: **belum**, dan tidak bisa digantikan E1 (OSRM memakai graf OSM yang sama).
-Limitation eksplisit sudah tercatat di abstrak + §Threats~(ii); tanpa E2, klaim
-"akurat" tetap tidak boleh muncul.
+Status: **tidak dijalankan**. D1 pada 2026-11-10 memilih opsi limitation,
+bukan API atau manual; E1 tidak bisa menggantikannya (OSRM memakai graf OSM yang
+sama). Limitation eksplisit tercatat di abstrak + §Threats~(ii); klaim "akurat"
+tidak boleh muncul.
 Kalau key tidak tersedia, opsi jujur: 60 pasang manual lewat Google Maps, atau
 nyatakan E2 di luar cakupan dan jaga abstrak tetap tanpa kata "akurat" (kondisi
 paper saat ini). Lihat `docs/M6.md` §E2.

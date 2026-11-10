@@ -29,22 +29,23 @@ Valhalla/GraphHopper/OSRM CH masih butuh run sendiri sebelum masuk tabel.
 | SnapEdge vs oracle | mean −1,25 m, 0% sampel >1 m lebih buruk | idem | terukur |
 | Koreksi ujung rute | Medan–Binjai: offset 45→4 m, jarak −58 m, `trimmed=both` | `GET /route` + `X-Route-Trim` | terukur |
 | E1 latency vs OSRM MLD (332 pasang cocok) | routeid p50 **35,1 ms**, p95 **522 ms**; OSRM **1,4 ms / 3,4 ms** | `scripts/m6-compare.py` (Ryzen 5 5600G) | terukur |
-| E1 jarak vs OSRM | median **−0,005%**, p95 **21,05%**, max 48,30%; 38/332 >10% | idem, filter snap <=250 m & gap <=50 m | terukur, gerbang p95 gagal |
-| Penalti belok (0,25x default) | mean \|Δ\| 3,60% -> **3,50%**, p75 3,03% -> 2,82%, p90 11,20% -> 10,56%, p95 **21,12% tetap**; 111/600 rute berubah, ETA +1,6% median | `rid-server -turn-penalty 0/0,25/1/2` + harness E1 | terukur, `RESULTS.md` §15 |
+| E1 jarak vs OSRM | median **0,23%**, p95 **14,49%**, max 70,44%; 25/332 >10% | idem, filter snap <=250 m & gap <=50 m | terukur, gerbang p95 dan median gagal |
+| E1 durasi vs OSRM (D4) | signed p50 **-1,11%**, signed p95 **+2,39%**, absolut p95 **10,22%** | idem | terukur, metrik primer 2026-11-10 |
+| Penalti belok (0,25x default, sebelum kalibrasi) | mean \|Δ\| 3,60% -> **3,50%**, p75 3,03% -> 2,82%, p90 11,20% -> 10,56%, p95 **21,12% tetap**; 111/600 rute berubah, ETA +1,6% median | `rid-server -turn-penalty 0/0,25/1/2` + harness E1 | terukur, `RESULTS.md` §15 |
 | E1 RSS | start **17.280 kB**, setelah 600 pasangan **815.312 kB**; OSRM 2,362/2,451 GiB | `/proc`, `docker stats` | terukur |
 | E1 artefak & preprocess | **693.111.912 B / 28 s** vs **5.082.571.256 B / 250 s** (extract+partition+customize) | `du -sb`, `scripts/m6-osrm.sh extract` | terukur |
 | E1 cakupan | 81/600 routeid `422` (72 snap >3 km); OSRM 0 error, snap tujuan pada 81 itu p50 14,7 km | idem | terukur |
 
 Catatan M2: galat snapping sudah terukur (ledger di atas), tetapi itu galat
-menempelkan titik ke jalan, bukan bukti bahwa jarak rute benar. Klaim akurasi rute
-tetap menunggu E2.
+menempelkan titik ke jalan, bukan bukti bahwa jarak rute benar. Klaim akurasi
+rute dicabut: E2 tidak dijalankan (D1 2026-11-10: opsi limitation).
 
 ## 2. Yang tidak boleh diklaim sekarang
 
 | klaim | kenapa |
 |---|---|
 | "lebih cepat dari OSRM" | E1 sudah jalan: OSRM menang latency (p50 1,4 ms vs 35 ms; p95 3,4 ms vs 522 ms) |
-| "lebih akurat" | E2 belum ada ground truth. E1 hanya perbandingan antar-engine; p95 selisih jarak 21% (gerbang 12% gagal) |
+| "lebih akurat" | E2 tidak dijalankan (D1: limitation). E1 hanya perbandingan antar-engine; p95 selisih jarak 14,49% (gerbang 12% gagal) |
 | "RSS lebih kecil dari OSRM" tanpa angka | terukur (17 MB vs 2,36 GiB idle; 815 MB vs 2,45 GiB setelah 600 pasangan), tetapi harus menyebut mesin, beban, dan bahwa RSS memuat halaman mmap plus tabel workspace yang tidak mengecil |
 | "siap untuk seluruh Indonesia" | tujuh pulau sudah terbangun, tapi rute antar-file masih ditolak (`422`) kecuali satu graph nasional 1.650 MB dipakai |
 | "hemat memori" tanpa kualifikasi | tabel workspace 12 B/slot tumbuh mengikuti edge unik rute terpanjang, dikali region x `-conc`, dan bertahan sampai restart; E1: 815 MB setelah 600 pasangan campuran |
@@ -70,14 +71,15 @@ kedua engine <=50 m di kedua ujung. Rincian: `RESULTS.md` §13.
 | p50 30-50 km | 139,0 ms | 2,2 ms | | 56 pasang |
 | p50 50-80 km | 397,3 ms | 3,2 ms | | 50 pasang |
 | p95 0-5/…/50-80 km | 14,0 / 68,7 / 226,7 / 478,4 / 1.060,9 ms | 1,1 / 1,7 / 2,3 / 3,0 / 4,5 ms | | |
-| jarak rute: median / p95 / max | **−0,005% / 21,05% / 48,30%** | referensi | | gerbang p95 <12% **gagal**, tetapi bukan gerbang akurasi (§14) |
-| pasangan selisih >10% | 38/332 (11,4%) | n/a | | 10/332 >25% |
+| jarak rute: median / p95 / max | **0,23% / 14,49% / 70,44%** | referensi | | gerbang p95 <12% dan median <0,1% **gagal**, tetapi bukan gerbang akurasi (§18) |
+| durasi: signed p50 / signed p95 / absolut p95 | **-1,11% / +2,39% / 10,22%** | referensi | | metrik primer D4 (§18) |
+| pasangan selisih >10% | 25/332 (7,5%) | n/a | | 8/332 >25% |
 | routeid 422 | 81/600 (72 snap, 7 budget, 2 no-route) | 0 error | | OSRM snap tujuan p50 14,7 km pada 81 itu |
 | turn restriction ditegakkan | 3.790 ban, 593 di-skip | `car.lua` | | audit `RESULTS.md` §14: bukan penyebab p95 jarak |
 | penalti belok | 0,25x tabel (2/7,5/20 s), ETA +1,6% median | `car.lua` `weight` | | `RESULTS.md` §15: p95 tidak turun, badan distribusi membaik |
 
 Catatan metrik: selisih jarak bukan ukuran akurasi. Audit `RESULTS.md` §14
-menunjukkan 38 outlier berasal dari perbedaan fungsi biaya (routeid meminimalkan
+menunjukkan 20 outlier berasal dari perbedaan fungsi biaya (routeid meminimalkan
 waktu murni termasuk `track`; OSRM `weight` = durasi + penalti belok +
 preferensi kelas jalan), bukan dari restriction yang di-skip. Penalti belok
 sudah ditambahkan (default 0,25x, `RESULTS.md` §15): p95 tidak berubah, sisa
@@ -125,11 +127,11 @@ Butuh referensi independen; OSRM bukan ground truth (dua-duanya graf OSM).
 | Google Maps manual | 60 pasangan | jarak rute + waktu, screenshot | ~2 jam kerja |
 | Google Routes API | 200-500 pasangan, tersebar | `distanceMeters`, `duration`, `polyline` | perlu API key (~$1 untuk 200-500 query) |
 
-Status: **belum ada**; tidak ada API key di mesin pengembangan, dan OSRM tidak
-bisa dipakai sebagai pengganti (dua-duanya graf OSM). Limitation eksplisit sudah
-ditulis di abstrak + `main.tex` §Threats~(ii): tidak ada klaim akurasi. Urutan
-kerja dan definisi selesai ada di `docs/M6.md` §E2.
+Status: **tidak dijalankan**. D1 pada 2026-11-10 memilih opsi limitation; tidak
+ada API key dan tidak ada data referensi. Limitation eksplisit ditulis di
+abstrak + `main.tex` §Threats~(ii): tidak ada klaim akurasi. Urutan kerja dan
+definisi selesai ada di `docs/M6.md` §E2.
 
 Metrik yang dilaporkan: selisih jarak relatif `|d_routeid - d_ref| / d_ref`,
-rasio detour, dan persentase rute dengan selisih >10%. Tanpa ini, klaim
-"akurat" tetap tidak boleh muncul di abstrak.
+rasio detour, dan persentase rute dengan selisih >10%. Dengan D1, klaim
+"akurat" tidak boleh muncul di abstrak.
