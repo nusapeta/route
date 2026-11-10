@@ -1,0 +1,4 @@
+# routeid motor golden routes
+#   profile,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash
+motor,-7.800000,110.400000,-7.800000,110.402000,224,672,3,756241e1be8c9396
+car,-7.800000,110.400000,-7.800000,110.402000,380,161,4,c1832f24e3a4fb70

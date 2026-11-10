@@ -267,3 +267,131 @@ func TestMetaRejectsInvalid(t *testing.T) {
 		t.Fatal("expected error for newline in metadata")
 	}
 }
+
+// testEdge is one bidirectional edge in a tiny synthetic graph. kmh is the
+// speed the profile would assign to the source way.
+type testEdge struct {
+	from, to uint32
+	kmh      float64
+}
+
+// smallGraph builds a graph from explicit edges, so a test can state exactly
+// which ways survived the profile filter.
+func smallGraph(t testing.TB, coords [][2]float64, edges []testEdge) *Builder {
+	t.Helper()
+	adj := make([][]testEdge, len(coords))
+	for _, e := range edges {
+		adj[e.from] = append(adj[e.from], e)
+		adj[e.to] = append(adj[e.to], testEdge{from: e.to, to: e.from, kmh: e.kmh})
+	}
+	b := &Builder{
+		Lat: make([]int32, len(coords)),
+		Lon: make([]int32, len(coords)),
+		Off: make([]uint32, uint32(len(coords))+1),
+	}
+	for i, c := range coords {
+		b.Lat[i] = int32(math.Round(c[0] * E7))
+		b.Lon[i] = int32(math.Round(c[1] * E7))
+	}
+	for i := range coords {
+		b.Off[i] = uint32(len(b.To))
+		for _, e := range adj[i] {
+			m := Haversine(
+				float64(b.Lat[i])/E7, float64(b.Lon[i])/E7,
+				float64(b.Lat[e.to])/E7, float64(b.Lon[e.to])/E7,
+			)
+			b.To = append(b.To, e.to)
+			b.Len = append(b.Len, uint16(math.Max(1, math.Round(m/LenUnit))))
+			b.Cls = append(b.Cls, uint8(math.Round(e.kmh*SpeedClassScale)))
+		}
+	}
+	b.Off[uint32(len(coords))] = uint32(len(b.To))
+	b.BuildGrid(0.02)
+	return b
+}
+
+// TestMotorGoldenRoutes pins the motor graph's shape: a path shortcut that only
+// motorcycles may use, and a motorway that only the car graph contains. The
+// access and speed decisions themselves are pinned by TestMotorGoldenRules in
+// internal/extract; this test pins the routes that result from them.
+func TestMotorGoldenRoutes(t *testing.T) {
+	const lat0, lon0 = -7.8, 110.4
+	// A(0) - B(1) - C(2) is the path shortcut; A(0) - D(3) - E(4) - C(2) is
+	// the motorway detour. Both are bidirectional.
+	coords := [][2]float64{
+		{lat0, lon0},
+		{lat0, lon0 + 0.001},
+		{lat0, lon0 + 0.002},
+		{lat0 + 0.001, lon0},
+		{lat0 + 0.001, lon0 + 0.001},
+	}
+	cases := []struct {
+		profile string
+		b       *Builder
+	}{
+		{"motor", smallGraph(t, coords, []testEdge{
+			{0, 1, 12}, {1, 2, 12}, // path + motorcycle=yes
+		})},
+		{"car", smallGraph(t, coords, []testEdge{
+			{0, 3, 100}, {3, 4, 100}, {4, 2, 100}, // motorway
+		})},
+	}
+
+	var got []string
+	for _, c := range cases {
+		path := filepath.Join(t.TempDir(), c.profile+".graph")
+		if err := c.b.Write(path); err != nil {
+			t.Fatalf("%s write: %v", c.profile, err)
+		}
+		g, err := Open(path)
+		if err != nil {
+			t.Fatalf("%s open: %v", c.profile, err)
+		}
+		src, _, ok1 := g.Nearest(lat0, lon0, 3000)
+		dst, _, ok2 := g.Nearest(lat0, lon0+0.002, 3000)
+		if !ok1 || !ok2 {
+			g.Close()
+			t.Fatalf("%s snap failed", c.profile)
+		}
+		rt, err := NewRouter(g, 1).Route(src, dst)
+		g.Close()
+		if err != nil {
+			t.Fatalf("%s route: %v", c.profile, err)
+		}
+		got = append(got, fmt.Sprintf("%s,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%s",
+			c.profile, lat0, lon0, lat0, lon0+0.002,
+			rt.DistanceM, rt.TimeDs, len(rt.Nodes), seqHash(rt.Nodes)))
+	}
+
+	goldenPath := filepath.Join("testdata", "motor-golden.txt")
+	want, err := os.ReadFile(goldenPath)
+	if err != nil || *updateGolden {
+		if err != nil && !*updateGolden {
+			t.Fatalf("read golden: %v (run with -update to create)", err)
+		}
+		body := "# routeid motor golden routes\n" +
+			"#   profile,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash\n" +
+			strings.Join(got, "\n") + "\n"
+		if err := os.WriteFile(goldenPath, []byte(body), 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		t.Logf("motor golden updated: %d routes", len(got))
+		return
+	}
+
+	var wantLines []string
+	for _, line := range strings.Split(strings.TrimSpace(string(want)), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		wantLines = append(wantLines, line)
+	}
+	if len(wantLines) != len(got) {
+		t.Fatalf("motor golden has %d routes, got %d (run with -update)", len(wantLines), len(got))
+	}
+	for i := range got {
+		if got[i] != wantLines[i] {
+			t.Errorf("route %d changed:\n got  %s\n want %s", i, got[i], wantLines[i])
+		}
+	}
+}

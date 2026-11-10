@@ -631,12 +631,14 @@ docs/BACKLOG.md      backlog teknis: masalah, rencana, kriteria lulus
 cmd/rid-bench        benchmark latency/akurasi + baseline -no-restrictions
 cmd/rid-restcheck    harness kepatuhan turn restriction
 cmd/rid-restats      audit data relasi restriction di pbf
+cmd/rid-tagstats     census tag way untuk profil motor (akses, maxspeed, surface)
 cmd/rid-snapcheck    ukur galat snapping (node vs ruas)
 internal/extract     parsing OSM, profil mobil, restriction, urutan Hilbert
 internal/graph       format biner, mmap, snapping, A*
 paper/               draf ACM + RESULTS.md (semua angka) + EXPERIMENTS.md
 scripts/             fetch.sh, build-national.sh, smoke.sh, loadtest.py,
-                     m6-osrm.sh + m6-compare.py (baseline OSRM, lihat docs/M6.md)
+                     m6-osrm.sh + m6-compare.py (baseline OSRM, lihat docs/M6.md),
+                     motor-ab.py (A/B mobil vs motor pada pasangan tetap)
 ```
 
 ## Test

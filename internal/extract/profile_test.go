@@ -142,3 +142,62 @@ func TestParseSpeedKMH(t *testing.T) {
 		}
 	}
 }
+
+// TestMotorGoldenRules pins the exact access, speed, and direction decisions
+// for the tags that matter to a motorcycle. A profile change that alters one
+// of these numbers must update this table deliberately.
+func TestMotorGoldenRules(t *testing.T) {
+	cases := []struct {
+		name  string
+		tags  osm.Tags
+		ok    bool
+		kmh   float64
+		dir   int8
+		ferry bool
+	}{
+		{"motorway dropped", tags("highway", "motorway"), false, 0, 0, false},
+		{"motorway_link dropped", tags("highway", "motorway_link"), false, 0, 0, false},
+		{"motorway mc yes", tags("highway", "motorway", "motorcycle", "yes"), true, 90, 0, false},
+		{"motorway mc yes beats access=no", tags("highway", "motorway", "access", "no", "motorcycle", "yes"), true, 90, 0, false},
+		{"motorway_link mc yes", tags("highway", "motorway_link", "motorcycle", "yes"), true, 50, 0, false},
+		{"path mc yes", tags("highway", "path", "motorcycle", "yes"), true, 12, 0, false},
+		{"footway mc yes", tags("highway", "footway", "motorcycle", "designated"), true, 10, 0, false},
+		{"cycleway mc yes", tags("highway", "cycleway", "motorcycle", "permissive"), true, 15, 0, false},
+		{"pedestrian mc yes", tags("highway", "pedestrian", "motorcycle", "official"), true, 8, 0, false},
+		{"steps mc yes", tags("highway", "steps", "motorcycle", "yes"), true, 4, 0, false},
+		{"track", tags("highway", "track"), true, 18, 0, false},
+		{"residential", tags("highway", "residential"), true, 28, 0, false},
+		{"service", tags("highway", "service"), true, 20, 0, false},
+		{"living_street", tags("highway", "living_street"), true, 12, 0, false},
+		{"motor_vehicle=no is not a bike ban", tags("highway", "primary", "motor_vehicle", "no"), true, 55, 0, false},
+		{"access=no blocks", tags("highway", "primary", "access", "no"), false, 0, 0, false},
+		{"access=private blocks", tags("highway", "primary", "access", "private"), false, 0, 0, false},
+		{"access=destination allowed", tags("highway", "primary", "access", "destination"), true, 55, 0, false},
+		{"motorcycle=no blocks", tags("highway", "primary", "motorcycle", "no"), false, 0, 0, false},
+		{"motorcycle=destination currently allowed", tags("highway", "primary", "motorcycle", "destination"), true, 55, 0, false},
+		{"oneway:motorcycle currently ignored", tags("highway", "primary", "oneway", "yes", "oneway:motorcycle", "no"), true, 55, 1, false},
+		{"oneway=-1", tags("highway", "primary", "oneway", "-1"), true, 55, -1, false},
+		{"roundabout", tags("highway", "primary", "junction", "roundabout"), true, 55, 1, false},
+		{"unparsable maxspeed", tags("highway", "primary", "maxspeed", "0"), true, 55, 0, false},
+		{"ferry ignores motor_vehicle=no", tags("route", "ferry", "motor_vehicle", "no"), true, 20, 0, true},
+	}
+	for _, c := range cases {
+		inf, ok := wayProfile(ProfileMotor, c.tags)
+		if ok != c.ok {
+			t.Errorf("%s: ok = %v, want %v", c.name, ok, c.ok)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if inf.speed != c.kmh {
+			t.Errorf("%s: speed = %.1f, want %.1f", c.name, inf.speed, c.kmh)
+		}
+		if inf.dir != c.dir {
+			t.Errorf("%s: dir = %d, want %d", c.name, inf.dir, c.dir)
+		}
+		if inf.ferry != c.ferry {
+			t.Errorf("%s: ferry = %v, want %v", c.name, inf.ferry, c.ferry)
+		}
+	}
+}
