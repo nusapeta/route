@@ -10,7 +10,7 @@ Ukuran biaya: **S** = < setengah hari, **M** = 1-2 hari, **L** = 3-5 hari.
 
 ## M1. Kepercayaan
 
-### 1. Metadata di header graph (S)
+### 1. Metadata di header graph (S), selesai (M1)
 
 **Masalah.** Header 256 byte sudah menyimpan `magic` (`RIDG`) dan `version`
 (sekarang 2), plus `VersionMin` untuk kompatibilitas, tetapi **tidak menyimpan
@@ -28,7 +28,12 @@ pbf saat membaca (streaming, tanpa buffer penuh).
 build + profileHash; graph v1 lama ditolak dengan pesan yang menyebut cara
 rebuild.
 
-### 2. Build info di binary (S)
+**Hasil (M1).** Format v4 menyimpan `PBFHash`, `BuildUnix`, dan metadata
+`extractor`, `profile`, `profile_sha256`, `source`, `pbf_bytes`, `order`, serta
+`grid_step`. `rid-graphinfo`, `/healthz`, dan `Provenance()` menampilkannya;
+format < 4 ditolak dengan pesan versi yang didukung.
+
+### 2. Build info di binary (S), selesai (M1)
 
 **Masalah.** Tidak ada cara mengetahui binary mana yang sedang jalan di homelab
 (rsync menimpa `bin/static`).
@@ -38,7 +43,11 @@ tampilkan di `/healthz` dan `/version`.
 
 **Lulus bila.** `/healthz` menyebut commit 7 karakter yang ada di `git log`.
 
-### 3. Golden test regresi rute (S)
+**Hasil (M1).** `make build` menyuntikkan `main.commit` dan `main.buildTime`
+lewat `-ldflags`. `/version` memuat commit, waktu build, versi Go, OS, dan
+arsitektur; `/healthz` memuat `version` dan `commit`.
+
+### 3. Golden test regresi rute (S), selesai (M1)
 
 **Masalah.** Setiap perubahan (snap, ALT, urutan) bisa menggeser rute tanpa
 ketahuan. Sekarang tidak ada test yang menangkap itu.
@@ -49,6 +58,11 @@ graph kecil (`data/test.graph` yang di-commit, ~2 MB) supaya CI tidak butuh pbf.
 
 **Lulus bila.** Mengubah bobot atau snap tanpa sengaja membuat test gagal dengan
 diff per pasangan.
+
+**Hasil (M1).** `internal/graph/golden_test.go` memakai graph uji kecil dan
+`testdata/golden.txt` berisi 48 pasangan node + 48 pasangan snap (trim/spur dan
+offset ikut dipin), plus `testdata/motor-golden.txt`. Perubahan bobot atau snap
+yang tidak disengaja menggagalkan test dan menampilkan diff per pasangan.
 
 ---
 
@@ -131,7 +145,7 @@ seluruh graf ke memori. Angkanya di `paper/RESULTS.md` §9.
 
 ## M3. Densitas
 
-### 6. ALT landmark (L)
+### 6. ALT landmark (L), ditunda (M3)
 
 **Masalah.** Saturasi 4 query = 3,6 core-ekuivalen pada A* dengan eps 1.5. Cara
 menaikkan RPS tanpa core tambahan hanya mengurangi ekspansi.
@@ -163,7 +177,7 @@ kalau hanya 1,2x, tolak dan pilih opsi lain.
 **Lulus bila.** >= 20 RPS @42 km di i3-6100T, RSS beban <= 350 MB, jarak rute
 identik (golden).
 
-### 7. Bidirectional A* (M)
+### 7. Bidirectional A* (M), ditunda (M3)
 
 **Masalah.** Frontier satu arah besar; tiap node yang di-pop menambah kerja.
 
@@ -180,7 +194,7 @@ sama seperti ALT, dibangun `rid-extract -reverse` setelah graph utama.
 
 **Lulus bila.** Ekspansi turun >= 30% untuk rute 15-42 km tanpa perubahan jarak.
 
-### 8. Prealokasi workspace A* (S)
+### 8. Prealokasi workspace A* (S), selesai sebagian (M3)
 
 **Masalah.** Puncak heap 876 MB setelah 29 rute panjang karena array tumbuh
 (grow menyalin). Ini juga sumber GC spike.
@@ -200,7 +214,7 @@ latency > 5%. (Butuh pengukuran ulang puncak heap dengan graph 148 km; angka
 
 ## M4. Produksi
 
-### 9. Timeout & pembatalan (S)
+### 9. Timeout & pembatalan (S), selesai (M4)
 
 **Masalah.** `cmd/rid-server/main.go` tidak punya timeout per request; query
 579 km menahan slot ~2 s, dan klien bisa menumpuk sampai memori naik.
@@ -212,7 +226,11 @@ kembalikan `504` berisi `{"error":"deadline exceeded"}`.
 **Lulus bila.** Query yang dipaksa lambat berhenti <= 10 s dan slot langsung
 tersedia untuk request berikutnya.
 
-### 10. Rate limit & bind (S)
+**Hasil (M4).** Server memakai `context.WithTimeout` per request, cek
+`ctx.Err()` di loop A*, dan membalas `504 {"error":"deadline exceeded"}`.
+Default 10 s lewat `-timeout`; test handler menutup kontrak ini.
+
+### 10. Rate limit & bind (S), selesai sebagian (M4)
 
 **Rencana.** Pembatas token-bucket per IP (15/menit, burst 5) sebagai middleware;
 `-bind 127.0.0.1` default di `deploy/docker-compose.yml` + Caddy `reverse_proxy`.
@@ -220,7 +238,12 @@ tersedia untuk request berikutnya.
 **Lulus bila.** `ab`/loop 100 request dari satu IP menghasilkan `429` setelah
 jatah, tanpa memengaruhi IP lain.
 
-### 11. `/metrics` (S)
+**Hasil (M4).** Token bucket per IP (default 15/menit, burst 5) aktif, dengan
+`-trust-proxy` untuk `X-Forwarded-For`; balasan `429` memuat `Retry-After`.
+**Sisa:** bind `127.0.0.1` + Caddy belum dipasang karena homelab tidak memakai
+reverse proxy dan bind loopback akan memutus akses LAN/Postman.
+
+### 11. `/metrics` (S), selesai (M4)
 
 **Rencana.** Counter: `route_requests_total{format,status}`,
 `route_duration_seconds` (histogram), `astar_expansions_sum`,
@@ -229,12 +252,24 @@ jatah, tanpa memengaruhi IP lain.
 **Lulus bila.** `curl /metrics` menampilkan angka yang cocok dengan 1 request
 yang dilakukan manual.
 
-### 12. ETag & cache (S)
+**Hasil (M4).** `/metrics` tanpa dependensi mengekspos
+`route_requests_total{code}`, histogram `route_request_duration_seconds`,
+`route_inflight`, `route_expansions_total`, `route_fallback_total`,
+`route_relaxed_total`, `route_rate_limited_total`, `route_canceled_total`,
+`route_errors_total{reason}`, `route_cross_region_*`, `route_snap_retry_total`,
+dan `routeid_build_info`.
+
+### 12. ETag & cache (S), selesai (M4)
 
 **Rencana.** Hash dari `(from,to,format,simplify,version graph)`; balas `304`
 bila `If-None-Match` cocok; `Cache-Control: public, max-age=60`.
 
 **Lulus bila.** Request kedua identik balas `304` tanpa menjalankan A*.
+
+**Hasil (M4).** ETag = hash fingerprint graph (`pbf_sha256`, node/edge, commit)
+digabung query ternormalisasi dan format/simplify; `If-None-Match` dibalas `304` sebelum
+limiter dan sebelum A*. Respons sukses memuat `Cache-Control: public,
+max-age=3600` (default `-maxage`) dan `Vary: Accept-Encoding`.
 
 ---
 
@@ -348,7 +383,9 @@ sehingga 141 relation terhitung dua kali. Via way yang tidak ada di graf pindah
 dari `not_car` ke `via_way_missing`. Junction via way kini dicari lewat endpoint
 yang benar, jadi 17 aturan via-way tambahan tersimpan (3.907 -> 3.924 ban).
 Maluku tidak berubah sama sekali (45 relation, 42 usable, ban 22, only 20).
-`profile_sha256` ikut berubah karena hash kini dihitung per profil.
+`profile_sha256` ikut berubah karena hash kini dihitung per profil. Angka 16a di
+atas adalah sebelum filter reachability item 16; hasil akhir Java ada di item 16.
+
 ### 16b. Restriction conditional (M)
 **Masalah.** 167 relation hanya punya `restriction:conditional` (jam sekolah,
 jam pasar); graf statis tidak bisa mengevaluasi waktu. Saat ini di-skip dan
@@ -358,6 +395,7 @@ jendela waktu per ban di format v5 + evaluasi jam lokal request, (c) terapkan
 larangan tanpa syarat (konservatif, bisa menutup jalan di luar jam).
 **Lulus bila.** Pilihan eksplisit + angka dampak pada 30 pasangan yang
 melintasi jalan dengan conditional.
+
 ### 16c. Penalti belok, selesai sebagian (keputusan produk: 0,25x)
 **Masalah.** routeid meminimalkan waktu murni; OSRM meminimalkan `weight`
 (durasi + penalti belok + preferensi kelas). Akibatnya p95 selisih jarak E1
@@ -372,6 +410,7 @@ ETA +1,6% median (0,25x). 1x memperbaiki outlier ekstrem (max 48,30% ->
 45,17%) tetapi merusak pasangan menengah.
 **Kriteria lulus (p95 turun tanpa ETA +2%) tidak tercapai** untuk p95; dipilih
 0,25x sebagai tie-break termurah. Sisa selisih -> 16d.
+
 ### 16d. Kalibrasi tabel kecepatan kelas jalan (M)
 **Masalah.** Ekor p95 E1 (21%) tidak bergerak oleh penalti belok
 (`RESULTS.md` §15). Routeid 1-3% lebih cepat di modelnya sendiri dengan jarak

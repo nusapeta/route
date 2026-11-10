@@ -31,11 +31,11 @@ Hilbert-curve renumbering of graph nodes, which improves page locality
 workload), and inflation of the A* heuristic, which buys a 1.9$\times$ median
 speed-up while leaving 99.8\,\% of route lengths unchanged. We report the
 negative results too: beyond roughly 60\,km the absence of a hierarchy becomes
-the dominant cost (p95 latency above one second), and turn restrictions (via-way
-rules remain unapplied) are the main remaining accuracy gap. A controlled
-comparison against OSRM's MLD on the same machine agrees at the median route
-distance but deviates by 14.49\,\% at p95; we did not collect an independent
-reference and therefore make no accuracy claim.
+the dominant cost (p95 latency above one second), and turn restrictions
+(time-dependent rules remain unapplied) are the main remaining accuracy gap.
+A controlled comparison against OSRM's MLD on the same machine agrees at the
+median route distance but deviates by 14.49\,\% at p95; we did not collect an
+independent reference and therefore make no accuracy claim.
 \end{abstract}
 
 \ccsdesc[500]{Information systems~Geographic information systems}
@@ -73,8 +73,8 @@ speed-up technique. Our contributions are:
         cost, memory behaviour, latency percentiles and a distance-bucket
         breakdown;
   \item an edge-based search that enforces OSM turn restrictions with a
-        32\,KB sparse transition table, evaluated with a compliance harness on
-        all 3.5\,k restrictions of Java;
+        30\,KB sparse transition table, evaluated with a compliance harness on
+        all 3.5\,k stored restrictions of Java;
   \item an explicit list of what is \emph{not} solved---edge snapping,
         long-route latency, traffic---so that the result is not misread as an
         OSRM replacement.

@@ -42,21 +42,21 @@ butuh argumen eksplisit dan milestone sendiri.
 | Artefak graph per pulau | **693 MB** (Java, v4; -32 %) | <= 800 MB | 1 GB |
 | p95 klien 42 km, `-conc 4` | 330 ms (v4, homelab berbeban) | <= 400 ms ✅ | 800 ms |
 | Galat ujung rute (snap) | **p50 16 m, p95 36 m** (offset uji <=40 m) | p50 <= 20 m, p95 <= 60 m | p95 150 m |
-| Pelanggaran turn restriction | 0 (3,17% fallback) | 0 (fallback <= 1%) | 0 |
+| Pelanggaran turn restriction | 0 (0% fallback, 116 ban dilonggarkan saat build) | 0 (fallback <= 1%) | 0 |
 
 "Densitas" = RPS / RSS, metrik utama proyek ini: satu GB RAM harus menampung
 sebanyak mungkin rute per detik.
 
-## Status ringkas (2026-11-07)
+## Status ringkas (2026-11-10)
 
 | milestone | status | hasil inti |
 |---|---|---|
 | M1 metadata + golden test | ✅ | format v3/v4 provenance, `/version`, regresi otomatis |
 | M2 snap ke ruas | ✅ | galat ujung 67,3 -> 16,1 m p50 |
 | M3 biaya per ekspansi | ✅ | latensi ~2x, memori -25 % |
-| M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,2 ms Ryzen / 0,39 ms i3-6100T), `/metrics` |
+| M4 produksi | ✅ (bind LAN ditunda) | deadline, rate limit, ETag (304 p50 0,2 ms Ryzen / 0,39 ms i3-6100T), `/metrics` |
 | M5 cakupan | ✅ | v4 (Java 693 MB), ferry, motor, 7 pulau, tangga ε |
-| M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 dilewati (D1: limitation) |
+| M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 dilewati (D1: limitation eksplisit) |
 
 Ground truth E2 tidak dikerjakan: D1 pada 2026-11-10 memilih opsi limitation.
 E1 sudah terukur ulang: median jarak 0,23%, p95 14,49% (gerbang 12% gagal);
@@ -152,7 +152,7 @@ opsinya ada di BACKLOG 6/7 (ALT atau reverse CSR sebagai sidecar, keduanya
 menambah, bukan mengurangi), atau turunkan `maxSlots` dan terima `ErrTooFar`
 untuk koridor >150 km.
 
-### M4. Siap dipakai app (SELESAI)
+### M4. Siap dipakai app (SELESAI; bind LAN ditunda)
 
 - [x] Timeout per request + `context` yang membatalkan A* di tengah jalan:
       dicek tiap 256 ekspansi, `504 {"error":"deadline exceeded"}`, workspace
@@ -283,7 +283,7 @@ angka absolutnya lebih lambat dari §2/RESULTS. Yang diukur adalah rasio A/B
 bergantian: ekspansi identik, CPU per query turun **1,6-2x** (Jakarta-Bandung
 18,6-22,1 s -> 11,7-13,7 s; Jakarta-Cikarang 2,2-2,4 s -> 0,95-1,54 s).
 
-### M6. Bukti (paper): E1 SELESAI (2026-11-07), E2 BELUM
+### M6. Bukti (paper): E1 SELESAI (2026-11-07), E2 DILEWATI (D1: limitation)
 
 Resep lengkap: **`docs/M6.md`**. E1 dijalankan di `omarchy` (Ryzen 5 5600G,
 6C/12T, 16 GB) dengan OSRM v5.26.0 MLD vs routeid, PBF Java yang sama, 600
@@ -304,8 +304,8 @@ p95 durasi absolut 10,22% sebagai metrik primer. Tidak ada klaim akurasi.
       (`paper/RESULTS.md` §15): mean 3,60% -> 3,50%, p95 tetap 21,12%, ETA
       +1,6%; sisa selisih dari tabel kecepatan kelas (`BACKLOG.md` 16c).
 - [x] E1 baseline OSRM MLD di mesin sama (`docs/M6.md`).
-- [ ] E2 ground truth 60-200 pasangan (butuh API key Google/Mapbox/HERE, atau 60
-      pasang manual; OSRM bukan ground truth).
+- [x] E2 diputuskan dilewati (D1, 2026-11-10): tidak ada API key dan OSRM bukan
+      ground truth; keterbatasan dinyatakan eksplisit di abstrak dan §Limitations.
 - [x] Tabel positioning diisi angka nyata, bukan "documented".
 - [x] Deploy build penalti belok ke homelab (graf Java/Sumatra dibangun ulang,
       Bali-Nusra dari PBF baru) + kapasitas pada batas desain 40 km
@@ -313,9 +313,8 @@ p95 durasi absolut 10,22% sebagai metrik primer. Tidak ada klaim akurasi.
       24-25 RPS, p95 jarak 7,44%).
 
 **Selesai bila:** `paper/COMPARISON.md` tidak lagi punya baris berstatus
-"belum diukur" untuk metrik inti, dan setiap klaim di README punya angka
-pendukungnya. Untuk M6 penuh, E2 (atau limitation eksplisit di abstrak) masih
-kurang.
+"belum diukur" untuk metrik inti, setiap klaim di README punya angka
+pendukungnya, dan E2 diganti limitation eksplisit (D1).
 
 ## Urutan & ketergantungan
 
