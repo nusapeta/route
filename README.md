@@ -161,6 +161,7 @@ make java           # unduh + build data/java.graph (profil mobil)
 make graph REGION=java PROFILE=motor   # -> data/java-motor.graph
 make islands        # ketujuh region Geofabrik, profil mobil
 make motor          # ketujuh region, profil motor
+make refresh REGION=java   # unduh ulang, build car+motor, tagstats, test, A/B
 
 # cek rute
 bin/rid-route -graph data/java.graph -from -6.1754,106.8272 -to -6.5950,106.8166
@@ -202,7 +203,7 @@ respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
 | endpoint | guna |
 |---|---|
 | `GET /route?from=lat,lng&to=lat,lng` | rute. Opsional: `format=json\|points\|geojson\|polyline`, `simplify=<m>`, `pin=1`, `restrictions=0` |
-| `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan provenance (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile_sha256`) |
+| `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan provenance (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile`, `profile_sha256`) |
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
 | `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `route_cross_region_resnapped_total`, `route_cross_region_stitched_total`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
 
@@ -585,7 +586,7 @@ Ketujuh region Geofabrik terbangun (format v4, profil mobil; disk = artefak):
 | region | node | edge | disk | build (4 worker) |
 |---|---|---|---|---|
 | java | 22,7 M | 46,7 M | 693 MB | 3m53s |
-| sumatra | 11,9 M | 24,3 M | 364 MB | 1m54s |
+| sumatra | 11,9 M | 24,3 M | 347 MB | 1m54s |
 | kalimantan | 7,1 M | 14,2 M | 215 MB | 56s |
 | sulawesi | 5,9 M | 11,7 M | 173 MB | 45s |
 | nusa-tenggara (Bali-Nusra) | 5,2 M | 10,3 M | 153 MB | 51s |
@@ -597,6 +598,23 @@ Diukur di box 4 core yang dipakai bersama (4 worker, `GOMEMLIMIT=4GiB`), jadi
 angka build ini lebih lambat daripada satu region sendirian di mesin sepi.
 Profil motor membesar sedikit karena gang/`path` yang boleh dilalui motor ikut
 masuk: `java-motor` 682 MB (23,4 M node / 48,2 M edge, 4m01s).
+
+**Refresh bulanan.** Jadwal: Minggu pertama setiap bulan pukul 03.00 WIB,
+dijalankan oleh operator homelab (Fauzan Arif Sani). Satu perintah mengunduh PBF
+terbaru, membangun graph mobil dan motor, menjalankan `rid-tagstats`, golden
+suite, dan A/B singkat:
+
+```bash
+make refresh REGION=java
+```
+
+Laporan ditulis ke `data/java-tagstats.txt`, `data/java-graphinfo.txt` (dua
+profil), dan `data/java-ab.csv`/`data/java-ab.txt`. Region yang belum punya
+pasangan A/B tetap membangun graph dan melaporkan A/B dilewati; tambahkan
+pasangan ke `paper/results/pairs-motor-regions.csv` atau file
+`paper/results/pairs-<region>.csv` bila ingin A/B ikut. Setelah refresh,
+pastikan `/healthz` menampilkan `profile`, `pbf_sha256`, dan `built_at` baru
+sebelum mengganti graph yang sedang dipakai.
 
 Cek sehat graph per region sebelum dipakai (snap per titik + peta lubang):
 

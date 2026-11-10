@@ -26,6 +26,17 @@ func testRegion(t *testing.T) *region {
 		Cls: []uint8{60, 60, 60},
 	}
 	b.BuildGrid(0.02)
+	b.PBFHash = make([]byte, 32)
+	for i := range b.PBFHash {
+		b.PBFHash[i] = byte(i + 1)
+	}
+	b.BuildUnix = 1_700_000_000
+	b.Meta = map[string]string{
+		"source":         "line.osm.pbf",
+		"extractor":      "test",
+		"profile":        "car",
+		"profile_sha256": strings.Repeat("a", 64),
+	}
 	path := filepath.Join(t.TempDir(), "line.graph")
 	if err := b.Write(path); err != nil {
 		t.Fatalf("write graph: %v", err)
@@ -59,6 +70,33 @@ func testServer(t *testing.T, snapM float64) *server {
 
 func testHandler(s *server) http.Handler {
 	return cors(gzipWrap(s.m.wrap(s.handleRoute)))
+}
+
+func TestHealthProfiles(t *testing.T) {
+	s := testServer(t, 3000)
+	rec := httptest.NewRecorder()
+	s.handleHealth(rec, httptest.NewRequest("GET", "/healthz", nil))
+	if rec.Code != 200 {
+		t.Fatalf("code %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Regions []struct {
+			Profile   string `json:"profile"`
+			ProfileID string `json:"profile_sha256"`
+			PBFHash   string `json:"pbf_sha256"`
+			BuiltAt   string `json:"built_at"`
+		} `json:"regions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Regions) != 1 {
+		t.Fatalf("regions = %d, want 1", len(body.Regions))
+	}
+	r := body.Regions[0]
+	if r.Profile != "car" || r.ProfileID != strings.Repeat("a", 64) || r.PBFHash == "" || r.BuiltAt == "" {
+		t.Fatalf("health provenance = %+v", r)
+	}
 }
 
 const routeQuery = "/route?from=-6.2,106.8&to=-6.21,106.81"

@@ -4,16 +4,29 @@ Dua cara: Docker Compose (paling cepat) atau systemd (tanpa Docker).
 Dua-duanya memakai graph yang sudah dibangun di host; image tidak pernah
 memuat data 1,5 GB.
 
-## 0. Bangun graph (sekali, di host)
+## 0. Bangun dan refresh graph (di host)
 
 Build jauh lebih berat dari run: puncak ~2,5 GB (Java) dan ~1,4 GB (Sumatra).
 Kalau RAM pas-pasan, batasi Go: `GOMEMLIMIT=1800MiB make java`.
 
 ```bash
+make refresh REGION=java
+make refresh REGION=sumatra
+ls -lh data/*.graph          # java ~693 MB, sumatra ~347 MB (v4, mobil)
+```
+
+`make refresh` mengunduh PBF terbaru, membangun profil mobil dan motor,
+menjalankan `rid-tagstats`, golden suite, dan A/B singkat. Jadwalnya Minggu
+pertama setiap bulan pukul 03.00 WIB oleh operator homelab (Fauzan Arif Sani);
+laporan ada di `data/<region>-graphinfo.txt` dan `data/<region>-ab.txt`.
+Ganti graph yang dipakai container hanya setelah `/healthz` graph baru
+menampilkan `profile`, `pbf_sha256`, dan `built_at` yang diharapkan.
+
+Build manual masih bisa dipakai:
+```bash
 make build
 ./bin/rid-extract -pbf data/java-latest.osm.pbf    -out data/java.graph
 ./bin/rid-extract -pbf data/sumatra-latest.osm.pbf -out data/sumatra.graph
-ls -lh data/*.graph          # java ~972 MB, sumatra ~509 MB
 ```
 
 ## 1a. Docker Compose

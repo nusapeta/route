@@ -258,7 +258,8 @@ func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		BuiltAt   string `json:"built_at,omitempty"`
 		Source    string `json:"source,omitempty"`
 		Extractor string `json:"extractor,omitempty"`
-		Profile   string `json:"profile_sha256,omitempty"`
+		Profile   string `json:"profile,omitempty"`
+		ProfileID string `json:"profile_sha256,omitempty"`
 	}
 	out := struct {
 		OK      bool   `json:"ok"`
@@ -271,7 +272,7 @@ func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		prov := rg.g.Provenance()
 		out.Regions = append(out.Regions, info{rg.name, rg.g.NodeCount, rg.g.EdgeCount, rg.minLat, rg.minLon, rg.maxLat, rg.maxLon,
 			rs.Ban, rs.Only, rs.Skipped,
-			prov.Format, prov.PBFHash, prov.BuiltAt, rg.g.MetaValue("source"), rg.g.MetaValue("extractor"), rg.g.MetaValue("profile_sha256")})
+			prov.Format, prov.PBFHash, prov.BuiltAt, rg.g.MetaValue("source"), rg.g.MetaValue("extractor"), rg.g.MetaValue("profile"), rg.g.MetaValue("profile_sha256")})
 	}
 	writeJSON(w, out)
 }

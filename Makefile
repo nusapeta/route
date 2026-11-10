@@ -14,7 +14,7 @@ LDFLAGS := -X main.commit=$(COMMIT) -X main.buildTime=$(BUILT) \
            -X routeid/internal/extract.Version=$(COMMIT)
 STATIC  := -s -w $(LDFLAGS)
 
-.PHONY: all build test vet fmt clean fetch graph java sumatra islands motor bench restcheck
+.PHONY: all build test vet fmt clean fetch graph java sumatra islands motor bench restcheck refresh
 
 all: build
 
@@ -77,3 +77,15 @@ docker: build
 
 restcheck: build
 	bin/rid-restcheck -graph data/java.graph -json paper/restrcheck-java.json
+
+# One command for a monthly data refresh: download, rebuild car and motor,
+# census the ways, run the golden suite, and do a short A/B on localhost.
+refresh: build
+	scripts/fetch.sh $(REGION)
+	$(MAKE) graph REGION=$(REGION) PROFILE=car
+	$(MAKE) graph REGION=$(REGION) PROFILE=motor
+	bin/rid-tagstats -pbf data/$(REGION)-latest.osm.pbf > data/$(REGION)-tagstats.txt
+	bin/rid-graphinfo -graph data/$(REGION).graph > data/$(REGION)-graphinfo.txt
+	bin/rid-graphinfo -graph data/$(REGION)-motor.graph >> data/$(REGION)-graphinfo.txt
+	$(MAKE) test
+	scripts/refresh-ab.sh $(REGION)

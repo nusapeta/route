@@ -88,7 +88,7 @@ func main() {
 	} else {
 		fmt.Printf("pbf sha256 : %s\n", prov.PBFHash)
 		fmt.Printf("built at   : %s\n", prov.BuiltAt)
-		for _, k := range []string{"source", "pbf_bytes", "extractor", "profile_sha256", "order", "grid_step", "restrictions"} {
+		for _, k := range []string{"source", "pbf_bytes", "extractor", "profile", "profile_sha256", "max_speed_kmh", "order", "grid_step", "restrictions"} {
 			if v := g.MetaValue(k); v != "" {
 				fmt.Printf("%-10s : %s\n", k, v)
 			}

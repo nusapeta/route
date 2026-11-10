@@ -75,8 +75,10 @@ performa tidak bisa dibandingkan antar build.
 
 - [x] Metadata graph format **v3**: SHA-256 pbf + waktu build di header, blob
       `key=value` di akhir file (`source`, `pbf_sha256`, `pbf_bytes`,
-      `extractor`, `profile_sha256`, `order`, `grid_step`, `restrictions`).
-      Terbaca di `/healthz`, `/version`, dan `rid-graphinfo`. v1/v2 tetap dimuat.
+      `extractor`, `profile`, `profile_sha256`, `max_speed_kmh`, `order`,
+      `grid_step`, `restrictions`).
+      Terbaca di `/healthz` dan `rid-graphinfo`; `/version` menyebut binary.
+      v1/v2 tetap dimuat.
 - [x] Build info di binary via `-ldflags` (`main.commit`, `main.buildTime`,
       `extract.Version`), otomatis dari `make build` / `make static`.
 - [x] Golden test 48 pasangan pada kota sintetis 30x30, plus round-trip
