@@ -208,6 +208,13 @@ scratch buffer path per workspace (`nodeBuf`/`edgeBuf`, dipotong bila
 request. Bidirectional A* belum dieksperimen, jadi target p50/p95 di atas belum
 diklaim.
 
+**Keputusan 2026-11-10: bidirectional A* dan ALT ditunda ke M7.** Pada kelas
+yang dilayani (<=40 km) p95 E1 246 ms masih di bawah target 400 ms. Biaya
+strukturnya tidak muat: reverse CSR Java 278 MB dan ALT 4 landmark 182 MB,
+keduanya menekan anggaran RSS anonim 700 MB sebelum workspace. Eksperimen hanya
+dibuka bila p95 42 km >400 ms atau batas rute naik di atas 50 km. Tidak ada kode
+yang diubah.
+
 ## 4. Urutan & gerbang
 
 | fase | isi | gerbang keluar |
