@@ -147,7 +147,8 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
   `motorcycle=destination` adalah izin lemah; `surface`/`smoothness` hanya
   menggeser kecepatan kelas tambahan (`path`, `footway`, `cycleway`,
   `pedestrian`, `steps`). Tag `*:conditional` dihitung `rid-tagstats` tetapi
-  tidak dievaluasi karena graph statis.
+  tidak dievaluasi karena graph statis. Batas lengkap:
+  [`docs/MOTOR-MODEL.md`](docs/MOTOR-MODEL.md).
 - **Ferry** (`route=ferry`) ikut jadi edge; waktu pakai tag `duration` kalau ada
   (Merak-Bakauheni 2 jam ≠ 30 km / 20 km/jam), dan respons menandai segmennya.
 
@@ -633,6 +634,7 @@ cmd/rid-route        CLI satu rute (debug)
 cmd/rid-graphinfo    inspeksi header/grid + probe snap & scan lubang data
 docs/ROADMAP.md      north star, budget, milestone
 docs/BACKLOG.md      backlog teknis: masalah, rencana, kriteria lulus
+docs/MOTOR-MODEL.md  batas model motor dan alasan tanpa faktor kemacetan
 cmd/rid-bench        benchmark latency/akurasi + baseline -no-restrictions
 cmd/rid-restcheck    harness kepatuhan turn restriction
 cmd/rid-restats      audit data relasi restriction di pbf
