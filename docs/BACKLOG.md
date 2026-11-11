@@ -490,10 +490,11 @@ memulihkan rute, dan panel hasil hanya menampilkan field respons. Verifikasi
 lokal di Chromium: rute Jakarta 2,39 km, 3 mnt, snap 4/16 m; ponsel 320 dan 360
 px tanpa overflow, tombol 44 px, rute tetap di atas panel.
 
-**Deploy LAN (2026-11-10).** Stack Compose aktif di homelab pada
-`http://192.168.1.19:8080/`, image `routeid:local` dari commit `c92f187`.
-`/healthz` melaporkan profil mobil dan motor sehat. `/route` mobil 31 ms dan
-motor 81 ms untuk rute 2,39 km; peta memuat aset dan rute di Chromium tanpa
+**Deploy LAN (2026-11-10, diperbarui 2026-11-11).** Stack Compose aktif di
+homelab pada `http://192.168.1.19:8080/`, image `routeid:local` dari commit
+`a7ad841` (built `2026-11-11T11:30:04Z`).
+`/healthz` melaporkan profil mobil dan motor sehat. `/route` mobil 2390 m /
+208,7 s dan motor 2390 m / 212,1 s; peta memuat aset dan rute di Chromium tanpa
 error console. `/metrics` masih menjawab `200` dari LAN.
 
 **Sisa deploy.** Belum ada reverse proxy, HTTPS, atau tunnel, jadi ini belum
