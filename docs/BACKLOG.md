@@ -404,6 +404,35 @@ dan mengembalikan `504` yang bergantung beban. Angka ini juga menjadi batas
 bawah untuk hardware lebih lambat: kalau mesin 4x lebih lambat, kerugian
 sebanding naik.
 
+### 13d. Radix heap, 16-bit tile-local, MLD (M), ditunda
+
+Ketiganya disetujui sebagai kandidat optimasi keempat sampai keenam, lalu
+diukur ulang setelah format v5 live. Semuanya berbenturan dengan gate golden,
+bukan dengan anggaran waktu:
+
+- **Radix heap.** Profil CPU 73 rute 50-80 km Java: `heapPop` 24,7% dan
+  `workspace.probe` 25,3%; heap sudah 4-ary. Uji sensitivitas urutan tie:
+  mengganti arity 4 -> 8 mempertahankan `dist`/`time` semua pasangan golden
+  tetapi mengubah `seq_hash` (pair 90: `fe8648…` -> `a48b4a…`). Artinya
+  struktur antrean apa pun yang mengubah urutan key sama akan gagal golden,
+  dan re-pin dilarang. Radix juga menuntut key insert >= key terakhir yang
+  keluar; heuristik berbobot `eps=1.5` tidak konsisten sehingga syarat itu
+  tidak dijamin.
+- **16-bit tile-local + delta CSR.** Target 16-bit hanya muat kalau node
+  dinomori ulang per tile. Itu mengubah id node, jadi `seq_hash` golden ikut
+  berubah; menyimpan tabel pemetaan id global (4 B/node = 94 MB) menghapus
+  seluruh penghematan `To` (4 -> 2 B/edge = 97 MB). Tanpa renumber, encoding
+  yang aman hanya 24-bit (hemat 48 MB, 7% file), bukan target yang diminta.
+- **MLD.** Overlay menghasilkan jarak/waktu yang sama, tetapi pemilihan jalur
+  di antara biaya identik berbeda dari A* sehingga `seq_hash` gagal. Manfaat
+  produknya juga nol selama `-max-route-km` 100: semua rute di atas cap sudah
+  dijawab 422 sebelum pencarian. Hierarki tetap relevan hanya kalau cap
+  dinaikkan (lihat 13c).
+
+Kalau gate golden dilonggarkan kelak, urutan kerja yang masuk akal: MLD
+dengan uji jarak/waktu saja, lalu radix heap, lalu format tile-local. Sampai
+itu ketiganya sengaja tidak dikerjakan.
+
 ### 14. Konektor ferry (M), selesai (M5)
 
 **Hasil.** Tidak perlu sub-graph: `route=ferry` sudah jadi edge biasa (sejak
