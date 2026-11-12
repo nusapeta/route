@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/bits"
 	"sync/atomic"
+	"time"
 )
 
 // Route is a routing result.
@@ -99,6 +100,12 @@ type WorkspacePool struct {
 // power of two. A budget such as "-workspace-mb 1" yields 87.381 slots, and a
 // non-power-of-two cap would make probe cycle forever in a full table.
 func NewWorkspacePool(concurrency int, maxSlotsPerWorkspace uint32) *WorkspacePool {
+	return newWorkspacePool(concurrency, maxSlotsPerWorkspace, idleShrinkAfter, idleReapEvery)
+}
+
+// newWorkspacePool carries the idle timings so tests can shorten them without
+// touching package state that a running reaper reads.
+func newWorkspacePool(concurrency int, maxSlotsPerWorkspace uint32, idleAfter, reapEvery time.Duration) *WorkspacePool {
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -116,10 +123,39 @@ func NewWorkspacePool(concurrency int, maxSlotsPerWorkspace uint32) *WorkspacePo
 	for i := range concurrency {
 		ws := newWorkspace(start, 1<<20)
 		ws.pool = wp
+		ws.idleAfter = idleAfter
 		wp.all[i] = ws
 		wp.ch <- ws
 	}
+	go wp.reapIdle(reapEvery)
 	return wp
+}
+
+// reapIdle returns the hash tables of idle workspaces to the allocator. A
+// workspace sits in the channel between queries, so a non-blocking receive
+// takes it without racing a query; the send cannot block because the receive
+// freed exactly one slot of a channel sized to the pool. Without this an idle
+// server keeps the peak table of its busiest query (2.6M slots = 31 MB per
+// workspace at the 100 km contract) until the next query happens to reuse the
+// same workspace.
+func (wp *WorkspacePool) reapIdle(every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for now := range t.C {
+	reap:
+		for range wp.concurrency {
+			select {
+			case ws := <-wp.ch:
+				if ws.idle(now) && ws.shrinkIdle() {
+					wp.shrinksTotal.Add(1)
+				}
+				wp.ch <- ws
+			default:
+				// Everything left is checked out by a query.
+				break reap
+			}
+		}
+	}
 }
 
 // Stats returns workspace capacity and resize counts. Slots are read from an
@@ -139,6 +175,9 @@ func (wp *WorkspacePool) Stats() WorkspaceStats {
 
 func (wp *WorkspacePool) get(g *Graph) (*workspace, error) {
 	ws := <-wp.ch
+	if ws.idle(time.Now()) && ws.shrinkIdle() {
+		wp.shrinksTotal.Add(1)
+	}
 	if err := ws.resetForGraph(g); err != nil {
 		wp.ch <- ws
 		return nil, err
@@ -149,6 +188,7 @@ func (wp *WorkspacePool) get(g *Graph) (*workspace, error) {
 func (wp *WorkspacePool) put(ws *workspace) {
 	ws.trimPathBuffers()
 	ws.shrinkIfNeeded()
+	ws.lastPut.Store(time.Now().UnixNano())
 	wp.ch <- ws
 }
 
@@ -217,22 +257,36 @@ func (r *Router) SetEpsilon(eps float32) {
 // stamp in the high bits and the state (node or edge index + 1) in the low
 // bits, so starting a query bumps a counter instead of clearing the slots.
 type workspace struct {
-	keys     []uint32
-	gs       []float32
-	came     []uint32
-	mask     uint32
-	nodeMask uint32 // low bits holding node+1
-	nodeBits uint
-	genBits  uint
-	maxGen   uint32
-	used     int
-	cur      uint32
-	heap     itemHeap
-	pool     *WorkspacePool
-	nodeBuf  []uint32      // reusable node sequence built by reconstruct
-	edgeBuf  []uint32      // reusable came-from chain built by reconstruct
-	slots    atomic.Uint32 // len(keys), readable while a query rehashes
+	keys      []uint32
+	gs        []float32
+	came      []uint32
+	mask      uint32
+	nodeMask  uint32 // low bits holding node+1
+	nodeBits  uint
+	genBits   uint
+	maxGen    uint32
+	used      int
+	cur       uint32
+	heap      itemHeap
+	pool      *WorkspacePool
+	nodeBuf   []uint32      // reusable node sequence built by reconstruct
+	edgeBuf   []uint32      // reusable came-from chain built by reconstruct
+	slots     atomic.Uint32 // len(keys), readable while a query rehashes
+	lastPut   atomic.Int64  // UnixNano of the last put, see idleShrinkAfter
+	idleAfter time.Duration // how long unused before the table is released
 }
+
+// idleShrinkAfter is how long a pooled workspace may sit unused before it
+// gives its hash table back. A long-haul query grows the table to hold every
+// visited state (2.6M slots = 31 MB in the 100 km contract); without this the
+// high-water table stays allocated for the life of the process, so an idle
+// server keeps ~100 MB of the -workspace-mb budget per slot pool. Shrinking on
+// acquire rather than on a timer keeps the pool lock-free: a workspace read
+// out of the channel is not in use by anyone else.
+const (
+	idleShrinkAfter = 30 * time.Second
+	idleReapEvery   = idleShrinkAfter / 2
+)
 
 func nextPow2(v uint32) uint32 {
 	if v <= 1 {
@@ -279,6 +333,32 @@ func (w *workspace) resetForGraph(g *Graph) error {
 	}
 	w.reset()
 	return nil
+}
+
+// idle reports whether the workspace has waited longer than idleShrinkAfter
+// since it was returned to the pool. A zero stamp means it has never been
+// used, which counts as idle.
+func (w *workspace) idle(now time.Time) bool {
+	last := w.lastPut.Load()
+	return last == 0 || now.Sub(time.Unix(0, last)) >= w.idleAfter
+}
+
+// shrinkIdle drops the table back to its initial size without copying: the
+// generation stamp makes every old key stale, so zeroing the fresh table is
+// enough. Used on acquire after a long idle gap; the next long query pays for
+// growing the table again.
+func (w *workspace) shrinkIdle() bool {
+	if len(w.keys) <= initialSlots {
+		return false
+	}
+	n := uint32(initialSlots)
+	w.keys = make([]uint32, n)
+	w.gs = make([]float32, n)
+	w.came = make([]uint32, n)
+	w.mask = n - 1
+	w.used = 0
+	w.slots.Store(n)
+	return true
 }
 
 func (w *workspace) shrinkIfNeeded() {
@@ -365,6 +445,9 @@ func (w *workspace) trimPathBuffers() {
 	}
 	if cap(w.edgeBuf) > maxReusePath {
 		w.edgeBuf = nil
+	}
+	if cap(w.heap) > maxReusePath {
+		w.heap = nil
 	}
 }
 

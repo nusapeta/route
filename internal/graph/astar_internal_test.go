@@ -341,3 +341,80 @@ func TestWorkspaceOverflow(t *testing.T) {
 	ws := mustGet(t, wp, tinyGraph(t, false))
 	wp.put(ws)
 }
+
+// TestWorkspaceIdleShrink checks that a workspace which grew for a long query
+// gives its table back once it has sat idle, and that a fresh query still works
+// on the smaller table. Without this the 100 km working set (2.6M slots per
+// workspace) stays resident forever and an idle server holds the whole
+// -workspace-mb budget.
+func TestWorkspaceIdleShrink(t *testing.T) {
+	w := newWorkspace(1<<20, 1<<20)
+	w.idleAfter = idleShrinkAfter
+	if got := w.slots.Load(); got != 1<<20 {
+		t.Fatalf("slots = %d, want %d", got, 1<<20)
+	}
+
+	now := time.Now()
+	w.lastPut.Store(now.Add(-idleShrinkAfter / 2).UnixNano())
+	if w.idle(now) {
+		t.Fatal("workspace shrunk before the idle window elapsed")
+	}
+	w.lastPut.Store(now.Add(-idleShrinkAfter).UnixNano())
+	if !w.idle(now) {
+		t.Fatal("workspace not idle after the window")
+	}
+
+	if !w.shrinkIdle() {
+		t.Fatal("shrinkIdle reported no change on a grown table")
+	}
+	if got := w.slots.Load(); got != initialSlots {
+		t.Fatalf("slots after shrink = %d, want %d", got, initialSlots)
+	}
+	if len(w.keys) != int(initialSlots) || len(w.gs) != int(initialSlots) || len(w.came) != int(initialSlots) {
+		t.Fatalf("arrays = %d/%d/%d, want %d each", len(w.keys), len(w.gs), len(w.came), initialSlots)
+	}
+	if w.mask != initialSlots-1 {
+		t.Fatalf("mask = %d, want %d", w.mask, initialSlots-1)
+	}
+
+	// The shrunken table must still accept a state and read it back.
+	w.reset()
+	if _, _, ok := w.get(1234); ok {
+		t.Fatal("fresh table returned an old state")
+	}
+	w.set(1234, 7.5, 99)
+	g, came, ok := w.get(1234)
+	if !ok || g != 7.5 || came != 99 {
+		t.Fatalf("get = %v/%d/%v, want 7.5/99/true", g, came, ok)
+	}
+}
+
+// TestWorkspaceIdleReap checks the background reaper: a workspace that grew
+// for a long query must give the table back on its own, without waiting for
+// another query to borrow that exact workspace.
+func TestWorkspaceIdleReap(t *testing.T) {
+	wp := newWorkspacePool(1, 1<<20, 20*time.Millisecond, 5*time.Millisecond)
+	g := &Graph{EdgeCount: 1 << 19}
+	ws := mustGet(t, wp, g)
+	for i := uint32(0); i < 60000; i++ {
+		if !ws.set(i, float32(i), i) {
+			t.Fatalf("failed to set item %d", i)
+		}
+	}
+	if len(ws.keys) <= int(initialSlots) {
+		t.Fatalf("table did not grow: %d slots", len(ws.keys))
+	}
+	wp.put(ws)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := wp.Stats().TotalSlots; got == uint64(initialSlots) {
+			if wp.Stats().ShrinksTotal == 0 {
+				t.Fatal("reaped without counting the shrink")
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("reaper did not shrink idle workspace, slots = %d", wp.Stats().TotalSlots)
+}
