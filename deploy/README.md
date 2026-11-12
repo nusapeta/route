@@ -149,10 +149,12 @@ membuka file yang sama dengan `-profile motor`. Angka lama (dua artefak
 terpisah, 2026-11-10) tetap dicatat di `docs/PLAN-2026-11-10.md`; ukuran v5
 diukur ulang setelah rollout.
 
-Satu proses memuat ketiganya: VmRSS idle 11,75 MB, RssAnon 19,80 MB setelah
-tiga rute lintas region (v4, idle-release). Kalau hanya mobil yang dipakai, layanan `routeid-motor`
-boleh dihapus dari compose tanpa mengubah yang lain; gateway lalu melaporkan
-profil motor tidak sehat.
+Satu proses memuat ketiganya. Setelah rollout v5 (2026-11-12) dan enam rute
+campuran, container mobil memakai 76 MB (`docker stats`, `VmRSS` 135 MB,
+`RssAnon` 65 MB termasuk tabel A* 41 MB) dan container motor 26 MB
+(`VmRSS` 37 MB, `RssAnon` 17 MB, tabel 11 MB). Kalau hanya mobil yang dipakai,
+layanan `routeid-motor` boleh dihapus dari compose tanpa mengubah yang lain;
+gateway lalu melaporkan profil motor tidak sehat.
 
 Kedua upstream memakai `-trust-proxy` karena rate limit harus memakai IP klien,
 bukan IP gateway. Gateway menimpa `X-Forwarded-For`/`X-Real-IP` (bukan
@@ -279,10 +281,11 @@ curl -s "127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.9175,107.6191&format=g
 | puncak, 600 pasang campuran (build `8e2dc11`) | ~1,1 GB (`anon` 415 MB) |
 | beban kontrak 40 km, `-conc 4`, `GOMEMLIMIT=1GiB` | 958 MB (`anon` 311 MB) |
 | beban kontrak 100 km, `-conc 4 -workspace-mb 256` (Ryzen 5 5600G) | 1,02-1,10 GB (`anon` 343-425 MB, tabel 126-201 MB) |
-| homelab i3-6100T, cap 100 km, 12 rute 96 km | `routeid` 25-64 MB, `routeid-motor` 180 MB |
+| homelab i3-6100T, v5, 6 rute campuran (56 km, ferry, lintas region) | `routeid` 76 MB (`anon` 65 MB), `routeid-motor` 26 MB (`anon` 17 MB) |
 
 CPU 1 core penuh selama satu query: 128 ms (15 km), 3,6 s (148 km),
-1,7 s (578 km). Disk 1,48 GB, wajib SSD (halaman mmap dibaca saat disentuh).
+1,7 s (578 km). Disk 1,2 GB untuk tiga region v5, wajib SSD (halaman mmap
+dibaca saat disentuh).
 Startup 10 ms.
 
 Untuk mesin kecil: `-conc 1` (memori ~4x lebih hemat, query diserialkan) dan
