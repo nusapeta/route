@@ -123,6 +123,13 @@ pasangan E1, tidak ada 500/OOM; rute <=50 km tetap 332/332 cocok.
   wall-clock identik dengan build lama (172,2 vs 174,3 s, §17b).
 - W1.4 konkurensi total: `-conc` sekarang berarti total lintas region, sesuai
   teks rencana; help text-nya diperbarui.
+- W1.5 pelepasan saat idle (2026-11-12): histeresis W1.3 hanya menyusut bila
+  query berikutnya memakai jauh lebih sedikit entri, jadi satu rute kelas
+  100 km memaku tabel puncak sampai proses mati. Reaper tiap 15 s mengembalikan
+  workspace yang menganggur >30 s ke 65.536 slot, lalu satu
+  `debug.FreeOSMemory()` supaya halaman bekas tabel kembali ke kernel. Homelab:
+  `RssAnon` 143,5 -> 4,5 MB per layanan, `VmRSS` 815,6 -> 75,9 MB; 43 km tetap
+  151-153 ms (sebelum idle 155-173 ms).
 - A/B di mesin uji (graf yang sama dimuat 3x, 600 pasangan identik):
   anon 322 -> **213 MB** (`-conc 2`) dan 555 -> **425 MB** (`-conc 4`);
   RSS ikut turun 2004 -> 1895 MB dan 2236 -> 2107 MB (sisa RSS adalah halaman
