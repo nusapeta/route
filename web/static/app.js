@@ -17,6 +17,10 @@
     region: document.getElementById("result-region"),
     distance: document.getElementById("result-distance"),
     duration: document.getElementById("result-duration"),
+    speed: document.getElementById("result-speed"),
+    serverMs: document.getElementById("result-server-ms"),
+    latencyMs: document.getElementById("result-latency-ms"),
+    expansions: document.getElementById("result-expansions"),
     snapFrom: document.getElementById("result-snap-from"),
     snapTo: document.getElementById("result-snap-to"),
     badges: document.getElementById("result-badges"),
@@ -245,6 +249,7 @@
       format: "geojson",
       profile: state.profile
     });
+    var startedAt = performance.now();
 
     fetch("/route?" + query.toString(), {
       signal: controller.signal,
@@ -277,7 +282,13 @@
       state.request = null;
       state.result = body;
       drawRoute(body);
-      showResult(body);
+      var requestURL = "/route?" + query.toString();
+      showResult(body, {
+        latencyMs: performance.now() - startedAt,
+        serverMs: headerNumber(response, "X-Route-Ms"),
+        expansions: headerNumber(response, "X-Route-Expansions"),
+        cached: isCachedResponse(requestURL)
+      });
       refresh();
       setStatus("Rute ditemukan.", "success");
       revealInPanel(els.result);
@@ -441,7 +452,7 @@
     }
   }
 
-  function showResult(body) {
+  function showResult(body, timing) {
     els.result.hidden = false;
 
     var region = typeof body.region === "string" ? body.region : "";
@@ -450,6 +461,10 @@
 
     setText(els.distance, formatDistance(body.distance_m));
     setText(els.duration, formatDuration(body.duration_s));
+    setText(els.speed, formatSpeed(body.distance_m, body.duration_s));
+    setText(els.serverMs, markCached(formatMilliseconds(timing.serverMs), timing.cached));
+    setText(els.latencyMs, markCached(formatMilliseconds(timing.latencyMs), timing.cached));
+    setText(els.expansions, formatCount(timing.expansions));
     setText(els.snapFrom, formatMeters(body.snap_from_m));
     setText(els.snapTo, formatMeters(body.snap_to_m));
 
@@ -675,6 +690,61 @@
     var hours = Math.floor(total / 60);
     var minutes = total % 60;
     return minutes === 0 ? hours + " j" : hours + " j " + minutes + " mnt";
+  }
+
+  function markCached(value, cached) {
+    return value === null || !cached ? value : value + " (cache)";
+  }
+
+  function isCachedResponse(url) {
+    var entries = performance.getEntriesByName(new URL(url, window.location.href).href);
+    var entry = entries[entries.length - 1];
+    if (!entry) {
+      return false;
+    }
+    return entry.deliveryType === "cache" || (entry.transferSize === 0 && entry.decodedBodySize > 0);
+  }
+
+  function formatSpeed(meters, seconds) {
+    var distance = Number(meters);
+    var duration = Number(seconds);
+    if (!Number.isFinite(distance) || distance < 0 || !Number.isFinite(duration) || duration <= 0) {
+      return null;
+    }
+    var kmh = (distance / 1000) / (duration / 3600);
+    return kmh.toLocaleString("id-ID", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 1
+    }) + " km/j";
+  }
+
+  function formatMilliseconds(value) {
+    if (!Number.isFinite(value) || value < 0) {
+      return null;
+    }
+    if (value < 10) {
+      return value.toLocaleString("id-ID", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1
+      }) + " ms";
+    }
+    return Math.round(value).toLocaleString("id-ID") + " ms";
+  }
+
+  function formatCount(value) {
+    if (!Number.isFinite(value) || value < 0) {
+      return null;
+    }
+    return Math.round(value).toLocaleString("id-ID");
+  }
+
+  function headerNumber(response, name) {
+    var raw = response.headers.get(name);
+    if (raw === null || raw.trim() === "") {
+      return null;
+    }
+    var value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : null;
   }
 
   function formatNumber(value) {
