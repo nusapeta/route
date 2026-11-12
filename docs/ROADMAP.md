@@ -158,7 +158,7 @@ untuk koridor >150 km.
       dicek tiap 256 ekspansi, workspace langsung dilepas. Default 10 s, flag
       `-timeout`. Batas lunak `-budget` (60% dari `-timeout`) membuat rute yang
       tidak selesai dijawab `422 search budget ... exceeded`
-      (`route_errors_total{reason="budget"}`); `504 {"error":"deadline exceeded"}`
+      (`route_errors_total{reason="budget"}`); `504 {"error":"deadline exceeded","reason":"deadline"}`
       tinggal untuk batas keras dan klien yang memutus koneksi.
 - [x] Rate limit per IP (default 15/menit, burst 5) -> `429` + `Retry-After`.
       `-trust-proxy` supaya IP diambil dari `X-Forwarded-For`; tanpa flag itu

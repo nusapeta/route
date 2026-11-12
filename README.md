@@ -269,17 +269,20 @@ pertama gagal, jadi jalur normal tidak berubah. Keberhasilannya dihitung di
   jadi `304` tidak memakai kuota; sebaliknya `ETag`/`Cache-Control` hanya
   dipasang pada `200` dan `304`. Respons error (`400`, `422`, `429`, `500`,
   `504`) tidak pernah membawa `ETag` dan memakai `Cache-Control: no-store`.
+  Khusus `422`/`504`, badan JSON menambahkan `reason` mesin (`snap`, `too_far`,
+  `budget`, `no_route`, `cross_region`, `deadline`) agar klien bisa memilih
+  kalimat sendiri; `error` tetap tidak berubah untuk Bruno/Postman/Flutter.
   Semua respons memasang `Vary: Accept-Encoding`; `Content-Encoding: gzip`
   hanya pada respons yang punya body (tidak pada `304`/`204`).
 - **Batas waktu `-timeout` (default 10 s) dan batas lunak `-budget` (default
   60% `-timeout` = 6 s).** `context` diteruskan ke dalam A* dan dicek tiap 256
   ekspansi. Batas lunak lebih dulu: pencarian yang melewatinya menjawab
-  `422 {"error":"search budget 6s exceeded (route too long)"}`
+  `422 {"error":"search budget 6s exceeded (route too long)","reason":"budget"}`
   (`route_errors_total{reason="budget"}`), supaya rute yang tidak bisa
   diselesaikan tidak muncul sebagai `504` yang kemunculannya bergantung pada
-  beban mesin. `504 {"error":"deadline exceeded"}` tinggal untuk batas keras dan
-  klien yang memutus koneksi. Plafon ekspansi `-max-expansions` (default 4 juta)
-  tetap deterministik di semua mesin.
+  beban mesin. `504 {"error":"deadline exceeded","reason":"deadline"}` tinggal
+  untuk batas keras dan klien yang memutus koneksi. Plafon ekspansi
+  `-max-expansions` (default 4 juta) tetap deterministik di semua mesin.
 - **Rate limit `-rate`/`-burst` (default 15/menit per IP, burst 5)** → `429` +
   `Retry-After`. Di belakang reverse proxy pakai `-trust-proxy` supaya IP diambil
   dari `X-Forwarded-For`; tanpa flag itu header diabaikan (tidak bisa dipalsukan).
@@ -374,9 +377,11 @@ Catatan lapangan:
   `127.0.0.1`) dan firewall lokal mengizinkan.
 - **flutter web** sudah aman: CORS `*` + preflight `OPTIONS` ditangani server.
 - `simplify=<meter>` kalau payload terlalu besar (mis. `simplify=8`).
-- Respons 422 dengan `{"error":...}` untuk kasus normal (di luar Indonesia,
-  tidak ada jalan dalam radius snap, dua titik beda region). Tampilkan apa
-  adanya saat development.
+- Respons 422/504 membawa `{"error":...,"reason":...}` untuk kasus normal (di
+  luar Indonesia, tidak ada jalan dalam radius snap, terlalu jauh, budget,
+  tidak ada rute, beda region, deadline). `error` tetap teks mesin; panel demo
+  memetakan `reason` ke kalimat Indonesia. Klien lain boleh tetap memakai
+  `error`.
 - Field `fallback: true` berarti larangan belok dilepas agar rute ketemu;
   berguna untuk telemetri, bukan untuk user.
 

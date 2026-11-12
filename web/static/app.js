@@ -269,7 +269,8 @@
 
       if (!response.ok) {
         var serverMessage = body && typeof body.error === "string" ? body.error : "";
-        throw new Error(routeErrorMessage(response.status, serverMessage));
+        var reason = body && typeof body.reason === "string" ? body.reason : "";
+        throw new Error(routeErrorMessage(response.status, reason, serverMessage));
       }
       if (!body || typeof body !== "object") {
         throw new Error("Respons rute tidak valid.");
@@ -753,7 +754,19 @@
     });
   }
 
-  function routeErrorMessage(status, serverMessage) {
+  var ROUTE_REASON_MESSAGES = {
+    snap: "Titik terlalu jauh dari jalan. Geser pin ke jalan terdekat.",
+    too_far: "Rute terlalu panjang. Pilih titik yang lebih dekat.",
+    budget: "Rute terlalu panjang untuk dihitung. Pilih titik yang lebih dekat.",
+    no_route: "Tidak ada rute jalan antara kedua titik. Geser pin ke jalan terdekat.",
+    cross_region: "Kedua titik berada di wilayah yang belum terhubung. Pilih titik di pulau yang sama.",
+    deadline: "Perhitungan rute melewati batas waktu. Coba titik yang lebih dekat."
+  };
+
+  function routeErrorMessage(status, reason, serverMessage) {
+    if (reason && typeof ROUTE_REASON_MESSAGES[reason] === "string") {
+      return ROUTE_REASON_MESSAGES[reason];
+    }
     var message;
     switch (status) {
       case 400:

@@ -361,6 +361,17 @@ const (
 	snapRetryPocket = 512
 )
 
+// Error reasons are shared by the HTTP body and route_errors_total, so the
+// metric labels and the client-facing vocabulary cannot drift apart.
+const (
+	reasonSnap        = "snap"
+	reasonTooFar      = "too_far"
+	reasonBudget      = "budget"
+	reasonNoRoute     = "no_route"
+	reasonCrossRegion = "cross_region"
+	reasonDeadline    = "deadline"
+)
+
 // failRoute maps a routing error to the documented HTTP contract. Cross-region
 // legs use the same mapping as a single-region search. searchCtx is the soft
 // budget context: when it expired but the request deadline did not, the engine
@@ -370,17 +381,17 @@ func (s *server) failRoute(w http.ResponseWriter, err error, budget time.Duratio
 	case errors.Is(err, graph.ErrCanceled):
 		if budget > 0 {
 			s.m.budget.Add(1)
-			httpErr(w, 422, "search budget "+budget.String()+" exceeded (route too long)")
+			httpErrReason(w, 422, reasonBudget, "search budget "+budget.String()+" exceeded (route too long)")
 			return
 		}
 		s.m.canceled.Add(1)
-		httpErr(w, 504, "deadline exceeded ("+s.timeout.String()+")")
+		httpErrReason(w, 504, reasonDeadline, "deadline exceeded ("+s.timeout.String()+")")
 	case errors.Is(err, graph.ErrTooFar):
 		s.m.tooFar.Add(1)
-		httpErr(w, 422, err.Error())
+		httpErrReason(w, 422, reasonTooFar, err.Error())
 	case errors.Is(err, graph.ErrNoRoute):
 		s.m.errNoRoute.Add(1)
-		httpErr(w, 422, err.Error())
+		httpErrReason(w, 422, reasonNoRoute, err.Error())
 	default:
 		// Anything else is a server-side failure; the text stays in the log
 		// surface, not the response.
@@ -464,7 +475,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	if s.maxRouteM > 0 {
 		if d := graph.Haversine(fLat, fLon, tLat, tLon); d > s.maxRouteM {
 			s.m.tooFar.Add(1)
-			httpErr(w, 422, fmt.Sprintf("route too long: straight-line %.1f km exceeds %.0f km limit", d/1000, s.maxRouteM/1000))
+			httpErrReason(w, 422, reasonTooFar, fmt.Sprintf("route too long: straight-line %.1f km exceeds %.0f km limit", d/1000, s.maxRouteM/1000))
 			return
 		}
 	}
@@ -494,7 +505,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	rgT, snapT, ok2 := s.pickSnap(tLat, tLon)
 	if !ok1 || !ok2 {
 		s.m.errSnap.Add(1)
-		httpErr(w, 422, "no road within snap distance (region not loaded?)")
+		httpErrReason(w, 422, reasonSnap, "no road within snap distance (region not loaded?)")
 		return
 	}
 	// The deadline follows the client: if it disconnects, req.Context() ends and
@@ -541,7 +552,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 			s.m.crossRegionStitched.Add(1)
 		} else {
 			s.m.errCrossRegion.Add(1)
-			httpErr(w, 422, "no ferry connector between "+rgF.name+" and "+rgT.name)
+			httpErrReason(w, 422, reasonCrossRegion, "no ferry connector between "+rgF.name+" and "+rgT.name)
 			return
 		}
 		if cross == nil {
@@ -569,7 +580,7 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	}
 	if s.maxRouteM > 0 && float64(res.DistanceM) > s.maxRouteM {
 		s.m.tooFar.Add(1)
-		httpErr(w, 422, fmt.Sprintf("route distance %.1f km exceeds %.0f km limit", float64(res.DistanceM)/1000, s.maxRouteM/1000))
+		httpErrReason(w, 422, reasonTooFar, fmt.Sprintf("route distance %.1f km exceeds %.0f km limit", float64(res.DistanceM)/1000, s.maxRouteM/1000))
 		return
 	}
 	s.m.expansions.Add(int64(res.Expansions))
@@ -835,13 +846,23 @@ func inIndonesia(lat, lon float64) bool {
 }
 
 func httpErr(w http.ResponseWriter, code int, msg string) {
+	httpErrReason(w, code, "", msg)
+}
+
+// httpErrReason adds the machine-readable reason used by clients to choose a
+// human-readable message. The error text stays as-is for existing consumers.
+func httpErrReason(w http.ResponseWriter, code int, reason, msg string) {
 	// An error body is not a cacheable representation of the route: drop any
 	// validator a previous branch may have set and forbid storing the answer.
 	w.Header().Del("ETag")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	type errorBody struct {
+		Error  string `json:"error"`
+		Reason string `json:"reason,omitempty"`
+	}
+	json.NewEncoder(w).Encode(errorBody{Error: msg, Reason: reason})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

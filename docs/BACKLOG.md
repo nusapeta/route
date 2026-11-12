@@ -284,7 +284,7 @@ cukup: pencarian yang menghabiskan anggaran ekspansi (6 juta) butuh 12,8 s di
 i3-6100T, jadi rute 80-100 km berakhir `504` alih-alih `422` dan statusnya
 berubah mengikuti beban. Sekarang `-budget` (default 60% `-timeout` = 6 s)
 menghentikan pencarian lebih dulu dan menjawab
-`422 search budget 6s exceeded (route too long)`
+`422 {"error":"search budget 6s exceeded (route too long)","reason":"budget"}`
 (`route_errors_total{reason="budget"}`); `504` hanya untuk batas keras dan klien
 yang memutus koneksi. `-max-expansions` (default 4 juta) tetap sebagai plafon
 deterministik. Rincian angka dan alasan pemilihan ada di item 13c.
@@ -685,7 +685,7 @@ tetap lulus dan binary tetap satu file. Tidak ada API key di client.
 **Risiko.** Kebijakan tile OSM dan kuota publik; mitigasi: atribusi, tanpa
 prefetch, batas zoom, dan siap pindah tile source.
 
-### 18b. Pesan 422 yang bisa dibaca pengguna (S)
+### 18b. Pesan 422 yang bisa dibaca pengguna (S), selesai
 
 **Masalah.** Pin di luar jaringan jalan (laut, hutan, pulau kecil tanpa jalan di
 graf) menjawab `422` dengan teks internal `no road within snap distance (region
@@ -717,6 +717,17 @@ boleh tetap memakai `error`.
 **Lulus bila.** Panel demo menampilkan kalimat Indonesia tanpa istilah internal
 untuk keenam `reason`, `error` lama tidak berubah, dan Bruno/Postman tetap
 lulus tanpa penyesuaian assertion.
+
+**Hasil (18b).** `httpErrReason` menambahkan field `reason` pada `422`/`504`;
+konstanta reason dipakai bersama label `/metrics` supaya kosakatanya tidak
+bercabang. Panel memetakan keenam reason ke kalimat Indonesia dan tidak lagi
+menempelkan teks internal. Diverifikasi lewat HTTP lokal: Teluk Jakarta
+(`snap`), Jakarta-Bandung 116 km (`too_far`), budget 1 ns (`budget`), timeout
+1 ns (`deadline`), Sumatra-Nusa tanpa feri (`cross_region`), dan pasangan
+`pairs-java.csv` yang memang `no route` (`no_route`). Teks `error` tetap:
+`no road within snap distance (region not loaded?)`, `route too long: ...`,
+`search budget ...`, `deadline exceeded ...`, `no ferry connector ...`, dan
+`no route`.
 
 **Biaya.** S.
 

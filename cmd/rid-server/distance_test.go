@@ -26,6 +26,9 @@ func TestMaxRouteFastReject(t *testing.T) {
 	if body := rec.Body.String(); !strings.Contains(body, "route too long: straight-line") {
 		t.Fatalf("body %q, want straight-line rejection", body)
 	}
+	if body := rec.Body.String(); !strings.Contains(body, `"reason":"too_far"`) {
+		t.Fatalf("body %q, want too_far reason", body)
+	}
 	if got := m.tooFar.Load(); got != 1 {
 		t.Fatalf("tooFar = %d, want 1", got)
 	}
@@ -51,6 +54,9 @@ func TestMaxRouteDisabled(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "no road within snap distance") {
 		t.Fatalf("body %q, want snap failure", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"reason":"snap"`) {
+		t.Fatalf("body %q, want snap reason", rec.Body.String())
 	}
 	if got := m.tooFar.Load(); got != 0 {
 		t.Fatalf("tooFar = %d, want 0", got)

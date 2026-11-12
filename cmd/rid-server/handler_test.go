@@ -17,9 +17,16 @@ import (
 // tests exercise real snapping and routing instead of a stub.
 func testRegion(t *testing.T) *region {
 	t.Helper()
+	return testRegionLine(t, "line", -62000000, 1068000000)
+}
+
+// testRegionLine builds the same three-node line around an arbitrary coordinate
+// pair, so cross-region tests can place two disjoint graphs.
+func testRegionLine(t *testing.T, name string, lat, lon int32) *region {
+	t.Helper()
 	b := &graph.Builder{
-		Lat: []int32{-62000000, -62050000, -62100000},
-		Lon: []int32{1068000000, 1068050000, 1068100000},
+		Lat: []int32{lat, lat - 50000, lat - 100000},
+		Lon: []int32{lon, lon + 50000, lon + 100000},
 		Off: []uint32{0, 1, 2, 3},
 		To:  []uint32{1, 2, 1},
 		Len: []uint16{1000, 1000, 1000},
@@ -37,7 +44,7 @@ func testRegion(t *testing.T) *region {
 		"profile":        "car",
 		"profile_sha256": strings.Repeat("a", 64),
 	}
-	path := filepath.Join(t.TempDir(), "line.graph")
+	path := filepath.Join(t.TempDir(), name+".graph")
 	if err := b.Write(path); err != nil {
 		t.Fatalf("write graph: %v", err)
 	}
@@ -49,7 +56,7 @@ func testRegion(t *testing.T) *region {
 	mnLat, mnLon, mxLat, mxLon := g.Bounds()
 	const pad = 0.05
 	return &region{
-		name: "line", g: g, r: graph.NewRouter(g, 1),
+		name: name, g: g, r: graph.NewRouter(g, 1),
 		minLat: mnLat - pad, maxLat: mxLat + pad,
 		minLon: mnLon - pad, maxLon: mxLon + pad,
 	}
@@ -182,6 +189,9 @@ func TestRouteCanceled(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "deadline exceeded") {
 		t.Fatalf("body %q, want deadline message", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"reason":"deadline"`) {
+		t.Fatalf("body %q, want deadline reason", rec.Body.String())
+	}
 }
 
 // TestRouteBudgetExceeded checks the soft-budget contract: when the search
@@ -200,8 +210,67 @@ func TestRouteBudgetExceeded(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "search budget") {
 		t.Fatalf("body %q, want budget message", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"reason":"budget"`) {
+		t.Fatalf("body %q, want budget reason", rec.Body.String())
+	}
 	if got := res.Header.Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control %q, want no-store", got)
+	}
+}
+
+// TestRouteNoRouteReason checks that an unreachable destination keeps the
+// stable error text and adds no_route for the demo panel.
+func TestRouteNoRouteReason(t *testing.T) {
+	s := &server{timeout: 5 * time.Second, m: &metrics{}}
+	rec := httptest.NewRecorder()
+	s.failRoute(rec, graph.ErrNoRoute, 0)
+
+	if rec.Code != 422 {
+		t.Fatalf("code %d, want 422 (%s)", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"error":"no route"`) {
+		t.Fatalf("body %q, want stable error text", body)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"reason":"no_route"`) {
+		t.Fatalf("body %q, want no_route reason", body)
+	}
+	if got := s.m.errNoRoute.Load(); got != 1 {
+		t.Fatalf("errNoRoute = %d, want 1", got)
+	}
+}
+
+// TestRouteCrossRegionReason checks the 422 path for two regions without a
+// registered ferry connector. The reason lets the panel explain the problem
+// without showing region names from the server.
+func TestRouteCrossRegionReason(t *testing.T) {
+	java := testRegionLine(t, "java", -62000000, 1068000000)
+	sumatra := testRegionLine(t, "sumatra", -63000000, 1069000000)
+	s := &server{
+		regions:  []*region{java, sumatra},
+		maxSnapM: 3000,
+		timeout:  5 * time.Second,
+		budget:   3 * time.Second,
+		m:        &metrics{},
+	}
+	h := testHandler(s)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/route?from=-6.2,106.8&to=-6.3,106.9", nil))
+
+	if rec.Code != 422 {
+		t.Fatalf("code %d, want 422 (%s)", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["reason"] != "cross_region" {
+		t.Fatalf("reason %q, want cross_region", body["reason"])
+	}
+	if !strings.Contains(body["error"], "no ferry connector") {
+		t.Fatalf("error %q, want stable connector text", body["error"])
+	}
+	if got := s.m.errCrossRegion.Load(); got != 1 {
+		t.Fatalf("errCrossRegion = %d, want 1", got)
 	}
 }
 
@@ -235,6 +304,26 @@ func TestRouteRateLimited(t *testing.T) {
 	}
 	if got := s.m.rateLimited.Load(); got != 1 {
 		t.Fatalf("rateLimited = %d, want 1", got)
+	}
+}
+
+// TestErrorWithoutReason keeps the old 400/429/500 contract: those paths use
+// httpErr, so they must not grow a reason field.
+func TestErrorWithoutReason(t *testing.T) {
+	rec := httptest.NewRecorder()
+	httpErr(rec, http.StatusBadRequest, "bad point")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("code %d, want 400", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["error"] != "bad point" {
+		t.Fatalf("error %q, want bad point", body["error"])
+	}
+	if reason, ok := body["reason"]; ok {
+		t.Fatalf("400 unexpectedly carries reason %q", reason)
 	}
 }
 
