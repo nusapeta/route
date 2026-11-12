@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 )
@@ -142,18 +143,28 @@ func (wp *WorkspacePool) reapIdle(every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for now := range t.C {
+		released := false
 	reap:
 		for range wp.concurrency {
 			select {
 			case ws := <-wp.ch:
 				if ws.idle(now) && ws.shrinkIdle() {
 					wp.shrinksTotal.Add(1)
+					released = true
 				}
 				wp.ch <- ws
 			default:
 				// Everything left is checked out by a query.
 				break reap
 			}
+		}
+		if released {
+			// Dropping the table only makes it garbage: nothing allocates
+			// while the server is idle, so the collector never runs and the
+			// freed arenas keep the process RSS at the peak. One GC plus a
+			// scavenge hands those pages back to the kernel; it runs at most
+			// once per reap tick and only after a shrink.
+			debug.FreeOSMemory()
 		}
 	}
 }

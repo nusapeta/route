@@ -1165,6 +1165,27 @@ dibanding baris kontrak 40 km di §17e (`anon` 311 MB, tabel 201 MB).
 (i3-6100T, cap 100 km terpasang) kontainer `routeid` 25-64 MB RSS setelah
 12 rute 96 km, `routeid-motor` 180 MB.
 
+**Melepas tabel workspace saat idle (2026-11-12).** Satu rute kelas 100 km
+menumbuhkan tabel tiap workspace ke puncaknya, dan tabel itu tinggal sampai
+proses mati: `shrinkIfNeeded` hanya menyusut bila tabel > 8x entri terpakai,
+sedangkan grow berhenti di load factor 0,8, jadi syarat itu tidak pernah
+tercapai. Sekarang `put()` menstempel waktu idle, dan goroutine reaper tiap 15 s
+mengambil workspace yang menganggur > 30 s, mengembalikan tabel ke 65.536 slot,
+lalu memanggil satu `debug.FreeOSMemory()`: server yang idle tidak mengalokasi,
+jadi tanpa panggilan itu GC tidak pernah jalan dan halaman bekas tabel tetap
+tinggal di RSS. Shrink adalah realloc, bukan salinan — stempel generasi di
+`keys` membuat tabel lama tidak terpakai tanpa dibersihkan.
+
+Lokal (Java + Sumatra + Nusa, `-conc 4 -workspace-mb 256`): satu rute 100 km
+meninggalkan 8.519.680 slot (102 MB); setelah 50 s idle 262.144 slot (3 MB) dan
+rute yang sama tetap `200` dalam 2,41 s. Homelab (image `b63fd2f-dirty`):
+`routeid_workspace_slots` 10.485.760 -> 262.144, `RssAnon` `routeid`
+143.500 -> 4.532 kB, `routeid-motor` 142.548 -> 5.796 kB; `VmRSS` `routeid`
+815.600 -> 75.888 kB (RssFile tidak dibandingkan karena restart mengosongkan
+page cache). Latensi tidak regresi: Jakarta-Bogor 43 km setelah idle
+151/153/151 ms versus 155/173/170 ms sebelum idle (tabel tumbuh lagi dalam
+hitungan milidetik untuk rute sekelas itu).
+
 **Latensi kelas 50-80 km** (bucket `50-80km`, 120 pasangan, `-conc 4`):
 46x200 / 33 snap / 38 `too_far` / 3 anggaran. Yang 200: p50 430-542 ms,
 p95 1,40-1,74 s, maksimum 2,04 s (97,4 km). Uji 4 query paralel pada bucket

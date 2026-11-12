@@ -245,6 +245,19 @@ dan itu menunggu baseline latency dari graph yang sama. Untuk konteks, satu
 region (Java, `-conc 4`) setelah rute 42 km: `Rss` 141 MB, `Anonymous` 102 MB —
 masih di bawah anggaran 350 MB item 6/7.
 
+**Hasil ukur 2026-11-12 (pelepasan tabel saat idle).** Tabel hasil grow tidak
+pernah menyusut dengan `shrinkIfNeeded`: syaratnya `len(keys) > 8*used`, padahal
+grow berhenti di load factor 0,8. Jadi satu rute kelas 100 km memaku tabel
+puncak (2,6 jt slot per workspace) sampai proses mati. Sekarang `put()`
+menstempel waktu idle dan reaper 15 s mengambil workspace yang menganggur >30 s,
+mengembalikan tabel ke 65.536 slot, lalu satu `debug.FreeOSMemory()` supaya
+halaman bekas tabel kembali ke kernel. Lokal: 8.519.680 slot (102 MB) -> 262.144
+slot (3 MB) setelah 50 s idle, rute yang sama tetap `200` 2,41 s. Homelab:
+`RssAnon` 143.500 -> 4.532 kB (`routeid`) dan 142.548 -> 5.796 kB
+(`routeid-motor`), `VmRSS` 815.600 -> 75.888 kB. Latensi setelah idle tidak
+turun kelas: 43 km 151-153 ms vs 155-173 ms sebelumnya. Kriteria "tidak ada
+regresi latency > 5%" terpenuhi; puncak heap saat query tidak berubah.
+
 ---
 
 ## M4. Produksi
