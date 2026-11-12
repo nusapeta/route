@@ -662,7 +662,7 @@ exceeded` pada 6,01 s (dulu `504` pada 10,01 s), 96,4 km -> `200` 0,17 s,
 `route_errors_total{reason="budget"}` 1, `code="504"` 0, dan rute 96,4 km yang
 sama dari publik `200` 0,73 s. Rollback tetap `routeid:pre-cloudflare`.
 
-**Deploy graph nasional (2026-11-12, `7067710`).** `data/indonesia.graph`
+**Deploy graph nasional (2026-11-12, `85880e8`).** `data/indonesia.graph`
 (1.621 MB, SHA-256 `b0e0f237...`) dan compose baru disalin ke homelab; graph
 lama tetap ada untuk rollback. `/healthz` publik melaporkan mobil dan motor
 `region=indonesia` (54.891.393 node / 112.340.071 edge, format 5,
@@ -678,7 +678,7 @@ Setelah beban, `docker stats`: `routeid` 27,89 MiB / 1,5 GiB, `routeid-motor`
 15,14 MiB, `routeid-gateway` 3,25 MiB; ketiganya `healthy`, restart 0. Idle
 proses nasional terukur 11,1 MB RSS (`anon` 4,5 MB). Image gateway dibangun
 ulang dari commit yang sama agar panel memakai `app.js` tanpa penempelan teks
-internal; `/version` tetap `7067710`.
+internal; `/version` melaporkan `85880e8`.
 
 **Catatan insiden.** Route Cloudflare sempat `502` dengan log
 `lookup gateway ... no such host` karena cloudflared ada di `1panel-network`
