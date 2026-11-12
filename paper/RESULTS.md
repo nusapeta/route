@@ -1136,6 +1136,27 @@ budget 6s exceeded` pada 6,02 s; 96,4 km -> 200 pada 0,18 s, 227.614 ekspansi;
 70,7 km -> 200 pada 0,12 s, 311.992 ekspansi; `route_requests_total{code="504"}`
 tetap 0.
 
+**Bench 600 pasangan di i3 (2026-11-12).** Dua instance dari image yang sama,
+`-conc 4 -workspace-mb 256 -max-route-km 100 -rate 0`, `format=line`,
+`nocache`, satu `X-Forwarded-For` per request supaya limiter tidak ikut diukur:
+
+| setelan | 200 | `too_far` | `exhausted` | `budget` | wall |
+|---|---:|---:|---:|---:|---:|
+| `-budget 6s -timeout 10s` (deploy) | 472 | 40 | 0 | 16 | 97,5 s |
+| `-budget 0 -timeout 30s` (referensi) | 475 | 45 | 8 | 0 | 125,0 s |
+
+Tiga pasangan berpindah dari 200 ke `422 search budget`: 9,06 s / 2.993.126
+ekspansi, 8,69 s / 2.862.883, dan 7,75 s / 2.456.687 (waktu dari instance
+referensi). Tiga belas sisanya tetap `422` di referensi (8 `exhausted` + 5
+`too_far`) dan hanya berubah teks serta lebih cepat. `too_far` turun 45 -> 40
+karena lima rute yang akan ditolak cek jarak tempuh kini berhenti di anggaran.
+Jadi harga batas lunak 6 s di mesin 2 core adalah 3 dari 600 pasangan (0,5%),
+semuanya di pita 7,75-9,06 s, pita yang paling dekat dengan batas keras 10 s.
+`-budget 8s` hanya menyelamatkan satu dari tiga; untuk menyelamatkan ketiganya
+anggaran harus ~9,1 s, yang menghapus margin ke `-timeout` dan mengembalikan
+`504`. Latensi ekor ikut turun: p99 2,94 s (budget) vs 4,52 s (referensi),
+maksimum 4,74 s vs 9,06 s.
+
 **Memori cap 100 km** (`-conc 4 -workspace-mb 256`, sesudah dua run 600
 pasangan): `routeid_workspace_bytes` 201 MB / 16,8 M slot dari 256 MB
 anggaran (grows 562, shrinks 222), `Rss` 1,02 GB, `Anonymous` 343 MB —

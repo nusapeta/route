@@ -233,9 +233,11 @@ berhenti; yang lebih menentukan puncak adalah ukuran tabel, bukan penyalinan.
 latency > 5%. (Butuh pengukuran ulang puncak heap dengan graph 148 km; angka
 876 MB berasal dari graph sebelum v3.)
 
-**Hasil ukur 2026-11-12 (graph v4, `-conc 1 -workspace-mb 256`).** Jakarta-Bandung
-148 km: `200` dalam 2,04 s, `Anonymous` 164 MB, `Rss` 233 MB, tabel workspace
-100.663.296 B / 8,39 jt slot (dari 22,3 jt slot yang diizinkan). Diulang 20x
+**Hasil ukur 2026-11-12 (graph v4, `-conc 1 -workspace-mb 256`, dan batas jarak
+dimatikan karena 148 km garis lurus melewati cap 100 km sekarang).**
+Jakarta-Bandung 148 km: `200` dalam 2,04 s, `Anonymous`
+164 MB, `Rss` 233 MB, tabel workspace 100.663.296 B / 8,39 jt slot (dari 22,3 jt
+slot yang diizinkan). Diulang 20x
 berturut-turut: `Anonymous` stabil di 163,7 MB, `Rss` 238,9 MB, tabel tidak
 tumbuh lagi. Batas 60% dari puncak lama (876 MB) = 526 MB, jadi kriteria heap
 lulus dengan margin ~3x; yang tersisa hanya "tidak ada regresi latency > 5%",
@@ -260,8 +262,19 @@ kembalikan `504` berisi `{"error":"deadline exceeded"}`.
 tersedia untuk request berikutnya.
 
 **Hasil (M4).** Server memakai `context.WithTimeout` per request, cek
-`ctx.Err()` di loop A*, dan membalas `504 {"error":"deadline exceeded"}`.
-Default 10 s lewat `-timeout`; test handler menutup kontrak ini.
+`ctx.Err()` tiap 256 ekspansi (bukan 4096), dan membalas
+`504 {"error":"deadline exceeded"}`. Default 10 s lewat `-timeout`; test handler
+menutup kontrak ini.
+
+**Revisi 2026-11-12: batas lunak lebih dulu.** Batas keras 10 s ternyata tidak
+cukup: pencarian yang menghabiskan anggaran ekspansi (6 juta) butuh 12,8 s di
+i3-6100T, jadi rute 80-100 km berakhir `504` alih-alih `422` dan statusnya
+berubah mengikuti beban. Sekarang `-budget` (default 60% `-timeout` = 6 s)
+menghentikan pencarian lebih dulu dan menjawab
+`422 search budget 6s exceeded (route too long)`
+(`route_errors_total{reason="budget"}`); `504` hanya untuk batas keras dan klien
+yang memutus koneksi. `-max-expansions` (default 4 juta) tetap sebagai plafon
+deterministik. Rincian angka dan alasan pemilihan ada di item 13c.
 
 ### 10. Rate limit & bind (S), selesai (M4)
 
@@ -294,7 +307,8 @@ yang dilakukan manual.
 `route_requests_total{code}`, histogram `route_request_duration_seconds`,
 `route_inflight`, `route_expansions_total`, `route_fallback_total`,
 `route_relaxed_total`, `route_rate_limited_total`, `route_canceled_total`,
-`route_errors_total{reason}`, `route_cross_region_*`, `route_snap_retry_total`,
+`route_errors_total{reason}` (label terpasang: `snap`, `no_route`, `too_far`,
+`budget`, `cross_region`), `route_cross_region_*`, `route_snap_retry_total`,
 dan `routeid_build_info`.
 
 **Publik (2026-11-11).** Gateway compose memakai `-block-metrics`, jadi
@@ -338,55 +352,6 @@ edge (jalan/gang yang boleh motor) sehingga `data/java-motor.graph` = 714 MB vs
 - Motor belum punya perilaku "menerobos kemacetan" (traffic tidak dimodelkan),
   jadi rute motor = rute mobil yang lebih lambat di jalan kecil.
 
-### 14. Konektor ferry (M), selesai (M5)
-
-**Hasil.** Tidak perlu sub-graph: `route=ferry` sudah jadi edge biasa (sejak
-awal), yang kurang hanya (a) waktu dari tag `duration`, sekarang dipakai
-(`Merak-Bakauheni` 2 jam, bukan 30 km / 20 km/jam) dan (b) penanda. Penanda
-disimpan sebagai **daftar edge sparse** (`uint32[ferryCount]`, ~10 rb entri
-se-Indonesia), bukan array penuh: percobaan pertama (bit di `GL` uint16/edge)
-menambah 93 MB di Java tanpa manfaat. Respons memuat `ferry_m`, `has_ferry`,
-`ferry_spans` (rentang indeks ke `points`/polyline).
-
-Sisa: ferry yang way-nya terpotong batas extract Geofabrik (node ujung tidak
-tersambung ke jalan) ditangani tabel connector statis di item 17b; tidak ada
-deteksi ferry otomatis.
-
-### 15. Kecilkan artefak (M), selesai (M5)
-
-**Hasil.** Format v4: `Off` uint32 (-4 B/node), `Len` uint16 satuan 4 m
-(-2 B/edge), section `Time` dihapus -> `Cls` uint8 (-3 B/edge). Java 1.019 ->
-**693 MB** (-32%), Sumatra 533 -> 364 MB, tujuh region 1.657 MB. `GO`/`GL`
-varint tidak perlu: keduanya kosong (geometri interior belum ditulis).
-
-Sisa (ide v5, kalau 800 MB per region mau ditekan lagi): koordinat 24-bit
-offset per region (-2 B/node), `GNodes` grid 3 B/node (-1 B/node), atau
-delta+varint per blok 64k dengan indeks blok (butuh desain akses acak).
-
-### 17b. Stitching antar-file (M), selesai dengan catatan
-
-**Masalah.** `-graph data/java.graph,data/sumatra.graph` memilih region dari snap
-dan membalas `422` kalau kedua ujung beda region, padahal ferry Merak-Bakauheni
-ada di salah satu file.
-
-**Hasil.** Tabel connector statis berisi Merak-Bakauheni dan Ketapang-Gilimanuk.
-Handler mencoba satu graph lebih dulu (extract yang tumpang tindih), lalu
-merutekan start -> pelabuhan A dan pelabuhan B -> tujuan, menyambung ferry, dan
-menggabung satu polyline dengan `legs[]` serta `ferry_spans`. Pasangan lain tetap
-`422 no ferry connector`. Metric baru: `route_cross_region_stitched_total`.
-
-Smoke `java.graph,sumatra.graph` dengan `-max-route-km 0`: Jakarta -> Palembang
-200, 533,5 km, 3 leg, 0,35 s, tanpa `relaxed`; Jakarta -> Medan 200, 1.941,9 km,
-3 leg, 3,2 s, `relaxed=true`. Leg Sumatra 1.797 km masih menabrak batas
-ekspansi, jadi kriteria "tanpa relaxed kalau bisa dihindari" belum lulus tanpa
-pekerjaan W6. Default `-max-route-km` 40 pada saat itu (kini 100, lihat
-`paper/RESULTS.md` §19); rute antarpulau harus
-menaikkan flag.
-
-**Sisa.** Konektor baru butuh entri tabel dan verifikasi koordinat pelabuhan;
-tidak ada pencarian ferry otomatis. Graph nasional tetap alternatif deployment
-besar (1,65 GB, 8 menit).
-
 ### 13c. Budget ekspansi & hierarki (M)
 
 **Temuan M5.** Koridor panjang butuh ε 3,0 dan 4,8 jt ekspansi (Jakarta-Medan
@@ -395,8 +360,8 @@ ini tanda batas: rute >800 km sebaiknya lewat hierarki (highway graph dulu,
 lalu detail di sekitar ujung), bukan menaikkan `maxExpansions`.
 
 **Kontrak 100 km (2026-11-12).** Setelah `-max-route-km` dinaikkan 40 -> 100,
-7-8 dari 600 pasangan `pairs-java.csv` gagal `422 search space exhausted`
-setelah 5-9 s. Diulang dengan `-workspace-mb` 256/512/2048 hasilnya identik,
+8 dari 600 pasangan `pairs-java.csv` gagal `422 search space exhausted`
+setelah 5-9 s (`paper/RESULTS.md` §19). Diulang dengan `-workspace-mb` 256/512/2048 hasilnya identik,
 jadi yang habis `maxExpansions`, bukan tabel; menaikkan anggaran tabel tidak
 menolong.
 Sampai hierarki ada, biaya ini diterima dan didokumentasikan di
@@ -415,11 +380,47 @@ maksimum 3.186.176 ekspansi (p99 2,73 jt, median 141 rb), jadi 4 juta tidak
 memotong satu pun rute yang berhasil. Verifikasi homelab: 98,4 dan 91,8 km ->
 422 pada 6,02 s, 96,4 km -> 200 0,18 s, `code="504"` tetap 0.
 
+**Harga batas 6 s di i3 (600 pasangan, 2026-11-12).** Instance deploy vs
+instance referensi (`-budget 0 -timeout 30s`), keduanya `-conc 4`: 472 vs 475
+rute 200. Tiga pasangan yang di referensi 200 (7,75-9,06 s, 2,46-2,99 jt
+ekspansi) menjadi `422 search budget`; 13 lainnya memang `422` di referensi
+(8 `exhausted` + 5 `too_far`). p99 turun 4,52 -> 2,94 s, maksimum 9,06 -> 4,74
+s (`paper/RESULTS.md` §19). Keputusan: pertahankan 6 s — menyelamatkan ketiga
+pasangan itu butuh anggaran ~9,1 s, yaitu menghapus margin ke `-timeout 10s`
+dan mengembalikan `504` yang bergantung beban. Angka ini juga menjadi batas
+bawah untuk hardware lebih lambat: kalau mesin 4x lebih lambat, kerugian
+sebanding naik.
+
+### 14. Konektor ferry (M), selesai (M5)
+
+**Hasil.** Tidak perlu sub-graph: `route=ferry` sudah jadi edge biasa (sejak
+awal), yang kurang hanya (a) waktu dari tag `duration`, sekarang dipakai
+(`Merak-Bakauheni` 2 jam, bukan 30 km / 20 km/jam) dan (b) penanda. Penanda
+disimpan sebagai **daftar edge sparse** (`uint32[ferryCount]`, ~10 rb entri
+se-Indonesia), bukan array penuh: percobaan pertama (bit di `GL` uint16/edge)
+menambah 93 MB di Java tanpa manfaat. Respons memuat `ferry_m`, `has_ferry`,
+`ferry_spans` (rentang indeks ke `points`/polyline).
+
+Sisa: ferry yang way-nya terpotong batas extract Geofabrik (node ujung tidak
+tersambung ke jalan) ditangani tabel connector statis di item 17b; tidak ada
+deteksi ferry otomatis.
+
 ### 14b. Jadwal ferry (S)
 
 `duration` OSM sering kosong atau kasar; untuk Merak-Bakauheni hasilnya 1,45 jam
 (OK), tapi banyak lintasan kecil tanpa tag sama sekali (jatuh ke 20 km/jam).
 Kalau akurasi ferry penting, tabel statis per lintasan lebih jujur daripada OSM.
+
+### 15. Kecilkan artefak (M), selesai (M5)
+
+**Hasil.** Format v4: `Off` uint32 (-4 B/node), `Len` uint16 satuan 4 m
+(-2 B/edge), section `Time` dihapus -> `Cls` uint8 (-3 B/edge). Java 1.019 ->
+**693 MB** (-32%), Sumatra 533 -> 364 MB, tujuh region 1.657 MB. `GO`/`GL`
+varint tidak perlu: keduanya kosong (geometri interior belum ditulis).
+
+Sisa (ide v5, kalau 800 MB per region mau ditekan lagi): koordinat 24-bit
+offset per region (-2 B/node), `GNodes` grid 3 B/node (-1 B/node), atau
+delta+varint per blok 64k dengan indeks blok (butuh desain akses acak).
 
 ### 15b. Profil motor untuk 7 region, selesai (M5)
 
@@ -527,6 +528,30 @@ yang tersimpan; 116 aturan yang dilonggarkan tidak masuk sampel.
 
 ---
 
+### 17b. Stitching antar-file (M), selesai dengan catatan
+
+**Masalah.** `-graph data/java.graph,data/sumatra.graph` memilih region dari snap
+dan membalas `422` kalau kedua ujung beda region, padahal ferry Merak-Bakauheni
+ada di salah satu file.
+
+**Hasil.** Tabel connector statis berisi Merak-Bakauheni dan Ketapang-Gilimanuk.
+Handler mencoba satu graph lebih dulu (extract yang tumpang tindih), lalu
+merutekan start -> pelabuhan A dan pelabuhan B -> tujuan, menyambung ferry, dan
+menggabung satu polyline dengan `legs[]` serta `ferry_spans`. Pasangan lain tetap
+`422 no ferry connector`. Metric baru: `route_cross_region_stitched_total`.
+
+Smoke `java.graph,sumatra.graph` dengan `-max-route-km 0`: Jakarta -> Palembang
+200, 533,5 km, 3 leg, 0,35 s, tanpa `relaxed`; Jakarta -> Medan 200, 1.941,9 km,
+3 leg, 3,2 s, `relaxed=true`. Leg Sumatra 1.797 km masih menabrak batas
+ekspansi, jadi kriteria "tanpa relaxed kalau bisa dihindari" belum lulus tanpa
+pekerjaan W6. Default `-max-route-km` 40 pada saat itu (kini 100, lihat
+`paper/RESULTS.md` §19); rute antarpulau harus
+menaikkan flag.
+
+**Sisa.** Konektor baru butuh entri tabel dan verifikasi koordinat pelabuhan;
+tidak ada pencarian ferry otomatis. Graph nasional tetap alternatif deployment
+besar (1,65 GB, 8 menit).
+
 ## Demo publik
 
 ### 18. Peta coba publik (M), selesai sebagian (kode + HTTPS publik)
@@ -583,6 +608,13 @@ masing-masing `200` lima kali lalu `429`; dari publik, request berurutan
 menghabiskan bucket yang sama. Scrape upstream `127.0.0.1:18080/metrics` tetap
 `200`.
 
+**Deploy 2026-11-12 (`b2f64cd`).** Image `routeid:local` dibangun dari commit
+`b2f64cd` (label `b2f64cd-dirty` karena satu file Bruno milik pengguna masih
+termodifikasi di mesin build). Verifikasi: 98,4 km -> `422 search budget 6s
+exceeded` pada 6,01 s (dulu `504` pada 10,01 s), 96,4 km -> `200` 0,17 s,
+`route_errors_total{reason="budget"}` 1, `code="504"` 0, dan rute 96,4 km yang
+sama dari publik `200` 0,73 s. Rollback tetap `routeid:pre-cloudflare`.
+
 **Catatan insiden.** Route Cloudflare sempat `502` dengan log
 `lookup gateway ... no such host` karena cloudflared ada di `1panel-network`
 sedangkan gateway hanya di `deploy_default`. Perbaikan: gateway ikut
@@ -627,20 +659,21 @@ bukan regresi batas jarak (`paper/RESULTS.md` §19).
 
 Sejak batas lunak `-budget` (2026-11-12) ada dua teks internal lagi yang
 tampil di panel: `search budget 6s exceeded (route too long)` dan
-`search space exhausted (route too long)`. Pecahan `reason` yang direncanakan:
-`no_road_near_point`, `too_far`, `search_budget`, `exhausted`,
-`deadline_exceeded`; teks Indonesia dipetakan di `web/static/app.js`, `error`
-tetap stabil supaya Bruno/Postman tidak perlu berubah.
+`search space exhausted (route too long)`.
 
 **Rencana.** Pertahankan `error` mesin yang stabil (dipakai
-`cmd/rid-server/distance_test.go`), tambah field `reason` bertipe
-(`no_road_near_point`, `too_far`, `search_space_exhausted`,
-`deadline_exceeded`) dan peta teks Indonesia di klien (`web/app.js`). Server
-tidak perlu tahu bahasa. Kalau `reason` diterima klien lain (Flutter), versi
-berikutnya bisa memakai teks server.
+`cmd/rid-server/distance_test.go`), tambah field `reason` bertipe di badan JSON
+422 dan 504, lalu petakan ke kalimat Indonesia di
+`web/static/app.js` (`routeErrorMessage`). Kosakata `reason` sama dengan label
+`route_errors_total{reason}` supaya metrik dan klien tidak punya dua enum:
+`snap` ("Titik terlalu jauh dari jalan. Geser pin ke jalan terdekat."),
+`too_far` ("Rute lebih dari 100 km..."), `budget` ("Rute terlalu panjang untuk
+dihitung..."), `no_route` (termasuk `search space exhausted`), `cross_region`,
+dan `deadline` untuk 504. Server tidak perlu tahu bahasa; klien lain (Flutter)
+boleh tetap memakai `error`.
 
 **Lulus bila.** Panel demo menampilkan kalimat Indonesia tanpa istilah internal
-untuk keempat `reason`, `error` lama tidak berubah, dan Bruno/Postman tetap
+untuk keenam `reason`, `error` lama tidak berubah, dan Bruno/Postman tetap
 lulus tanpa penyesuaian assertion.
 
 **Biaya.** S.
