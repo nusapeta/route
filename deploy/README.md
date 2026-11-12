@@ -1,32 +1,27 @@
-# Deploy di homelab (Jawa + Sumatra)
+# Deploy di homelab (Indonesia)
 
 Tiga cara: Docker Compose (paling cepat), systemd (tanpa Docker), atau
 Compose + Cloudflare Tunnel untuk akses domain saja. Semua memakai graph yang
-sudah dibangun di host; image tidak pernah memuat data 1,5 GB.
+sudah dibangun di host; image tidak pernah memuat data 1,6 GB.
 
 ## 0. Bangun dan refresh graph (di host)
 
-Build jauh lebih berat dari run: puncak ~2,5 GB (Java) dan ~1,4 GB (Sumatra).
-Kalau RAM pas-pasan, batasi Go: `GOMEMLIMIT=1800MiB make java`.
+Deployment saat ini memakai **satu graph nasional** `data/indonesia.graph`
+(format v5, mobil + motor, 1.621 MB). Build lebih berat dari run: unduh PBF
+Geofabrik Indonesia ±1,7 GB, lalu ekstrak dengan `GOMEMLIMIT=5GiB`:
 
 ```bash
-make refresh REGION=java
-make refresh REGION=sumatra
-ls -lh data/*.graph          # java ~693 MB, sumatra ~347 MB (v4, mobil)
+GOMEMLIMIT=5GiB scripts/build-national.sh
+ls -lh data/indonesia.graph     # 1,6 GB, v5 car+motor
 ```
 
-`make refresh` mengunduh PBF terbaru, membangun profil mobil dan motor,
-menjalankan `rid-tagstats`, golden suite, dan A/B singkat. Jadwalnya Minggu
-pertama setiap bulan pukul 03.00 WIB oleh operator homelab (Fauzan Arif Sani);
-laporan ada di `data/<region>-graphinfo.txt` dan `data/<region>-ab.txt`.
-Ganti graph yang dipakai container hanya setelah `/healthz` graph baru
-menampilkan `profile`, `pbf_sha256`, dan `built_at` yang diharapkan.
+Di Ryzen 5 5600G: unduh + ekstrak 11m40s, ekstraksi saja 1m12s. Puncak build
+memakai ~5 GB; jangan jalankan bersamaan dengan build region lain.
 
 Build manual masih bisa dipakai:
 ```bash
 make build
-./bin/rid-extract -pbf data/java-latest.osm.pbf    -out data/java.graph
-./bin/rid-extract -pbf data/sumatra-latest.osm.pbf -out data/sumatra.graph
+./bin/rid-extract -pbf data/indonesia-latest.osm.pbf -out data/indonesia.graph
 ```
 
 ## 1a. Docker Compose
@@ -89,7 +84,7 @@ stop 25 s, log diputar 3x10 MB.
 ```bash
 sudo useradd --system --home /srv/routeid --shell /usr/sbin/nologin routeid
 sudo mkdir -p /srv/routeid/bin && sudo cp bin/rid-server /srv/routeid/bin/
-sudo cp -r data /srv/routeid/            # java.graph + sumatra.graph
+sudo cp -r data /srv/routeid/            # indonesia.graph (1,6 GB)
 sudo chown -R routeid:routeid /srv/routeid
 sudo install -m 0644 deploy/routeid.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -102,15 +97,15 @@ Unit sudah membatasi `MemoryMax=1200M` dan mengeraskan filesystem
 
 ## 1c. Dua profil, satu base URL
 
-Mobil dan motor memakai satu artefak graf v5 per region, tetapi satu proses
+Mobil dan motor memakai satu artefak graph v5 nasional, tetapi satu proses
 hanya melayani satu profil (`-profile car|motor`). Karena itu compose
 menjalankan tiga container inti dari image yang sama:
 
 | container | port | isi |
 |---|---|---|
 | `routeid-gateway` | `127.0.0.1:8080` (loopback) | proxy pemilih profil |
-| `routeid` | `127.0.0.1:18080` (loopback) | `java`, `sumatra`, `nusa-tenggara` (mobil) |
-| `routeid-motor` | `127.0.0.1:18081` (loopback) | `java`, `sumatra`, `nusa-tenggara` dengan `-profile motor` |
+| `routeid` | `127.0.0.1:18080` (loopback) | `indonesia` (mobil) |
+| `routeid-motor` | `127.0.0.1:18081` (loopback) | `indonesia` dengan `-profile motor` |
 | `routeid-cloudflared` | tanpa port | opsional, profil compose `cloudflare` |
 
 Tidak ada port yang mendengarkan di `0.0.0.0`; akses dari luar host hanya lewat
@@ -137,24 +132,21 @@ Tanpa parameter, profil mobil yang dipakai (perilaku lama port 8080).
 
 ```bash
 make static                                   # bin/static/rid-extract + rid-gateway
-for r in java sumatra nusa-tenggara; do
-  make graph REGION=$r                        # satu artefak: mobil + motor
-done
+GOMEMLIMIT=5GiB scripts/build-national.sh     # data/indonesia.graph: mobil + motor
 cd deploy && docker compose up -d             # gateway ikut dibuat
 curl -s 127.0.0.1:8080/healthz | head -c 300
 ```
 
-Sejak format v5 satu file per region memuat kedua profil; `routeid-motor`
-membuka file yang sama dengan `-profile motor`. Angka lama (dua artefak
-terpisah, 2026-11-10) tetap dicatat di `docs/PLAN-2026-11-10.md`; ukuran v5
-diukur ulang setelah rollout.
+Sejak format v5 satu file nasional memuat kedua profil; `routeid-motor`
+membuka file yang sama dengan `-profile motor`. Angka lama (tiga region
+terpisah, 2026-11-10/12) tetap dicatat di `docs/BACKLOG.md` dan
+`docs/PLAN-2026-11-10.md`; ukuran v5 nasional diukur ulang setelah rollout.
 
-Satu proses memuat ketiganya. Setelah rollout v5 (2026-11-12) dan enam rute
-campuran, container mobil memakai 76 MB (`docker stats`, `VmRSS` 135 MB,
-`RssAnon` 65 MB termasuk tabel A* 41 MB) dan container motor 26 MB
-(`VmRSS` 37 MB, `RssAnon` 17 MB, tabel 11 MB). Kalau hanya mobil yang dipakai,
-layanan `routeid-motor` boleh dihapus dari compose tanpa mengubah yang lain;
-gateway lalu melaporkan profil motor tidak sehat.
+Graph nasional lokal diukur: 4 rute 96 km paralel = 225 MiB RSS (`anon` 90 MiB),
+4 rute 80 km paralel = 190 MiB; satu rute Jakarta-Medan 1.882 km dengan
+`-max-route-km 0` = 701 MiB (`anon` 401 MiB) tetapi tidak dipakai deployment
+karena melewati kontrak 100 km. File 1,6 GB di-`mmap`; halaman bersih dapat
+direklaim cgroup, jadi `mem_limit: 1536m` cukup untuk beban kontrak.
 
 Kedua upstream memakai `-trust-proxy` karena rate limit harus memakai IP klien,
 bukan IP gateway. Gateway menimpa `X-Forwarded-For`/`X-Real-IP` (bukan
@@ -260,7 +252,7 @@ diubah.
 
 ```bash
 scripts/smoke.sh http://127.0.0.1:8080
-./bin/rid-graphinfo -graph data/sumatra.graph -at 3.5952,98.6722   # snap Medan
+./bin/rid-graphinfo -graph data/indonesia.graph -at=-2.5916,140.6690  # snap Jayapura
 ```
 
 Contoh cepat:
@@ -274,17 +266,20 @@ curl -s "127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.9175,107.6191&format=g
 
 | keadaan | RSS |
 |---|---|
-| idle | 15 MB |
+| idle graph nasional | 11 MB (`anon` 4,5 MB) |
 | 20x rute 15 km | 89 MB |
 | 1x rute 148 km | 401 MB |
 | 1x rute 578 km | 613 MB |
 | puncak, 600 pasang campuran (build `8e2dc11`) | ~1,1 GB (`anon` 415 MB) |
 | beban kontrak 40 km, `-conc 4`, `GOMEMLIMIT=1GiB` | 958 MB (`anon` 311 MB) |
 | beban kontrak 100 km, `-conc 4 -workspace-mb 256` (Ryzen 5 5600G) | 1,02-1,10 GB (`anon` 343-425 MB, tabel 126-201 MB) |
-| homelab i3-6100T, v5, 6 rute campuran (56 km, ferry, lintas region) | `routeid` 76 MB (`anon` 65 MB), `routeid-motor` 26 MB (`anon` 17 MB) |
+| homelab i3-6100T, v5, 6 rute campuran (3 region, sebelum nasional) | `routeid` 76 MB (`anon` 65 MB), `routeid-motor` 26 MB (`anon` 17 MB) |
+| graph nasional, 4x rute 96 km paralel (Ryzen, `-conc 4`) | 225 MiB (`anon` 90 MiB) |
+| graph nasional, 4x rute 80 km paralel (Ryzen, `-conc 4`) | 190 MiB (`anon` 90 MiB) |
+| graph nasional, 1x Jakarta-Medan 1.882 km (`-max-route-km 0`) | 701 MiB (`anon` 401 MiB) |
 
 CPU 1 core penuh selama satu query: 128 ms (15 km), 3,6 s (148 km),
-1,7 s (578 km). Disk 1,2 GB untuk tiga region v5, wajib SSD (halaman mmap
+1,7 s (578 km). Disk 1,6 GB untuk graph nasional v5, wajib SSD (halaman mmap
 dibaca saat disentuh).
 Startup 10 ms.
 
@@ -373,12 +368,11 @@ Untuk homelab:
 ## 5. Update data OSM
 
 ```bash
-curl -O https://download.geofabrik.de/asia/indonesia/java-latest.osm.pbf
-make build && ./bin/rid-extract -pbf java-latest.osm.pbf -out data/java.graph
+GOMEMLIMIT=5GiB scripts/build-national.sh
 docker compose restart      # atau: sudo systemctl restart routeid
 ```
 
-Untuk update tanpa downtime: bangun ke nama lain (`java-new.graph`), lalu
+Untuk update tanpa downtime: bangun ke nama lain (`indonesia-new.graph`), lalu
 jalankan dua server di port berbeda dan alihkan proxy.
 
 ## M4: cache, batas waktu, batas laju, metrics

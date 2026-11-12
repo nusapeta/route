@@ -2,7 +2,7 @@
 #   sudo install -m 0644 deploy/routeid.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now routeid
 [Unit]
-Description=routeid router (OSM Indonesia: java + sumatra)
+Description=routeid router (OSM Indonesia: graph nasional)
 Documentation=https://github.com/opensec-git/routeid
 After=network-online.target
 Wants=network-online.target
@@ -12,14 +12,15 @@ Type=simple
 User=routeid
 Group=routeid
 WorkingDirectory=/srv/routeid
-ExecStart=/srv/routeid/bin/rid-server -graph /srv/routeid/data/java.graph -graph /srv/routeid/data/sumatra.graph -addr :8080 -conc 2 -workspace-mb 256 -max-route-km 40
+ExecStart=/srv/routeid/bin/rid-server -graph /srv/routeid/data/indonesia.graph -addr :8080 -conc 2 -workspace-mb 256 -max-route-km 100
 Environment=GOMEMLIMIT=768MiB
 Restart=always
 RestartSec=2s
 TimeoutStopSec=25s
-# anggaran memori: puncak terukur ~600 MB untuk rute lintas provinsi
-MemoryMax=1200M
-MemoryHigh=900M
+# anggaran memori: graph 1,6 GB di-mmap; beban kontrak terukur 225 MiB
+# (4x96 km paralel). Halaman bersih bisa direklaim cgroup.
+MemoryMax=1536M
+MemoryHigh=1200M
 # hardening
 NoNewPrivileges=yes
 PrivateTmp=yes

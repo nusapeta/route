@@ -31,7 +31,7 @@ butuh argumen eksplisit dan milestone sendiri.
 
 | metrik | sekarang (terukur) | target M3 | batas keras |
 |---|---|---|---|
-| RSS idle (3 region termuat, v4) | **14,9 MB** | <= 20 MB | 32 MB |
+| RSS idle (graph nasional 1,6 GB termuat) | **11,1 MB** (`RssAnon` 4,5 MB) | <= 20 MB | 32 MB |
 | Binary statis | 6,6 MB | <= 8 MB | 12 MB |
 | Image container | 24 MB (prebuilt alpine) | <= 25 MB | 40 MB |
 | Start sampai `/healthz` 200 | 10 ms | <= 25 ms | 100 ms |
@@ -40,6 +40,8 @@ butuh argumen eksplisit dan milestone sendiri.
 | Throughput 42 km (i3-6100T) | 10,9 (v3) -> **13,8-16,0 RPS** (v4) | >= 20 RPS | - |
 | Densitas | 19,5 RPS/GB (v3) -> **~240 RPS/GB** (v4: 15 RPS / 64 MB) | >= 45 RPS/GB | - |
 | Artefak graph per pulau | **693 MB** (Java, v4; -32 %) | <= 800 MB | 1 GB |
+| Artefak graph nasional (satu file, v5) | **1.621 MB** | dikecualikan untuk cakupan Indonesia | 2 GB |
+| RSS graph nasional, 4x rute 96 km `-conc 4` | 225 MiB (`anon` 90 MiB) | <= 1.536 MB cgroup | 1,5 GB |
 | p95 klien 42 km, `-conc 4` | 330 ms (v4, homelab berbeban) | <= 400 ms ✅ | 800 ms |
 | Galat ujung rute (snap) | **p50 16 m, p95 36 m** (offset uji <=40 m) | p50 <= 20 m, p95 <= 60 m | p95 150 m |
 | Pelanggaran turn restriction | 0 (0% fallback, 116 ban dilonggarkan saat build) | 0 (fallback <= 1%) | 0 |
@@ -55,7 +57,7 @@ sebanyak mungkin rute per detik.
 | M2 snap ke ruas | ✅ | galat ujung 67,3 -> 16,1 m p50 |
 | M3 biaya per ekspansi | ✅ | latensi ~2x, memori -25 % |
 | M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,2 ms Ryzen / 0,39 ms i3-6100T), `/metrics`; live di `https://route.arifsani.xyz` |
-| M5 cakupan | ✅ | v4 (Java 693 MB), ferry, motor, 7 pulau, tangga ε |
+| M5 cakupan | ✅ | v5 nasional live: 54,9 M node / 112,3 M edge, 1.621 MB, 7 pulau + ferry |
 | M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 dilewati (D1: limitation eksplisit) |
 
 Ground truth E2 tidak dikerjakan: D1 pada 2026-11-10 memilih opsi limitation.
@@ -230,6 +232,13 @@ Artinya deadline mengembalikan slot ke antrean, jadi satu klien yang meminta rut
       100, `paper/RESULTS.md` §19); rute antarpulau tetap memakai flag
       eksplisit `-max-route-km 0`. Jakarta -> Medan masih `relaxed=true` pada
       leg Sumatra, dicatat sebagai batas W6.
+- [x] **Deploy graph nasional (2026-11-12).** Satu
+      `data/indonesia.graph` (54.891.393 node / 112.340.071 edge, v5
+      `car+motor`, 1.621 MB) menggantikan tiga file region di homelab. Semua
+      pulau dan ferry ada di satu graph; `region=indonesia`. Batas 800 MB per
+      artefak dilewati secara eksplisit karena tujuannya cakupan Indonesia.
+      `-max-route-km 100` tetap; rute lebih jauh ditolak `too_far`, bukan
+      dilayani dengan latensi 8-20 s.
 
 **Hasil terukur:**
 
@@ -267,8 +276,8 @@ menjadi satu polyline dengan `legs[]`.
 | query | hasil | ferry |
 |---|---|---|
 | Ketapang -> Gilimanuk (`java.graph`) | 15,1 km / 1436 s | `ferry_m=4180`, `ferry_spans=[[321,329]]` |
-| Merak -> Bakauheni (graph nasional) | 29,2 km / 5226 s | `ferry_m=28535`, `ferry_spans=[[1,25]]` |
-| Jakarta -> Medan (graph nasional) | **2004,5 km / 92.963 s** | `ferry_m=29072`, `relaxed=true` |
+| Merak -> Bakauheni (graph nasional) | 28,1 km / 5057 s | `ferry_m=28079` |
+| Jakarta -> Medan (graph nasional, `-max-route-km 0`) | **1.882,1 km / 83.419 s** | `ferry_m=29312`, `relaxed=true`, 8,5 s |
 
 **Temuan yang mengubah implementasi: tangga ε saat budget habis.** Koridor
 >800 km dulu berhenti di `ErrTooFar` (Palembang -> Medan sudah gagal di v2/v3,
@@ -280,9 +289,12 @@ ekspansi); ε 2,5 = 155,3 km (+4,4%). Jadi 2,0 murah, 3,0 hanya untuk lintas
 pulau. Jakarta -> Medan butuh ε 3,0: 4,8 jt ekspansi, 19-22 s di box uji (default
 `-timeout 10s` akan memotongnya, jadi `-timeout 60s` untuk kelas ini).
 
-Graph nasional: `data/indonesia.graph`, 53,9 M node / 110,2 M edge, **1.650 MB**,
-8m08s dengan `GOMEMLIMIT=4GiB` di box 7 GB (workers 3). Artefak ini tidak untuk
-dideploy per-default (budget 800 MB), tapi membuktikan konektivitas 7 region.
+Graph nasional: `data/indonesia.graph`, 54,9 M node / 112,3 M edge, **1.621 MB**,
+11m40s termasuk unduh (ekstraksi 1m12s) dengan `GOMEMLIMIT=5GiB` di Ryzen
+5 5600G. Artefak ini sekarang di-deploy sebagai default; batas 800 MB per
+artefak dilewati secara eksplisit, bukan diabaikan tanpa catatan. Homelab
+(2026-11-12): health mobil/motor `region=indonesia`, tujuh pulau + Merak
+Bakauheni `200`, `docker stats` 27,89 / 15,14 / 3,25 MiB, restart 0.
 
 **Catatan pengukuran:** box uji M5 ini dipakai bersama (4 core, load 3-5), jadi
 angka absolutnya lebih lambat dari §2/RESULTS. Yang diukur adalah rasio A/B

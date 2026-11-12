@@ -41,30 +41,32 @@ p50; keunggulan routeid ada di memori, artefak, dan preprocess.
 
 ### Keunggulan yang bisa dipertahankan
 
-1. **Footprint kecil & deterministik.** Idle **12,8 MB** dengan Java + Sumatra
-   termuat (v4; **17 MB** untuk Java saja di E1), image 24 MB, start sampai
-   `/healthz` 200 dalam 10 ms; OSRM idle 2,36 GiB. Cocok untuk homelab atau
-   sidecar; setelah 600 query campuran di E1 RSS naik ke 815 MB, jadi box
-   1 GB terlalu mepet untuk beban itu. Kenaikan itu bukan halaman graf:
-   tabel workspace 12 B/slot tumbuh mengikuti edge unik yang dikunjungi rute
-   terpanjang dan tidak mengecil sampai proses restart (lihat butir 4).
+1. **Footprint kecil & deterministik.** Idle **11,1 MB** dengan graph nasional
+   1,6 GB termuat (halaman graph belum disentuh; `RssAnon` 4,5 MB), image
+   24 MB, start sampai `/healthz` 200 dalam 10 ms; OSRM idle 2,36 GiB. Cocok
+   untuk homelab atau sidecar. Setelah 600 query campuran di E1 (Java + Sumatra,
+   v4) RSS naik ke 815 MB; kenaikan itu bukan halaman graf, melainkan tabel
+   workspace 12 B/slot yang tumbuh mengikuti edge unik dan tidak mengecil sampai
+   proses restart (lihat butir 4).
 2. **Pipeline sesederhana tuntutan:** satu binary statis (6,6 MB), tanpa
    dependency runtime, tanpa profile Lua. `osm.pbf -> map.graph` 28 s untuk
    Jawa (E1) vs 250 s pipeline OSRM, jadi rebuild bulanan itu sepele.
-3. **Multi-region satu proses.** Java + Sumatra + Bali/Nusra termuat bersama,
-   region dipilih dari snap terdekat (bukan dari bbox request), dan dua file yang
-   tumpang tindih diresnap ke satu file yang memuat kedua ujungnya.
+3. **Cakupan Indonesia dari satu graph.** Deployment homelab memakai satu
+   `data/indonesia.graph` (54,9 M node / 112,3 M edge, 1,6 GB) untuk mobil dan
+   motor. Region tidak lagi dipilih per pulau; semua pulau dan ferry ada dalam
+   satu graph. Multi-file per pulau tetap didukung untuk deployment kecil
+   (`-graph data/java.graph,data/sumatra.graph`), tetapi bukan default.
 4. **Idle kecil karena graf `mmap` belum tersentuh; biaya sebenarnya tabel
-   pencarian.** Graph 1,06 GB (Java 693 MB + Sumatra 364 MB) di-`mmap`, jadi
-   idle 12,8 MB dan puncak 399 MB pada 4 rute 148 km paralel (`-conc 4`),
-   815 MB setelah 600 pasangan campuran di E1, sementara OSRM 2,45 GiB
-   untuk beban yang sama. Pengukuran ulang (3 region, `-conc 4`): halaman
-   file/mmap yang resident hanya ~45 MB; sisa RSS adalah tabel workspace
-   `keys`/`gs`/`came` 12 B/slot. Sejak pool bersama + shrink, tabel = `-conc`
-   (bukan region × `-conc`) dan mengecil sendiri: A/B 600 pasangan yang sama,
-   graf Java dimuat 3x, `-conc 2` (`paper/RESULTS.md` §17) turun dari 322 MB menjadi
-   213 MB anon (−34%) dengan 519 rute identik. Frontier heap A* cuma ~25
-   ribu item.
+   pencarian.** Graph 1,6 GB di-`mmap`; halaman bersih dapat direklaim cgroup.
+   Pengukuran graph nasional di Ryzen: 4 rute 96 km paralel = 225 MiB RSS
+   (`anon` 90 MiB); satu rute 1.882 km dengan `-max-route-km 0` = 701 MiB
+   (`anon` 401 MiB), tetapi rute sepanjang itu tidak dilayani deployment.
+   Halaman file/mmap yang resident hanya sebagian kecil; sisa RSS adalah tabel
+   workspace `keys`/`gs`/`came` 12 B/slot. Sejak pool bersama + shrink, tabel =
+   `-conc` (bukan region × `-conc`) dan mengecil sendiri: A/B 600 pasangan yang
+   sama, graf Java dimuat 3x, `-conc 2` (`paper/RESULTS.md` §17) turun dari
+   322 MB menjadi 213 MB anon (−34%) dengan 519 rute identik. Frontier heap A*
+   cuma ~25 ribu item.
 5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
    dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
    0% pada data uji, setelah 116 aturan tanpa jalur alternatif dilonggarkan
@@ -90,12 +92,15 @@ p50; keunggulan routeid ada di memori, artefak, dan preprocess.
   (`Cls`) dan motor (`MCls`, 0 = terlarang) plus dua set turn restriction.
   Proses server memilih profil lewat `-profile car|motor`; tidak ada file
   `-motor.graph` terpisah lagi.
-- Satu proses boleh memuat beberapa file region, tetapi rute lintas file hanya
-  dilayani untuk pasangan ferry yang terdaftar: Merak-Bakauheni
-  (`java` + `sumatra`) dan Ketapang-Gilimanuk (`java` + `nusa-tenggara`). Rute
-  dijalankan per leg lalu digabung dengan `legs[]`; pasangan lain tetap `422`.
-  Batas `-max-route-km` default 100 km tetap berlaku, jadi rute antarpulau perlu
-  `-max-route-km 0` secara eksplisit. Lihat "Rute lintas selat".
+- **Cakupan geografis bukan jaminan rute panjang.** Satu proses kini memuat
+  `data/indonesia.graph`, jadi semua pulau dan ferry ada dalam satu graph;
+  pasangan seperti Merak-Bakauheni (28,1 km) dilayani tanpa `legs[]`/connector.
+  Tetapi `-max-route-km 100` tetap berlaku: Jakarta-Medan 1.882 km dijawab
+  `422 too_far` sebelum pencarian. Menaikkan cap tanpa hierarki akan
+  mengembalikan latensi 8-20 s dan `budget`/`504` (lihat 13c di BACKLOG).
+- Multi-file per pulau tetap didukung (`-graph data/java.graph,data/sumatra.graph`)
+  untuk deployment kecil; rute lintas file hanya untuk pasangan ferry yang
+  terdaftar di tabel connector statis, lalu digabung dengan `legs[]`.
 - Restriction per kelas kendaraan diterapkan (`restriction:motorcar`/`motor_vehicle` untuk car, `motorcycle`/`motor_vehicle` untuk motor); 167 `restriction:conditional` (jam sekolah/pasar) tetap di-skip karena graf statis.
 - **E1 sudah dijalankan; E2 tidak dikerjakan.** Per 2026-11-10, setelah tabel kecepatan
   mobil disamakan dengan `car.lua` OSRM dan graph Java dibangun ulang,
@@ -420,7 +425,7 @@ jadi tidak muncul `Invalid URL`.
 
 Request di folder "Region lain" butuh graf region tsb: server lokal yang hanya
 memuat `data/java.graph` menjawab 422 dan test menerima itu; homelab memuat
-`java`, `sumatra`, `nusa-tenggara`. Homelab memakai `-rate 15` per menit
+satu graph `indonesia` (mobil + motor). Homelab memakai `-rate 15` per menit
 (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang-ulang:
 request identik dengan `If-None-Match` dibalas 304 dan tidak memakan kuota.
 Di homelab kedua profil ada di satu base URL `https://route.arifsani.xyz`:
@@ -600,9 +605,19 @@ cd deploy && docker compose up -d --build     # atau deploy/routeid.service
 scripts/smoke.sh http://127.0.0.1:8080
 ```
 
-## Multi-region (per pulau)
+## Cakupan Indonesia (graph nasional)
 
-Graph bisa dipecah per pulau lalu disajikan satu server; region dipilih dari
+Deployment homelab memakai **satu** `data/indonesia.graph` untuk kedua profil:
+54.891.393 node, 112.340.071 edge, format v5 `car+motor`, 1.621 MB. Semua pulau
+dan edge ferry ada di file yang sama; tidak ada pemilihan region per pulau dan
+tidak ada tabel connector.
+
+```bash
+bin/rid-server -graph data/indonesia.graph -addr :8080
+bin/rid-server -graph data/indonesia.graph -profile motor -addr :8081
+```
+
+Multi-file per pulau tetap didukung untuk deployment kecil; region dipilih dari
 snap terdekat (bbox antar-extract saling tumpang tindih):
 
 ```bash
@@ -621,29 +636,22 @@ Ketujuh region Geofabrik terbangun (format v4, profil mobil; disk = artefak):
 | nusa-tenggara (Bali-Nusra) | 5,2 M | 10,3 M | 153 MB | 51s |
 | maluku | 0,8 M | 1,6 M | 25 MB | 8s |
 | papua | 1,1 M | 2,2 M | 34 MB | 8s |
-| nasional (7 region, satu file) | 53,9 M | 110,2 M | 1.650 MB | 8m08s |
+| nasional (7 region, satu file, v5) | 54,9 M | 112,3 M | 1.621 MB | 11m40s (termasuk unduh; ekstraksi 1m12s) |
 
-Diukur di box 4 core yang dipakai bersama (4 worker, `GOMEMLIMIT=4GiB`), jadi
-angka build ini lebih lambat daripada satu region sendirian di mesin sepi.
-Profil motor membesar sedikit karena gang/`path` yang boleh dilalui motor ikut
-masuk: `java-motor` 682 MB (23,4 M node / 48,2 M edge, 4m01s).
+Diukur di Ryzen 5 5600G dengan `GOMEMLIMIT=5GiB`. Angka region lain adalah
+build lama di box 4 core yang dipakai bersama (4 worker, `GOMEMLIMIT=4GiB`),
+jadi lebih lambat daripada satu region sendirian di mesin sepi. Profil motor
+membesar sedikit karena gang/`path` yang boleh dilalui motor ikut masuk:
+`java-motor` 682 MB (23,4 M node / 48,2 M edge, 4m01s).
 
-**Refresh bulanan.** Jadwal: Minggu pertama setiap bulan pukul 03.00 WIB,
-dijalankan oleh operator homelab (Fauzan Arif Sani). Satu perintah mengunduh PBF
-terbaru, membangun graph mobil dan motor, menjalankan `rid-tagstats`, golden
-suite, dan A/B singkat:
-
-```bash
-make refresh REGION=java
-```
-
-Laporan ditulis ke `data/java-tagstats.txt`, `data/java-graphinfo.txt` (dua
-profil), dan `data/java-ab.csv`/`data/java-ab.txt`. Region yang belum punya
-pasangan A/B tetap membangun graph dan melaporkan A/B dilewati; tambahkan
-pasangan ke `paper/results/pairs-motor-regions.csv` atau file
-`paper/results/pairs-<region>.csv` bila ingin A/B ikut. Setelah refresh,
-pastikan `/healthz` menampilkan `profile`, `pbf_sha256`, dan `built_at` baru
-sebelum mengganti graph yang sedang dipakai.
+**Refresh.** Deployment nasional dibangun ulang dengan
+`GOMEMLIMIT=5GiB scripts/build-national.sh`. `make refresh REGION=...` tetap
+tersedia untuk deployment per pulau (mengunduh PBF region, membangun profil
+mobil/motor, `rid-tagstats`, golden suite, A/B singkat). Jadwal operasional
+lama: Minggu pertama setiap bulan pukul 03.00 WIB oleh operator homelab
+(Fauzan Arif Sani); laporan regional ada di `data/<region>-graphinfo.txt` dan
+`data/<region>-ab.txt`. Ganti graph yang dipakai container hanya setelah
+`/healthz` menampilkan `profile`, `pbf_sha256`, dan `built_at` yang diharapkan.
 
 Cek sehat graph per region sebelum dipakai (snap per titik + peta lubang):
 
@@ -667,8 +675,13 @@ Lampung dan Bali) membuat titik terminal sering tetap satu region:
 | Ketapang -> Gilimanuk (`java.graph`) | 4,7 km, `region=java`, `ferry_m=4180` |
 | Merak -> Bakauheni (`java.graph,sumatra.graph`) | 28,1 km, `region=sumatra`, `ferry_m=28079`, tanpa `legs` |
 
-Bila ujungnya benar-benar berbeda, server memakai tabel connector statis,
-merutekan tiap leg di graph masing-masing, lalu menyambung ferry:
+Di deployment nasional kedua ujung selalu berada di file yang sama:
+Merak -> Bakauheni = 28,1 km, `region=indonesia`, `ferry_m=28079`, tanpa
+`legs[]`; Ketapang -> Gilimanuk memberi `ferry_m=4180`. Tidak ada pemilihan
+connector.
+
+Bila memakai multi-file, ujung yang benar-benar berbeda memakai tabel connector
+statis, merutekan tiap leg di graph masing-masing, lalu menyambung ferry:
 
 | query (`-max-route-km 0`) | hasil |
 |---|---|
@@ -682,12 +695,13 @@ heuristik atau batas itu. Tanpa `-max-route-km 0`, precheck Haversine menolak
 kedua query dengan `422` `too_far` sebelum snap. Default produk kini 100 km;
 533 km dan 1.942 km keduanya di atas itu.
 
-Hanya pasangan yang terdaftar yang dilayani. Pasangan lain, misalnya
-Jakarta -> Pontianak, tetap `422` dengan pesan
-`no ferry connector between java and kalimantan`; tidak ada pencarian ferry
-otomatis. Jalur graph nasional masih ada di `scripts/build-national.sh`
-(1.650 MB, 8 menit) untuk deployment yang memang menghendaki satu artefak,
-tetapi bukan default karena melewati batas 800 MB per file.
+Di deployment nasional tidak ada lagi batasan pasangan terdaftar: semua pulau
+berada di satu graph, dan rute lokal di tujuh pulau sudah diuji 200. Yang tetap
+membatasi adalah kontrak 100 km: tanpa `-max-route-km 0`, rute seperti
+Jakarta -> Pontianak atau Jakarta -> Medan ditolak `422 too_far` sebelum snap.
+Graph nasional **adalah default sekarang** (1.621 MB); batas 800 MB per artefak
+dilewati secara eksplisit karena tujuannya cakupan seluruh Indonesia. Multi-file
+per pulau tetap opsi deployment kecil, bukan jalur utama.
 
 **Koridor panjang = `relaxed`.** Sebelum menyerah dengan `ErrTooFar`, router
 mencoba ulang dengan heuristik lebih rakus (ε 2,0 lalu 3,0) dan menandai hasil

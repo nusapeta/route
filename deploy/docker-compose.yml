@@ -1,19 +1,23 @@
-# Homelab deploy: Jawa + Sumatra + Bali/Nusra, satu artefak per region untuk
-# profil mobil dan motor (format v5 menyimpan kedua kelas sekaligus).
+# Homelab deploy: satu graph nasional Indonesia untuk profil mobil dan motor
+# (format v5 menyimpan kedua kelas sekaligus).
 #   cd deploy && docker compose up -d --build
 # Graph dibangun sekali di host (butuh RAM lebih besar dari saat run):
-#   make java sumatra nusa-tenggara
-#     -> data/java.graph, data/sumatra.graph, data/nusa-tenggara.graph
+#   GOMEMLIMIT=5GiB scripts/build-national.sh
+#     -> data/indonesia.graph (1,6 GB; PBF 1,7 GB)
 # Format v3 (java-v3.graph.bak) hanya terbaca oleh image pre-m5; untuk rollback
 # simpan image lama: docker tag routeid:local routeid:pre-m5
 #
-# Tiga layanan inti, satu image: pemilihan region memakai snap terdekat, jadi
-# profil mobil dan motor tidak boleh berada di proses yang sama (dua proses
-# membuka file yang sama; profil dipilih per proses). Kedua proses itu hanya
-# mendengarkan di loopback (18080/18081, untuk debug langsung), dan `gateway`
-# memegang port loopback 8080: profil dipilih lewat ?profile=motor, tanpa
-# parameter dilayani profil mobil. Akses publik lewat Cloudflare Tunnel
-# (`cloudflared`, profil compose `cloudflare`), bukan IP/LAN.
+# Tiga layanan inti, satu image: profil mobil dan motor tidak boleh berada di
+# proses yang sama (dua proses membuka file yang sama; profil dipilih per
+# proses). Kedua proses itu hanya mendengarkan di loopback (18080/18081, untuk
+# debug langsung), dan `gateway` memegang port loopback 8080: profil dipilih
+# lewat ?profile=motor, tanpa parameter dilayani profil mobil. Akses publik
+# lewat Cloudflare Tunnel (`cloudflared`, profil compose `cloudflare`), bukan
+# IP/LAN.
+#
+# Graph nasional memberi cakupan lokal di seluruh Indonesia; kontrak
+# -max-route-km 100 tetap berlaku. Rute antarpulau panjang (mis. Jakarta-Medan
+# 1.882 km) belum dilayani tanpa hierarki dua tingkat.
 x-routeid: &routeid
   image: routeid:local
   restart: unless-stopped
@@ -21,7 +25,9 @@ x-routeid: &routeid
     - ../data:/data:ro
   environment:
     GOMEMLIMIT: 1GiB
-  # terukur: 4x rute 148 km paralel = 745 MiB; sisakan kepala (paper/RESULTS.md §5)
+  # Terukur graph nasional: 4x rute 96 km paralel = 225 MiB RSS (anon 90 MiB).
+  # File graph 1,6 GB dipetakan read-only; halaman bersih bisa direklaim cgroup,
+  # jadi 1536m cukup dan menyisakan kepala untuk page cache.
   mem_limit: 1536m
   memswap_limit: 1536m
   stop_grace_period: 25s
@@ -57,11 +63,7 @@ services:
       - "127.0.0.1:18080:8080"
     command:
       - -graph
-      - /data/java.graph
-      - -graph
-      - /data/sumatra.graph
-      - -graph
-      - /data/nusa-tenggara.graph
+      - /data/indonesia.graph
       - -addr
       - :8080
       # 2 core fisik: 4 workspace -> throughput ~2,4x dibanding conc 1
@@ -177,11 +179,7 @@ services:
       - -profile
       - motor
       - -graph
-      - /data/java.graph
-      - -graph
-      - /data/sumatra.graph
-      - -graph
-      - /data/nusa-tenggara.graph
+      - /data/indonesia.graph
       - -addr
       - :8080
       # Sisa flag sengaja ditulis ulang, bukan dibiarkan default: nilai default

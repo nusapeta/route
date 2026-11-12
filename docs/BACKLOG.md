@@ -591,8 +591,13 @@ pekerjaan W6. Default `-max-route-km` 40 pada saat itu (kini 100, lihat
 menaikkan flag.
 
 **Sisa.** Konektor baru butuh entri tabel dan verifikasi koordinat pelabuhan;
-tidak ada pencarian ferry otomatis. Graph nasional tetap alternatif deployment
-besar (1,65 GB, 8 menit).
+tidak ada pencarian ferry otomatis. Graph nasional sekarang **default deploy**
+(2026-11-12): `data/indonesia.graph` 54.891.393 node / 112.340.071 edge,
+v5 `car+motor`, 1.621 MB; lokal terukur 4x96 km paralel = 225 MiB RSS
+(`anon` 90 MiB), Merak-Bakauheni 28,1 km `ferry_m=28079`. Semua pulau dilayani
+dari satu file, tanpa connector. Batas 800 MB per artefak dikecualikan secara
+eksplisit; `-max-route-km 100` tetap, jadi ini cakupan lokal seluruh Indonesia,
+bukan rute Jakarta-Jayapura.
 
 ## Demo publik
 
@@ -656,6 +661,24 @@ termodifikasi di mesin build). Verifikasi: 98,4 km -> `422 search budget 6s
 exceeded` pada 6,01 s (dulu `504` pada 10,01 s), 96,4 km -> `200` 0,17 s,
 `route_errors_total{reason="budget"}` 1, `code="504"` 0, dan rute 96,4 km yang
 sama dari publik `200` 0,73 s. Rollback tetap `routeid:pre-cloudflare`.
+
+**Deploy graph nasional (2026-11-12, `7067710`).** `data/indonesia.graph`
+(1.621 MB, SHA-256 `b0e0f237...`) dan compose baru disalin ke homelab; graph
+lama tetap ada untuk rollback. `/healthz` publik melaporkan mobil dan motor
+`region=indonesia` (54.891.393 node / 112.340.071 edge, format 5,
+`pbf_sha256=752489d3...`). Tujuh pulau diuji dari publik dengan koordinat lokal:
+Jakarta 9,0 km, Medan-Binjai 22,6 km, Balikpapan 7,3 km, Makassar-Maros 26,0 km,
+Denpasar-Singaraja 82,5 km, Ambon 6,1 km, Jayapura 15,6 km; semua `200`.
+Merak-Bakauheni 28,1 km, `ferry_m=28079`, `has_ferry=true`. Profil motor
+Medan-Binjai 22,6 km / 1344,3 s, header `X-Route-Profile: motor`,
+`X-Route-Region: indonesia`. `/metrics` publik tetap `404`; Jakarta-Medan
+ditolak `422` dengan `reason=too_far`.
+
+Setelah beban, `docker stats`: `routeid` 27,89 MiB / 1,5 GiB, `routeid-motor`
+15,14 MiB, `routeid-gateway` 3,25 MiB; ketiganya `healthy`, restart 0. Idle
+proses nasional terukur 11,1 MB RSS (`anon` 4,5 MB). Image gateway dibangun
+ulang dari commit yang sama agar panel memakai `app.js` tanpa penempelan teks
+internal; `/version` tetap `7067710`.
 
 **Catatan insiden.** Route Cloudflare sempat `502` dengan log
 `lookup gateway ... no such host` karena cloudflared ada di `1panel-network`
