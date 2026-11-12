@@ -5,9 +5,16 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline
+  url: {{baseUrl}}/route?profile=motor&from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline
   body: none
   auth: none
+}
+
+params:query {
+  profile: motor
+  from: -7.8435723,110.392939
+  to: -7.7393368,110.3760593
+  format: polyline
 }
 
 tests {
