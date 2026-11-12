@@ -1,829 +1,283 @@
-# routeid
+# RouteID
 
-Router jalan raya Indonesia untuk app Flutter (polyline di Google Maps).
-Bukan OSRM: graph binary hasil ekstraksi OSM + weighted A*, di-`mmap`.
+**Router jalan Indonesia yang muat di sidecar.** Satu binary Go, graph OSM
+`mmap`, weighted A*, tanpa dependency runtime.
+
+[![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Data](https://img.shields.io/badge/data-ODbL-green)](https://www.openstreetmap.org/copyright)
+[![Status](https://img.shields.io/badge/status-research%20preview-orange)](#batasan)
+
+> **English:** RouteID is a memory-mapped OpenStreetMap router for Indonesia.
+> It compiles an `.osm.pbf` into one binary graph and serves short-to-medium
+> routes over HTTP. The design target is cost per route — RAM, artifact size,
+> and rebuild time — not raw query latency.
 
 ## Kenapa
 
-Kebutuhan: 2 titik lat/lng, rute <=50 km, mobil, Indonesia, akurat, resource
-ringan, jalan tanpa bayar per-request.
+Aplikasi ride-hailing, logistik, dan field service biasanya hanya butuh dua
+koordinat, satu polyline yang mengikuti jalan, jarak, dan ETA kasar untuk rute
+≤100 km. Hosted Directions API membebankan biaya per request. OSRM, GraphHopper,
+dan Valhalla gratis per request, tetapi dirancang untuk query panjang dan
+memakai RAM ratusan MB sampai beberapa GB.
 
-Angka routeid di bawah **semua terukur di repo ini** (perintahnya ada di
-`paper/RESULTS.md`). E1 sudah dijalankan: OSRM v5.26.0 MLD dan routeid di
-**mesin yang sama** (Ryzen 5 5600G), PBF Java yang sama, 600 pasangan identik;
-332 pasang masuk statistik jarak setelah filter snap (rincian `RESULTS.md` §13).
-Angka latency lama (i5-7360U) tetap ada di §1-§12 dan tidak dicampur ke tabel ini.
+RouteID mengambil trade-off sebaliknya:
 
-| | routeid (Java, E1) | OSRM MLD v5.26.0 (Java, E1) |
-|---|---|---|
-| Graph di disk | 693 MB (1 file) | 5,08 GB (4,73 GiB, banyak file) |
-| RSS sebelum query | 17 MB | 2,36 GiB |
-| RSS setelah 600 pasangan | 815 MB | 2,45 GiB |
-| Preprocess (22,7 jt node) | 28 s (`GOMEMLIMIT=2GiB`) | 250 s (151+83+16 s; peak 6,25 GB) |
-| p50 0-5 / 5-15 / 15-30 / 30-50 / 50-80 km | 3,6 / 19,7 / 54,7 / 139,0 / 397,3 ms | 0,7 / 1,1 / 1,7 / 2,2 / 3,2 ms |
-| p95 bucket yang sama | 14,0 / 68,7 / 226,7 / 478,4 / 1.060,9 ms | 1,1 / 1,7 / 2,3 / 3,0 / 4,5 ms |
-| Selisih jarak rute (332 pasang) | median 0,23%, p95 14,49%, max 70,44% | referensi; gerbang p95 <12% dan median <0,1% gagal, bukan gerbang akurasi |
-| Cakupan 600 pasangan | 332 cocok, 81 `422`, 187 keluar filter snap | 0 error; pada 81 itu snap tujuan p50 14,7 km |
-| Turn restriction | 3.790 ban / 593 di-skip saat build | `car.lua` |
-| Traffic / ETA real-time | tidak | tidak |
+- **Graph dipetakan, bukan disalin ke heap.** Halaman yang tidak disentuh tidak
+  masuk RSS; graph nasional 1,6 GB tetap bisa idle di 11 MB.
+- **Satu artefak untuk mobil dan motor.** Format v5 menyimpan dua tabel kelas
+  kecepatan dan dua set turn restriction dalam satu file.
+- **Rebuild murah.** Ekstraksi Java 28 detik di mesin uji; graph nasional 1
+  menit 12 detik setelah PBF tersedia.
+- **Hasil bisa diaudit.** `/healthz` membawa provenance PBF, versi format,
+  jumlah node/edge, dan statistik restriction.
 
-Kolom OSRM CH belum dijalankan. Binary/image routeid (6,6 MB statis, image
-23 MB) terukur di build lama, bukan bagian E1.
+Trade-off-nya nyata: tanpa hierarki CH/MLD, routeid **bukan** engine tercepat.
+Pada E1, OSRM MLD sekitar 26× lebih cepat di p50. Keunggulan routeid ada di
+memori, ukuran artefak, dan preprocessing.
 
-Kolom yang paling penting untuk app: **rute <=50 km selesai 0,004-0,14 s (p50)
-dan prosesnya memakai 17 MB saat idle, bukan 2,4 GiB**. Trade-off yang diterima:
-tanpa CH/MLD rute jauh melambat (148 km = 2,7-4,2 s di v3/v4; p95 bucket 50-80 km
-E1 = 1,06 s), jadi batas `-max-route-km` (kini 100 km) menjaga angka ini tetap
-bagus: segmen 50-80 km terukur p50 430-542 ms / p95 1,40-1,74 s, dan 1,3%
-pasangan terpanjang (8/600) berhenti di `422` setelah 5-9 s (batas ekspansi,
-bukan anggaran tabel; `paper/RESULTS.md` §19). OSRM tetap ~25x lebih cepat di
-p50; keunggulan routeid ada di memori, artefak, dan preprocess.
+## Snapshot terukur
 
-### Keunggulan yang bisa dipertahankan
+E1: Java, mesin yang sama (Ryzen 5 5600G), PBF yang sama, 600 pasangan identik.
+Angka lengkap dan perintah reproduksi ada di
+[`paper/RESULTS.md`](paper/RESULTS.md) §13 dan §18.
 
-1. **Footprint kecil & deterministik.** Idle **11,1 MB** dengan graph nasional
-   1,6 GB termuat (halaman graph belum disentuh; `RssAnon` 4,5 MB), image
-   24 MB, start sampai `/healthz` 200 dalam 10 ms; OSRM idle 2,36 GiB. Cocok
-   untuk homelab atau sidecar. Setelah 600 query campuran di E1 (Java + Sumatra,
-   v4) RSS naik ke 815 MB; kenaikan itu bukan halaman graf, melainkan tabel
-   workspace 12 B/slot yang tumbuh mengikuti edge unik dan tidak mengecil sampai
-   proses restart (lihat butir 4).
-2. **Pipeline sesederhana tuntutan:** satu binary statis (6,6 MB), tanpa
-   dependency runtime, tanpa profile Lua. `osm.pbf -> map.graph` 28 s untuk
-   Jawa (E1) vs 250 s pipeline OSRM, jadi rebuild bulanan itu sepele.
-3. **Cakupan Indonesia dari satu graph.** Deployment homelab memakai satu
-   `data/indonesia.graph` (54,9 M node / 112,3 M edge, 1,6 GB) untuk mobil dan
-   motor. Region tidak lagi dipilih per pulau; semua pulau dan ferry ada dalam
-   satu graph. Multi-file per pulau tetap didukung untuk deployment kecil
-   (`-graph data/java.graph,data/sumatra.graph`), tetapi bukan default.
-4. **Idle kecil karena graf `mmap` belum tersentuh; biaya sebenarnya tabel
-   pencarian.** Graph 1,6 GB di-`mmap`; halaman bersih dapat direklaim cgroup.
-   Pengukuran graph nasional di Ryzen: 4 rute 96 km paralel = 225 MiB RSS
-   (`anon` 90 MiB); satu rute 1.882 km dengan `-max-route-km 0` = 701 MiB
-   (`anon` 401 MiB), tetapi rute sepanjang itu tidak dilayani deployment.
-   Halaman file/mmap yang resident hanya sebagian kecil; sisa RSS adalah tabel
-   workspace `keys`/`gs`/`came` 12 B/slot. Sejak pool bersama + shrink, tabel =
-   `-conc` (bukan region × `-conc`) dan mengecil sendiri: A/B 600 pasangan yang
-   sama, graf Java dimuat 3x, `-conc 2` (`paper/RESULTS.md` §17) turun dari
-   322 MB menjadi 213 MB anon (−34%) dengan 519 rute identik. Frontier heap A*
-   cuma ~25 ribu item.
-5. **Turn restriction yang bisa diaudit.** Ban/only rule dihitung saat ekstraksi
-   dan dilaporkan di `/healthz`; fallback (larangan dilepas agar rute ketemu)
-   0% pada data uji, setelah 116 aturan tanpa jalur alternatif dilonggarkan
-   saat build.
-6. **Dua optimisasi yang terbukti:** Hilbert ordering memangkas RSS
-   metropolitan 1.225 -> 675 MB (1,8x) dan p50 7-20% lebih cepat; weighted A*
-   `eps=1.5` 28% lebih cepat dari `eps=1.0` dengan 526/526 panjang rute identik.
-7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 74,6 RPS @7 km,
-   17 RPS @15 km, dan 42 km 13,8-16,0 RPS pada pengukuran v4 terakhir
-   (sebelumnya 11 RPS), saturasi di 4 query paralel. Untuk campuran pasangan
-   himpunan uji §16 (jarak tempuh <= 40 km): p50 24,3 ms `-conc 1` dan plafon
-   23,5-24,9 RPS (`paper/RESULTS.md` §16). Batas `-max-route-km` produk kini
-   100 km, dan biayanya terukur di §19: bucket 50-80 km p50 430-542 ms,
-   p95 1,4-1,7 s.
-   Ini kapasitas routeid sendiri; E1 menunjukkan OSRM ~25x lebih cepat p50
-   untuk satu query.
+| | RouteID (Java, E1) | OSRM MLD v5.26.0 |
+|---|---:|---:|
+| Graph di disk | **693 MB** (1 file) | 5,08 GB (banyak file) |
+| RSS sebelum query | **17 MB** | 2,36 GiB |
+| Preprocess | **28 s** | 250 s (peak 6,25 GB) |
+| p50, 332 pasangan cocok | 38,7 ms | **1,5 ms** |
+| p95, 332 pasangan cocok | 674 ms | **3,7 ms** |
+| Selisih jarak, 332 pasang | median 0,23%, p95 14,49%, max 70,44% | referensi |
+| Gagal / dibuang | 79 gagal (72 `snap`, 7 `budget`); 189 dibuang filter snap | — |
 
-### Batasan (jangan diklaim lebih)
+E1 adalah perbandingan antar-engine, **bukan validasi akurasi**: keduanya
+memakai graph OSM. Ground truth independen (E2) tidak dijalankan. Karena itu
+README ini tidak mengklaim "paling akurat".
 
-- Tanpa hierarki (CH/MLD): >60 km melambat superlinear. 148 km = 2,7 s (v4;
-  4,2 s di v3), dan koridor >800 km masih menabrak batas ekspansi (`ErrTooFar`).
-- Satu artefak untuk dua profil: format v5 menyimpan kelas kecepatan mobil
-  (`Cls`) dan motor (`MCls`, 0 = terlarang) plus dua set turn restriction.
-  Proses server memilih profil lewat `-profile car|motor`; tidak ada file
-  `-motor.graph` terpisah lagi.
-- **Cakupan geografis bukan jaminan rute panjang.** Satu proses kini memuat
-  `data/indonesia.graph`, jadi semua pulau dan ferry ada dalam satu graph;
-  pasangan seperti Merak-Bakauheni (28,1 km) dilayani tanpa `legs[]`/connector.
-  Tetapi `-max-route-km 100` tetap berlaku: Jakarta-Medan 1.882 km dijawab
-  `422 too_far` sebelum pencarian. Menaikkan cap tanpa hierarki akan
-  mengembalikan latensi 8-20 s dan `budget`/`504` (lihat 13c di BACKLOG).
-- Multi-file per pulau tetap didukung (`-graph data/java.graph,data/sumatra.graph`)
-  untuk deployment kecil; rute lintas file hanya untuk pasangan ferry yang
-  terdaftar di tabel connector statis, lalu digabung dengan `legs[]`.
-- Restriction per kelas kendaraan diterapkan (`restriction:motorcar`/`motor_vehicle` untuk car, `motorcycle`/`motor_vehicle` untuk motor); 167 `restriction:conditional` (jam sekolah/pasar) tetap di-skip karena graf statis.
-- **E1 sudah dijalankan; E2 tidak dikerjakan.** Per 2026-11-10, setelah tabel kecepatan
-  mobil disamakan dengan `car.lua` OSRM dan graph Java dibangun ulang,
-  332 pasangan E1 yang lolos filter snap menghasilkan median |selisih| 0,23%,
-  p95 14,49% (gerbang <12% gagal), maksimum 70,44%. D4 mengganti metrik primer
-  ke p95 durasi absolut 10,22%; ini keputusan metrik, bukan klaim akurat.
-  Riwayat p95 21,05% dan uji penalti belok ada di `paper/RESULTS.md` §14-15.
-  Audit 20 outlier menunjukkan sisa selisih berasal dari akses/restriksi dan
-  pilihan rute OSRM, bukan hanya tabel. Ground truth E2 tidak dikerjakan:
-  pemilik memilih opsi limitation pada 2026-11-10, jadi README ini tidak
-  mengklaim akurasi.
-- Tanpa auth, rate limit, atau TLS di server: taruh di belakang reverse proxy.
+Graph nasional saat ini:
 
-## Roadmap
+| metrik | nilai |
+|---|---:|
+| Node / edge | 54.891.393 / 112.340.071 |
+| Format | v5 `car+motor`, Hilbert order |
+| Artefak | 1.621 MB |
+| Idle RSS | 11,1 MB (`RssAnon` 4,5 MB) |
+| 4× rute 96 km paralel | 225 MiB RSS (`anon` 90 MiB) |
+| Build | 11m40s termasuk unduh; ekstraksi 1m12s |
 
-North star proyek ini: **alternatif OSRM / Google Routes yang paling ringan**,
-puluhan MB dan tetap <0,5 s untuk rute <=50 km di perangkat
-murah. Budget-nya mengikat: RSS idle <= 20 MB, image <= 25 MB,
-p95 42 km <= 400 ms, densitas >= 45 RPS/GB.
+Beban 600 pasangan Jawa dengan batas 100 km di Ryzen: 481 sukses, p50 39–47 ms,
+p95 0,94–1,32 s. Di i3-6100T: 472 sukses; 72 gagal snap, 40 `too_far`, 16
+`budget`. Detail dan batas klaim ada di
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
-| milestone | isi | selesai bila |
-|---|---|---|
-| M1 | metadata graph, build info, golden test | `/healthz` menyebut pbf asal; regresi rute ketahuan otomatis |
-| M2 | snap ke ruas (bukan node) | galat ujung p50 <= 20 m, p95 <= 60 m |
-| M3 | biaya per ekspansi (heuristik, workspace 12 B/slot, heap 4-ary); ALT ditunda karena memori | latensi 1,9-2,0x, dalam box uji; RPS i3 menyusul deploy |
-| M4 | timeout, rate limit, `/metrics`, ETag | tak ada request menahan slot >10 s |
-| M5 ✅ | format v4 (Java 693 MB), ferry, profil motor, tangga ε, 7 region | rute lintas pulau `200` dengan penanda ferry |
-| M6 🟡 | baseline OSRM (E1) selesai; E2 dilewati dengan limitation eksplisit | tiap klaim di README punya angka pendukung |
+## Quick start
 
-Rincian item, kriteria lulus, dan biaya: [`docs/ROADMAP.md`](docs/ROADMAP.md) dan
-[`docs/BACKLOG.md`](docs/BACKLOG.md). Non-goals yang sengaja ditolak (traffic
-real-time, cakupan dunia, CH/MLD penuh) juga tertulis di sana.
+Butuh Go 1.27+ dan `make`.
+
+```bash
+git clone git@github.com:arifsans/routeid.git
+cd routeid
+
+make build                 # semua binary ke bin/
+make java                  # unduh PBF Jawa + build data/java.graph
+bin/rid-server -graph data/java.graph -addr 127.0.0.1:8080
+```
+
+Di terminal lain:
+
+```bash
+curl -s 'http://127.0.0.1:8080/route?from=-6.1754,106.8272&to=-6.5950,106.8166&format=polyline' \
+  | jq '{distance_m, duration_s, points_n, snap_from, snap_to}'
+```
+
+Graph nasional (butuh ±1,7 GB PBF dan ±5 GB RAM saat build):
+
+```bash
+GOMEMLIMIT=5GiB scripts/build-national.sh
+bin/rid-server -graph data/indonesia.graph -addr 127.0.0.1:8080
+```
+
+Dua profil di satu base URL memakai `rid-gateway`:
+
+```bash
+bin/rid-server -graph data/indonesia.graph -profile car   -addr 127.0.0.1:18080
+bin/rid-server -graph data/indonesia.graph -profile motor -addr 127.0.0.1:18081
+bin/rid-gateway -addr 127.0.0.1:8080
+curl '127.0.0.1:8080/route?...&profile=motor'
+```
 
 ## Arsitektur
 
-```
-osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP JSON/polyline
-```
-
-- **Node = setiap node OSM** → geometri jalan persis, tanpa shape point terpisah.
-- **CSR** adjacency (Off/To/Len/Cls/MCls), koordinat fixed point 1e-7.
-  Format v5: `Off` uint32, `Len` uint16 satuan 4 m, `Cls` (mobil) dan `MCls`
-  (motor) uint8 = km/h x 2 dengan 0 berarti profil itu tidak boleh lewat;
-  waktu tidak disimpan, dihitung dari `Len` + kelas. Ferry adalah daftar edge
-  sparse. 12 B/node + 8 B/edge.
-- **Hilbert curve ordering**: node diurutkan geografis → A* tetap page-local
-  (RSS metropolitan 1.225 → 675 MB, p50 7-20% lebih cepat).
-- **Weighted A*** (ε=1.5 default): 28% lebih cepat dari ε=1.0, panjang rute identik.
-- **Snap ke ruas**, bukan ke node: titik diproyeksikan tegak lurus ke segmen
-  yang boleh dilalui profil aktif, lalu jarak/geometri dikoreksi (trim kalau
-  rute keluar lewat ruas itu, spur kalau tidak). Grid 0.02° (~2,2 km/cell)
-  menyimpan id node per sel sebagai delta varint dengan offset byte `GOff`.
-- Bobot = waktu tempuh (detik desimal) dari `maxspeed` atau default per kelas
-  jalan yang disetel untuk Indonesia (residential 25 km/h, service 15 km/h, dll).
-- **Profil** dipilih saat server start: satu artefak memuat kelas mobil dan
-  motor sekaligus, `-profile car|motor`. Tabel motor lebih permisif untuk
-  service/gang, membuang tol kecuali `motorcycle=yes`, dan memakai
-  `path`/`footway` kalau ditandai boleh motor.
-  Untuk motor, `oneway:motorcycle=yes|no|-1` menimpa `oneway` dan
-  `motorcycle=destination` adalah izin lemah; `surface`/`smoothness` hanya
-  menggeser kecepatan kelas tambahan (`path`, `footway`, `cycleway`,
-  `pedestrian`, `steps`). Tag `*:conditional` dihitung `rid-tagstats` tetapi
-  tidak dievaluasi karena graph statis. Batas lengkap:
-  [`docs/MOTOR-MODEL.md`](docs/MOTOR-MODEL.md).
-- **Ferry** (`route=ferry`) ikut jadi edge; waktu pakai tag `duration` kalau ada
-  (Merak-Bakauheni 2 jam ≠ 30 km / 20 km/jam), dan respons menandai segmennya.
-
-## Pakai
-
-```bash
-make build          # semua binary ke bin/
-make fetch REGION=java
-make java           # unduh + build data/java.graph (mobil + motor)
-make islands        # ketujuh region Geofabrik, satu graph per region
-make refresh REGION=java   # unduh ulang, build, tagstats, test, A/B
-
-# cek rute
-bin/rid-route -graph data/java.graph -from -6.1754,106.8272 -to -6.5950,106.8166
-
-# server
-bin/rid-server -graph data/java.graph -addr :8080 -conc 4
-curl 'localhost:8080/route?from=-6.1754,106.8272&to=-6.5950,106.8166&format=polyline'
+```mermaid
+flowchart LR
+  PBF[".osm.pbf"] --> EX["rid-extract"]
+  EX --> G[".graph v5<br/>mmap"]
+  G --> SRV["rid-server<br/>A* / snap"]
+  SRV --> HTTP["HTTP JSON / polyline"]
+  CLIENT["Flutter / web / curl"] --> GW["rid-gateway<br/>?profile=mobil|motor"]
+  GW --> SRV
 ```
 
-Tanpa `make`:
-```bash
-go build -o bin/ ./cmd/...
-GOMEMLIMIT=2GiB bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
-```
+- **Ekstraksi sekali, query berkali-kali.** `rid-extract` membaca PBF, menulis
+  header + section ter-align, lalu server membuka file dengan `mmap`.
+- **Node adalah node OSM.** Geometri jalan tidak disederhanakan; tidak ada tabel
+  shape point terpisah.
+- **CSR + fixed point.** `Off`/`To` 32-bit, `Len` 16-bit satuan 4 m, `Cls`/`MCls`
+  8-bit (km/h × 2), koordinat 1e-7. Satu edge 8 B; satu node 12 B.
+- **Hilbert ordering.** Node diurutkan secara geografis agar frontier A* tetap
+  page-local.
+- **Edge-based A*.** State adalah edge yang baru dilewati, sehingga turn
+  restriction `(edge masuk, edge keluar)` bisa ditegakkan tanpa tabel dense.
+- **Snap ke ruas.** Titik diproyeksikan ke segmen, lalu hasil dir trimming atau
+  diberi spur; polyline mulai dan berakhir di jalan.
+- **Dua profil, satu graph.** Mobil dan motor punya tabel kelas dan restriction
+  sendiri; proses server memilih salah satu lewat `-profile`.
 
-Response:
-```json
-{"distance_m":56451,"duration_s":2538.8,"polyline":"...",
- "snap_from_m":4,"snap_to_m":24,
- "snap_from":[3.595201,98.672160],"snap_to":[3.600212,98.485017],
- "trimmed":{"from":true,"to":true}}
-```
-`format=json` (default) mengembalikan `points: [[lat,lon],...]`.
-Polyline: precision 5 (~1.1 m), decode di Dart standar.
+Detail format, invarian, dan alasan desain:
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-**Geometri mulai dan berakhir di jalan** (titik proyeksi `snap_from`/`snap_to`),
-bukan di pin mentah; tidak ada garis spur menyeberang bangunan. Pin user tetap
-digambar dari koordinat yang dikirim klien. Kalau butuh perilaku lama (garis
-menyambung pin ke jalan), tambahkan `&pin=1`.
+## API singkat
 
-Query params: `simplify=<meter>` (Douglas-Peucker), `format=polyline|json`,
-`pin=0|1`, `restrictions=0|1`. `simplify` harus angka tidak negatif; nilai lain
-(`abc`, `-5`, `NaN`, `Infinity`) dijawab `400` sebelum graph disentuh. Header
-respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
-(`none|from|to|both`).
-
-### Endpoint
-
-| endpoint | guna |
+| Endpoint | Guna |
 |---|---|
-| `GET /route?from=lat,lng&to=lat,lng` | rute. Opsional: `format=json\|points\|geojson\|polyline`, `simplify=<m>`, `pin=1`, `restrictions=0` |
-| `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan provenance (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile`, `profile_sha256`) |
-| `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
-| `GET /metrics` | Prometheus (gateway publik menjawab `404`; scrape upstream 18080/18081): `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `route_cross_region_resnapped_total`, `route_cross_region_stitched_total`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
+| `GET /route?from=lat,lng&to=lat,lng` | rute; `format=json\|points\|geojson\|polyline` |
+| `POST /route` | body JSON `{from,to,format,simplify,restrictions,pin}` |
+| `GET /healthz` | kesiapan + provenance graph |
+| `GET /version` | commit, build time, Go/OS/arch |
+| `GET /metrics` | Prometheus (biasanya hanya upstream internal) |
+| `GET /` | demo peta di `rid-gateway` |
 
-`GET /` menyajikan demo peta untuk mencoba rute dari browser. Aset Leaflet,
-CSS, dan JS di-embed ke binary gateway dan dilayani dari `/assets/*`; halaman
-memanggil `/route` same-origin tanpa API key. Tanpa `from`/`to` di URL, tab baru
-mencoba lokasi browser sekali dan memusatkan peta ke sana; tombol "Lokasi saya"
-memusatkan ulang kapan saja. Izin ditolak atau lokasi tidak tersedia jatuh ke
-Jakarta tanpa membuat titik rute.
+Parameter penting: `simplify=<meter>`, `pin=1` (garis menyambung pin mentah),
+`restrictions=0` (matikan enforcement untuk debug), `profile=mobil|motor`
+(hanya di gateway). Error `422`/`504` membawa `reason`:
+`snap`, `too_far`, `budget`, `no_route`, `cross_region`, `deadline`.
 
-**Dua profil lewat satu base URL.** Satu proses memuat satu profil (snap
-terdekat membuat dua graf hampir identik saling menutupi), jadi compose
-menjalankan dua server di loopback dan `rid-gateway` memegang port publik:
-`?profile=mobil|motor` memilih upstream, tanpa parameter dilayani mobil.
-Parameter itu dicopot sebelum diteruskan (upstream dan log-nya tidak perlu tahu),
-nilai lain dijawab `400`, dan respons membawa `X-Route-Profile`. `/healthz`
-tanpa parameter menjawab kedua profil sekaligus (`503` bila salah satu mati),
-`/healthz?profile=motor` hanya satu. ETag tiap profil berbeda karena fingerprint
-grafnya berbeda, jadi cache klien tidak bisa tertukar. Lihat `deploy/README.md`
-bagian 1c.
+Contoh respons:
 
-`/healthz` dan `/version` menjawab "graph dan binary mana yang sedang jalan",
-jadi pertanyaan pasang-ulang tidak perlu masuk ke container. Respons rute memuat
-`snap_from`/`snap_to` (titik proyeksi di jalan), `snap_from_m`/`snap_to_m`
-(offset meter), `trimmed`, `bbox`, `points_n`, dan kalau rute menyeberang:
-`ferry_m`, `has_ferry`, `ferry_spans` (rentang indeks ke `points`/polyline yang
-bisa digambar putus-putus); header `X-Route-Ms`, `X-Route-Expansions`,
-`X-Route-Region`, `X-Route-Trim`.
-
-Rute stitched juga memuat `legs[]` dengan tiga entri berurutan (road, ferry,
-road). Setiap leg membawa `mode`, `distance_m`, `duration_s`, `from`, `to`,
-`point_start`, `point_end`, dan `region` atau `name`. `point_start`/`point_end`
-adalah indeks inklusif ke `points` setelah `simplify`; keduanya bisa hilang bila
-tidak ada sampel leg yang tersisa. Region gabungan ditulis `java+sumatra`.
-`legs` tidak dikirim untuk rute satu region.
-
-**Snap cadangan saat ruas terdekat buntu.** Snap hanya melihat geometri, jadi
-pin di taman, halaman berpagar, atau jalan buntu bisa mendarat di ujung yang
-tidak mengarah ke mana pun dan A* langsung menjawab `422 no route`. Untuk itu
-handler mencoba ulang dari ruas terdekat berikutnya: 32 kandidat, melebar ke 512
-kalau semuanya buntu, dan kandidat awal yang hanya menjangkau <= 512 node
-(termasuk dirinya) dilewati karena pencarian dari situ tidak akan pernah sampai.
-Paling banyak 4 pasangan awal-tujuan dicari, sekali, hanya setelah percobaan
-pertama gagal, jadi jalur normal tidak berubah. Keberhasilannya dihitung di
-`route_snap_retry_total`. Sisi tujuan belum bisa diperiksa dengan cara yang sama
-(graf hanya punya CSR maju), jadi pin tujuan di dalam pocket tetap `422`.
-
-### Cache, batas waktu, batas laju (M4)
-
-- **`ETag` + `Cache-Control`.** `max-age` diambil dari flag `-maxage` (default
-  3600 detik, `0` mematikan header cache). Tag dibentuk dari
-  fingerprint graph (`pbf_sha256`, node/edge, `snap`, `eps`, `turn-penalty`,
-  commit) plus query yang sudah dinormalisasi (urutan parameter dan GET-vs-POST
-  tidak mengubah tag). Kirim `If-None-Match` → `304` tanpa body: **p50 0,2 ms**
-  vs 43 ms untuk rute 42 km, jadi app yang mengulang query saat rotasi layar
-  nyaris tidak memakai slot. Cek `If-None-Match` jalan sebelum rate limiter,
-  jadi `304` tidak memakai kuota; sebaliknya `ETag`/`Cache-Control` hanya
-  dipasang pada `200` dan `304`. Respons error (`400`, `422`, `429`, `500`,
-  `504`) tidak pernah membawa `ETag` dan memakai `Cache-Control: no-store`.
-  Khusus `422`/`504`, badan JSON menambahkan `reason` mesin (`snap`, `too_far`,
-  `budget`, `no_route`, `cross_region`, `deadline`) agar klien bisa memilih
-  kalimat sendiri; `error` tetap tidak berubah untuk Bruno/Postman/Flutter.
-  Semua respons memasang `Vary: Accept-Encoding`; `Content-Encoding: gzip`
-  hanya pada respons yang punya body (tidak pada `304`/`204`).
-- **Batas waktu `-timeout` (default 10 s) dan batas lunak `-budget` (default
-  60% `-timeout` = 6 s).** `context` diteruskan ke dalam A* dan dicek tiap 256
-  ekspansi. Batas lunak lebih dulu: pencarian yang melewatinya menjawab
-  `422 {"error":"search budget 6s exceeded (route too long)","reason":"budget"}`
-  (`route_errors_total{reason="budget"}`), supaya rute yang tidak bisa
-  diselesaikan tidak muncul sebagai `504` yang kemunculannya bergantung pada
-  beban mesin. `504 {"error":"deadline exceeded","reason":"deadline"}` tinggal
-  untuk batas keras dan klien yang memutus koneksi. Plafon ekspansi
-  `-max-expansions` (default 4 juta) tetap deterministik di semua mesin.
-- **Rate limit `-rate`/`-burst` (default 15/menit per IP, burst 5)** → `429` +
-  `Retry-After`. Di belakang reverse proxy pakai `-trust-proxy` supaya IP diambil
-  dari `X-Forwarded-For`; tanpa flag itu header diabaikan (tidak bisa dipalsukan).
-- **Batas jarak `-max-route-km` (default 100, `0` = nonaktif).** Dua penjagaan:
-  jarak garis lurus (great-circle, batas bawah jarak tempuh) ditolak `422` tepat
-  setelah validasi koordinat, sebelum ETag/rate-limit/snap/A*; lalu jarak
-  tempuh hasil rute dicek lagi setelah `RouteSnapCtx` supaya rute pendek yang
-  berbelok jauh tetap ditolak. Keduanya menaikkan `reason="too_far"` di
-  `/metrics` dan batasnya ikut masuk fingerprint ETag. Rute stitched antarpulau
-  tidak dikecualikan diam-diam: operator harus menaikkan flag ini (`0` atau nilai
-  yang cukup) dan itu terlihat di fingerprint.
-- **Biaya belok `-turn-penalty` (default 0,25, `0` = waktu murni).** Biaya
-  belok dibaca dari sudut antara arah datang dan arah keluar
-  (22,5°/67,5°/135° → 2/7,5/20 s, dikali flag) dan masuk ke `duration_s`,
-  `distance_m` tidak berubah. Pengaruhnya pada E1: p95 jarak tetap 21,12%,
-  mean 3,60% → 3,50%, ETA +1,6% median (`paper/RESULTS.md` §15).
-- **Bobot heuristik `-eps` (default 1,5, `1,0` = optimal).** Turun ke 1,2 di
-  E1 menghasilkan rute identik dengan 20% ekspansi lebih banyak, jadi 1,5
-  dipertahankan. `-eps`, `-turn-penalty`, dan `-max-route-km` semuanya masuk
-  fingerprint ETag: restart dengan nilai berbeda membatalkan cache lama.
-- **Pool workspace bersama `-conc` + anggaran `-workspace-mb`.** Tabel A*
-  (12 B/slot: `keys`, `gs`, `came`) tidak lagi disimpan per region × `-conc`;
-  satu pool sebesar `-conc` dipakai ulang lintas region dan di-*rebind* ke
-  graf yang dilayani (`nodeBits`/`mask`/generasi dihitung ulang). Tabel
-  dimulai dari 65.536 slot (0,75 MB) dan hanya tumbuh saat rute panjang
-  membutuhkan; saat dikembalikan ke pool dan terisi < 1/8 kapasitas, tabel
-  mengecil lagi (histeresis 8x) sehingga satu rute 500 km tidak menahan
-  puluhan MB di semua slot. `-workspace-mb` (default `0` = tanpa anggaran
-  eksplisit, plafon lama 384 MB/slot) membagi anggaran ke `-conc` slot;
-  tembus anggaran → `422 {"error":"search space exhausted (route too long)"}`
-  (lihat `routeid_workspace_bytes`), bukan OOM.
-  `routeid_workspace_slots`/`_bytes` menunjukkan biaya nyata saat ini, `_grows_total`
-  dan `_shrinks_total` menunjukkan berapa kali tabel tumbuh/mengecil.
-- Semua angka di atas terlihat di `/metrics`, jadi tidak perlu log untuk tahu
-  berapa ekspansi/fallback/penolakan yang terjadi.
-
-## Integrasi Flutter
-
-Server: `GET /route` (query string) atau `POST /route` (JSON), dua-duanya
-menerima `"lat,lng"` maupun `{"lat":..,"lng":..}`. Respons berisi
-`distance_m`, `duration_s`, `polyline` (precision 5), `bbox` (siap dipakai
-`CameraUpdate.newLatLngBounds`), `points_n`, dan `snap_from`/`snap_to`.
-
-Polyline sudah menyusur jalan sampai ujungnya: titik pertama/terakhir adalah
-proyeksi ke ruas (`snap_from`/`snap_to`), bukan pin mentah. Gambar marker dari
-koordinat asli yang lo kirim, garis dari `points`; hasilnya pin di lokasi user,
-rute mulai di jalan. Kalau butuh garis menyambung pin (perilaku lama), kirim
-`'pin': true`.
-
-```dart
-final res = await http.post(
-  Uri.parse('$base/route'),
-  headers: {'Content-Type': 'application/json'},
-  body: jsonEncode({
-    'from': {'lat': fromLat, 'lng': fromLng},
-    'to':   {'lat': toLat,   'lng': toLng},
-    'format': 'polyline',
-  }),
-);
-final j = jsonDecode(res.body) as Map<String, dynamic>;
-final pts = decodePolyline(j['polyline'] as String);
-final km = (j['distance_m'] as num) / 1000;
-final snapFrom = (j['snap_from'] as List).cast<num>(); // [lat, lng] di jalan
-
-GoogleMap(
-  polylines: {Polyline(polylineId: const PolylineId('r'), points: pts, width: 5)},
-  initialCameraPosition: CameraPosition(target: pts.first, zoom: 14),
-);
-
-// precision-5 polyline decoder (1e-5 deg), tanpa dependency tambahan
-List<LatLng> decodePolyline(String s) {
-  final out = <LatLng>[];
-  var i = 0, lat = 0, lng = 0;
-  while (i < s.length) {
-    var shift = 0, result = 0, b;
-    do { b = s.codeUnitAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; }
-    while (b >= 0x20);
-    lat += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-    shift = 0; result = 0;
-    do { b = s.codeUnitAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; }
-    while (b >= 0x20);
-    lng += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-    out.add(LatLng(lat / 1e5, lng / 1e5));
-  }
-  return out;
+```json
+{
+  "distance_m": 56451,
+  "duration_s": 2538.8,
+  "polyline": "...",
+  "snap_from_m": 4,
+  "snap_to_m": 24,
+  "snap_from": [3.595201, 98.672160],
+  "snap_to": [3.600212, 98.485017],
+  "trimmed": {"from": true, "to": true},
+  "bbox": [3.59, 98.48, 3.60, 98.68],
+  "points_n": 412
 }
 ```
 
-Catatan lapangan:
-- **Emulator Android** tidak bisa `127.0.0.1`: pakai `10.0.2.2:8080`.
-- **HP fisik** pakai IP LAN laptop (`ip addr`), pastikan `-addr :8080` (bukan
-  `127.0.0.1`) dan firewall lokal mengizinkan.
-- **flutter web** sudah aman: CORS `*` + preflight `OPTIONS` ditangani server.
-- `simplify=<meter>` kalau payload terlalu besar (mis. `simplify=8`).
-- Respons 422/504 membawa `{"error":...,"reason":...}` untuk kasus normal (di
-  luar Indonesia, tidak ada jalan dalam radius snap, terlalu jauh, budget,
-  tidak ada rute, beda region, deadline). `error` tetap teks mesin; panel demo
-  memetakan `reason` ke kalimat Indonesia. Klien lain boleh tetap memakai
-  `error`.
-- Field `fallback: true` berarti larangan belok dilepas agar rute ketemu;
-  berguna untuk telemetri, bukan untuk user.
+Kontrak lengkap, cache/ETag, rate limit, dan integrasi Flutter:
+[`docs/API.md`](docs/API.md).
 
-### Coba tanpa app (Bruno / Hoppscotch / Postman / curl)
+## Build dan operasi
 
-**Bruno** (native, environment ikut ter-import): buka folder
-`docs/bruno/routeid/` (Open Collection), lalu pilih environment `Local` atau
-`Homelab` di kanan atas. Isinya 26 request dengan test JavaScript Bruno
-(81 blok `test`): Meta (`healthz` termasuk bentuk agregat gateway, `version`,
-`metrics`, dan versi `profile=motor`), Route inti (points, geojson, polyline +
-`polyline_b64`, POST objek/string, `restrictions=0`, ETag → 304, `profile=motor`
-plus bukti ETag antar profil tidak bisa tertukar), kelas jarak (42 km, 148 km),
-region lain (Sumatra, Bali), dan 5 kasus error (termasuk `profile=truk` → 400).
-Request khusus gateway melewatkan pemeriksaan header kalau base URL langsung
-menuju satu server, jadi keduanya tetap bisa dijalankan. Versi CLI:
-
-```bash
-cd docs/bruno/routeid
-npx @usebruno/cli run -r --env Local
-npx @usebruno/cli run -r --env Homelab --delay 4300   # rate limit 15/menit
-```
-
-**Postman / Hoppscotch**: collection + environment JSON (Bruno tidak bisa
-impor file environment Postman, jadi pakai folder `docs/bruno/` di atas):
-
-| file | isi |
+| Perintah | Guna |
 |---|---|
-| `docs/routeid.postman_collection.json` | 21 request inti (set sebelum gateway; koleksi Bruno di atas yang terbaru), tiap request punya test script Postman. |
-| `docs/routeid.postman_environment-local.json` | `baseUrl = http://127.0.0.1:8080` |
-| `docs/routeid.postman_environment-homelab.json` | `baseUrl = https://route.arifsani.xyz` |
+| `make build` | semua binary ke `bin/` |
+| `make static` | binary statis untuk image Alpine |
+| `make test` | `go vet` + seluruh test |
+| `make java` / `make sumatra` | unduh + build satu region |
+| `make islands` | tujuh region Geofabrik |
+| `make refresh REGION=java` | unduh ulang, build, tagstats, test, A/B |
+| `scripts/build-national.sh` | satu graph Indonesia (v5) |
+| `scripts/smoke.sh <base-url>` | smoke test HTTP |
 
-Import collection lalu environment (Postman: File → Import; Hoppscotch:
-Collections → Import → Postman), pilih environment di kanan atas. Tanpa
-environment tetap jalan: default collection variable `http://127.0.0.1:8080`,
-jadi tidak muncul `Invalid URL`.
+Deploy Docker Compose, systemd, Cloudflare Tunnel, refresh graph, dan batas
+memori: [`docs/OPERATIONS.md`](docs/OPERATIONS.md) dan
+[`deploy/README.md`](deploy/README.md).
 
-Request di folder "Region lain" butuh graf region tsb: server lokal yang hanya
-memuat `data/java.graph` menjawab 422 dan test menerima itu; homelab memuat
-satu graph `indonesia` (mobil + motor). Homelab memakai `-rate 15` per menit
-(burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang-ulang:
-request identik dengan `If-None-Match` dibalas 304 dan tidak memakan kuota.
-Di homelab kedua profil ada di satu base URL `https://route.arifsani.xyz`:
-tambahkan `&profile=motor` untuk motor. Port 8081 tidak lagi dipakai klien;
-upstream-nya hanya mendengarkan di loopback homelab (18080/18081). Akses
-publik lewat Cloudflare Tunnel; port 8080 host hanya loopback.
+**Keamanan:** server tidak punya autentikasi. Bind ke loopback dan taruh di
+belakang reverse proxy/TLS; rate limit per IP aktif secara default
+(`-rate 15 -burst 5`). Jangan expose `/metrics` ke publik.
 
-Kalau dijalankan di emulator/HP, ganti `127.0.0.1` jadi `10.0.2.2` (emulator
-Android) atau IP LAN mesin (`ip -4 addr show scope global`) lewat environment variable.
+## Struktur repo
 
-Atau manual di Hoppscotch:
-
-| field | isi |
-|---|---|
-| Method | `GET` |
-| URL | `http://127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.2297,106.8166&format=polyline` |
-
-`http://127.0.0.1:8080` boleh dipanggil dari `hoppscotch.io` (HTTPS) karena
-server mengirim `Access-Control-Allow-Private-Network: true`. Kalau browser
-tetap memblokir, pakai Hoppscotch desktop. Untuk domain tetap, ikuti
-`deploy/README.md` §1d (Cloudflare Tunnel); quick tunnel
-`cloudflared tunnel --url http://localhost:8080` hanya untuk uji sementara.
-
-### Cek hasil rute tanpa app
-
-**Cara paling aman: pakai `points` (array), bukan `polyline`.**
-
-```bash
-curl -s "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593" \
-  > /tmp/r.json
-scripts/route2geojson.py /tmp/r.json > /tmp/r.geojson
-```
-Ringkasan (jumlah titik, bbox, ujung, jarak) dicetak ke stderr; tempel isi
-`/tmp/r.geojson` ke https://geojson.io untuk melihat garisnya di peta.
-
-**Cara tercepat kalau cuma mau lihat garisnya:** minta `format=geojson`, lalu
-copy isi field `geojson` dari respons ke https://geojson.io (panel JSON kiri)
-atau simpan sebagai file `.geojson`. Tidak ada backslash, jadi tidak ada
-decoder yang bisa salah.
-
-```bash
-curl -s "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=geojson"
-```
-
-Kalau file picker tidak menampilkan `/tmp`, tulis GeoJSON ke folder project
-(`scripts/route2geojson.py r.json > r.geojson`) lalu buka dari situ.
-
-**`polyline_b64`.** Karena charset polyline memuat `\`, respons
-`format=polyline` juga menyertakan `polyline_b64` (base64 dari string yang
-sama). Versi ini bebas backslash, jadi aman di-copy-paste. Decoder lokal yang
-menerima JSON, base64, maupun polyline mentah (termasuk yang backslash-nya
-sudah dobel):
-
-```bash
-curl -s ".../route?from=..&to=..&format=polyline" > rp.json
-scripts/polyline-decode.py rp.json                 # ringkasan + cek points_n
-scripts/polyline-decode.py rp.json > r.geojson     # siap tempel ke geojson.io
-```
-
-**Peringatan `polyline`:** encoding polyline Google memakai seluruh rentang
-karakter printable, termasuk `\` (backslash). Di JSON karakter itu tampil
-sebagai `\\`, dan banyak decoder (termasuk situs decoder online) berhenti
-atau melompat di titik itu, garis jadi terpotong di tengah jalan tanpa error
-apa pun. Polyline hanya ada kalau request memakai `format=polyline`, dan
-jangan copy-paste teks JSON mentah; ekstrak lewat JSON parser:
-
-```bash
-curl -s "http://127.0.0.1:8080/route?from=-7.8435723,110.392939&to=-7.7393368,110.3760593&format=polyline" \
-  > rp.json
-python3 -c "import json;print(json.load(open('rp.json'))['polyline'])" > r.polyline
-```
-
-Smoke test sebelum nyentuh app:
-```bash
-make build && bin/rid-server -graph data/java.graph -addr :8080
-scripts/smoke.sh http://127.0.0.1:8080
-```
-
-## Kapasitas (terukur)
-
-Homelab uji: i3-6100T (2 core/4 thread), container 1,5 GiB, `-conc 4`.
-Load test: `scripts/loadtest.py`.
-
-| rute | server p50 (1 query) | RPS puncak | concurrency jenuh |
-|---|---|---|---|
-| 7 km (Palembang) | 47 ms | ~75 | 4 |
-| 15 km (Yogyakarta) | 136 ms | ~17 | 4 |
-| 148 km (Jakarta–Bandung) | 4,2 s | ~0,6 | 4 |
-
-Kalau rute dibatasi maksimum 100 km (batas aplikasi), acuan tetap baris 42 km
-(Jakarta -> Cikarang) untuk segmen pendek, ditambah himpunan 100 km di §19:
-
-Angka sebelum M3 (baris 42 km Jakarta -> Cikarang, `-conc 4`): RPS puncak 10,9
-dan server p50 326 ms. Sesudah M3, di box yang sama, rute 41,7 km dengan
-`-conc 4` dan `scripts/loadtest.py`:
-
-| | sebelum | sesudah |
-|---|---|---|
-| RPS | 15,8-21,7 | 36,1-40,1 |
-| server p50 | 176-216 ms | 93-102 ms |
-| p95 server | 208-330 ms | 105-145 ms |
-| RSS beban (4x 148 km) | 767,6 MiB | 572,2 MiB |
-
-Selisih RPS "sebelum" dengan baris tabel di atas berasal dari rute yang berbeda
-(Jakarta -> Cikarang 40,7 km vs 41,7 km Surabaya); yang penting rasionya, diukur
-bergantian pada mesin dan graph yang sama: **~2x RPS, 1,9x p50, -25% memori**
-(lihat `paper/RESULTS.md` §10-10b).
-
-Sesudah format v4 (M5) di box yang sama: ekspansi tiap rute identik, CPU per
-query turun 1,6-2x, jadi RPS naik 1,4-1,5x dan p50 turun ~30 % (rasio A/B
-bergantian: v3 9,97-10,58 RPS / p50 361-376 ms vs v4 13,79-16,02 RPS / p50
-223-283 ms pada rute 42 km, `-conc 4`, `paper/RESULTS.md` §12b). Artifak graph
-mengecil 32 % (Java 693 MB) dan RSS diam 64 MiB.
-
-Dengan build terbaru (penalti belok 0,25x, tiga region termuat) diukur langsung
-himpunan pasangan <= 40 km, bukan satu rute contoh: 298 dari 600 pasang
-`pairs-java.csv` (jarak p50 12,6 km, p95 36,4 km), instance `-rate 0`,
-`GOMEMLIMIT=768MiB`, i3-6100T:
-
-| concurrency | RPS | p50 | p95 |
-|---|---|---|---|
-| 1 | n/a | 24,3 ms | 246,2 ms |
-| 2 | 24,7 | 32,9 ms | 336,6 ms |
-| 4 | 23,5 | 73,6 ms | 705,4 ms |
-| 8 | 24,9 | 192,7 ms | 1.205,0 ms |
-
-Plafon ~24-25 RPS di 2 core fisik; `-conc 2` memberi p50 sepertiga `-conc 4`
-pada RPS yang sama, jadi untuk himpunan <= 40 km `-conc 2` cukup. Pada kontrak
-100 km `-conc 4` yang dipakai: 4 query paralel 50-80 km tetap stabil
-(p95 ok 899 ms, RSS tidak melejit; §19). Untuk segmen ini
-akurasi E1 juga lulus: p95 selisih jarak 7,44% (median 0,03%) pada 324 pasang
-OSRM <= 40 km. Rincian: `paper/RESULTS.md` §16.
-
-Memori dengan build pool bersama (600 pasang `pairs-java.csv`, tiga region,
-`-conc 4`, sesudah beban; `paper/RESULTS.md` §17e; baris terakhir §19, mesin
-Ryzen 5 5600G):
-
-| build | beban | anon | RSS | tabel workspace |
-|---|---|---|---|---|
-| `f9693f8` (12 tabel) | 600 pasang, tanpa batas | 462 MB | 1.138 MB | tak terukur |
-| `8e2dc11` (pool 4) | 600 pasang, tanpa batas | 415 MB | 1.087 MB | 126 MB |
-| `8e2dc11` | 40 km (`-max-route-km 40`), `GOMEMLIMIT=1GiB` | 311 MB | 958 MB | 201 MB dari 256 MB |
-| build M6 | 100 km (`-max-route-km 100`), `-conc 4 -workspace-mb 256` | 425 MB | 1.087 MB | 125,8 MB dari 256 MB |
-
-RSS di atas menghitung halaman `mmap` graf yang tersentuh (Java+Sumatra+
-Nusa-Tenggara = 1,21 GB berkas, `Pss` ~= `Rss`); bagian yang dikendalikan
-aplikasi adalah `anon`, dan itu turun 10% pada beban yang sama serta 49%
-dibanding `anon` 612 MB pada §5. Idle container sesudah beberapa rute:
-RSS 21,6 MB, `anon` 6,7 MB, `routeid_workspace_bytes` 3,1 MB.
-
-Sebelum M3, saturasi ada di ~11-12 RPS: pada `-conc 4` CPU terpakai ~3,5
-core-ekuivalen (10,9 query x 0,33 s), jadi menambah container tidak menambah RPS
-selama core fisiknya tetap 2. Sesudah M3 titik jenuhnya naik ke ~4 core lagi
-(38,6 query x 0,1 s = 3,9 core-ekuivalen).
-
-Catatan penting:
-
-- `-conc 1` (default lama) membatasi ke ~7 RPS untuk rute 15 km; menaikkan
-  `-conc` ke 4 menaikkan throughput ~2,4x dan konkurensi klien di atas 4 tidak
-  menambah apa pun (sudah jenuh di 2 core fisik).
-- RPS berbanding terbalik dengan panjang rute; A* naik superlinear.
-- Antrean memperburuk latency, bukan throughput: pada c=4 rute 15 km, p50 klien
-  226 ms sementara server 226 ms (murni antre).
-- Satu query 148 km menempati 1 slot workspaces selama 4–7 s. Kalau app lo
-  banyak query panjang, siapkan timeout klien ≥10 s dan rate limit per-IP.
-- Memori puncak terukur saat 4x rute 148 km paralel: 745 MiB (di bawah limit
-  1,5 GiB, tanpa OOM).
-
-## Deploy (homelab)
-
-Docker Compose dan systemd unit siap pakai ada di `deploy/`; lihat
-[`deploy/README.md`](deploy/README.md) untuk langkah lengkap, batas memori,
-dan catatan keamanan. Ringkasnya:
-
-```bash
-cd deploy && docker compose up -d --build     # atau deploy/routeid.service
-scripts/smoke.sh http://127.0.0.1:8080
-```
-
-## Cakupan Indonesia (graph nasional)
-
-Deployment homelab memakai **satu** `data/indonesia.graph` untuk kedua profil:
-54.891.393 node, 112.340.071 edge, format v5 `car+motor`, 1.621 MB. Semua pulau
-dan edge ferry ada di file yang sama; tidak ada pemilihan region per pulau dan
-tidak ada tabel connector.
-
-```bash
-bin/rid-server -graph data/indonesia.graph -addr :8080
-bin/rid-server -graph data/indonesia.graph -profile motor -addr :8081
-```
-
-Multi-file per pulau tetap didukung untuk deployment kecil; region dipilih dari
-snap terdekat (bbox antar-extract saling tumpang tindih):
-
-```bash
-bin/rid-server -graph data/java.graph,data/sumatra.graph -addr :8080
-bin/rid-server -graph data/ -addr :8080          # semua *.graph di direktori
-```
-
-Ketujuh region Geofabrik terbangun (format v4, profil mobil; disk = artefak):
-
-| region | node | edge | disk | build (4 worker) |
-|---|---|---|---|---|
-| java | 22,7 M | 46,7 M | 693 MB | 3m53s |
-| sumatra | 11,9 M | 24,3 M | 347 MB | 1m54s |
-| kalimantan | 7,1 M | 14,2 M | 215 MB | 56s |
-| sulawesi | 5,9 M | 11,7 M | 173 MB | 45s |
-| nusa-tenggara (Bali-Nusra) | 5,2 M | 10,3 M | 153 MB | 51s |
-| maluku | 0,8 M | 1,6 M | 25 MB | 8s |
-| papua | 1,1 M | 2,2 M | 34 MB | 8s |
-| nasional (7 region, satu file, v5) | 54,9 M | 112,3 M | 1.621 MB | 11m40s (termasuk unduh; ekstraksi 1m12s) |
-
-Diukur di Ryzen 5 5600G dengan `GOMEMLIMIT=5GiB`. Angka region lain adalah
-build lama di box 4 core yang dipakai bersama (4 worker, `GOMEMLIMIT=4GiB`),
-jadi lebih lambat daripada satu region sendirian di mesin sepi. Profil motor
-membesar sedikit karena gang/`path` yang boleh dilalui motor ikut masuk:
-`java-motor` 682 MB (23,4 M node / 48,2 M edge, 4m01s).
-
-**Refresh.** Deployment nasional dibangun ulang dengan
-`GOMEMLIMIT=5GiB scripts/build-national.sh`. `make refresh REGION=...` tetap
-tersedia untuk deployment per pulau (mengunduh PBF region, membangun profil
-mobil/motor, `rid-tagstats`, golden suite, A/B singkat). Jadwal operasional
-lama: Minggu pertama setiap bulan pukul 03.00 WIB oleh operator homelab
-(Fauzan Arif Sani); laporan regional ada di `data/<region>-graphinfo.txt` dan
-`data/<region>-ab.txt`. Ganti graph yang dipakai container hanya setelah
-`/healthz` menampilkan `profile`, `pbf_sha256`, dan `built_at` yang diharapkan.
-
-Cek sehat graph per region sebelum dipakai (snap per titik + peta lubang):
-
-```bash
-bin/rid-graphinfo -graph data/sumatra.graph                       # header + grid
-bin/rid-graphinfo -graph data/sumatra.graph -at 3.5952,98.6722    # snap Medan
-bin/rid-graphinfo -graph data/sumatra.graph \
-  -scan 3.0,98.0,4.2,99.2,0.05                                    # rapat: lubang data
-```
-
-Uji yang sudah lolos di satu proses (java + sumatra): Jakarta->Bandung
-(`java`, 148.5 km), Medan->Binjai (`sumatra`, 22.7 km), Medan->Parapat
-(175.0 km), Banda Aceh->Medan (578.7 km), RSS total 357 MB (mmap).
-
-**Rute lintas selat.** Ferry adalah edge biasa, jadi rute menyeberang keluar
-kalau kedua ujung ada di satu graph. Extract yang tumpang tindih (Java memuat
-Lampung dan Bali) membuat titik terminal sering tetap satu region:
-
-| query | hasil |
-|---|---|
-| Ketapang -> Gilimanuk (`java.graph`) | 4,7 km, `region=java`, `ferry_m=4180` |
-| Merak -> Bakauheni (`java.graph,sumatra.graph`) | 28,1 km, `region=sumatra`, `ferry_m=28079`, tanpa `legs` |
-
-Di deployment nasional kedua ujung selalu berada di file yang sama:
-Merak -> Bakauheni = 28,1 km, `region=indonesia`, `ferry_m=28079`, tanpa
-`legs[]`; Ketapang -> Gilimanuk memberi `ferry_m=4180`. Tidak ada pemilihan
-connector.
-
-Bila memakai multi-file, ujung yang benar-benar berbeda memakai tabel connector
-statis, merutekan tiap leg di graph masing-masing, lalu menyambung ferry:
-
-| query (`-max-route-km 0`) | hasil |
-|---|---|
-| Jakarta -> Palembang (`java.graph,sumatra.graph`) | 533,5 km, `region=java+sumatra`, 3 `legs`, `ferry_m=28535`, 0,35 s |
-| Jakarta -> Medan (`java.graph,sumatra.graph`) | 1.941,9 km / 86.568 s, 3 `legs`, `ferry_m=28775`, `relaxed=true`, sekitar 3,2 s |
-
-`ferry_m` Jakarta -> Medan mencakup 28.535 m crossing tabel dan 240 m edge ferry
-di dalam leg Sumatra. `relaxed=true` muncul karena leg Sumatra 1.797 km masih
-menabrak batas ekspansi yang sama seperti graph nasional; W5 tidak mengubah
-heuristik atau batas itu. Tanpa `-max-route-km 0`, precheck Haversine menolak
-kedua query dengan `422` `too_far` sebelum snap. Default produk kini 100 km;
-533 km dan 1.942 km keduanya di atas itu.
-
-Di deployment nasional tidak ada lagi batasan pasangan terdaftar: semua pulau
-berada di satu graph, dan rute lokal di tujuh pulau sudah diuji 200. Yang tetap
-membatasi adalah kontrak 100 km: tanpa `-max-route-km 0`, rute seperti
-Jakarta -> Pontianak atau Jakarta -> Medan ditolak `422 too_far` sebelum snap.
-Graph nasional **adalah default sekarang** (1.621 MB); batas 800 MB per artefak
-dilewati secara eksplisit karena tujuannya cakupan seluruh Indonesia. Multi-file
-per pulau tetap opsi deployment kecil, bukan jalur utama.
-
-**Koridor panjang = `relaxed`.** Sebelum menyerah dengan `ErrTooFar`, router
-mencoba ulang dengan heuristik lebih rakus (ε 2,0 lalu 3,0) dan menandai hasil
-`relaxed=true` + `epsilon`. Ongkosnya: Jakarta-Bandung ε 2,0 = 148,62 km
-(+0,07%), ε 2,5 = 155,3 km (+4,4%). Jakarta -> Medan (2004 km) butuh ε 3,0, 4,8
-jt ekspansi, 19-22 s, jadi pakai `-timeout 60s` untuk kelas ini, bukan default
-10 s.
-
-## Repo layout
-
-```
-cmd/rid-extract      pbf -> .graph (offline, bulanan)
-cmd/rid-server       HTTP /route, /healthz, /version (prod)
-cmd/rid-gateway      satu base URL, profil dipilih ?profile=mobil|motor
-cmd/rid-route        CLI satu rute (debug)
-cmd/rid-graphinfo    inspeksi header/grid + probe snap & scan lubang data
-docs/ROADMAP.md      north star, budget, milestone
-docs/BACKLOG.md      backlog teknis: masalah, rencana, kriteria lulus
-docs/MOTOR-MODEL.md  batas model motor dan alasan tanpa faktor kemacetan
-cmd/rid-bench        benchmark latency/akurasi + baseline -no-restrictions
+```text
+cmd/rid-extract      PBF -> .graph (offline, bulanan)
+cmd/rid-server       HTTP /route, /healthz, /version, /metrics
+cmd/rid-gateway      satu base URL, ?profile=mobil|motor
+cmd/rid-route        CLI satu rute untuk debug
+cmd/rid-graphinfo    inspeksi header, snap, scan lubang data
+cmd/rid-bench        benchmark latency/akurasi
 cmd/rid-restcheck    harness kepatuhan turn restriction
-cmd/rid-restats      audit data relasi restriction di pbf
-cmd/rid-tagstats     census tag way untuk profil motor (akses, maxspeed, surface)
-cmd/rid-snapcheck    ukur galat snapping (node vs ruas)
-internal/extract     parsing OSM, profil mobil, restriction, urutan Hilbert
-internal/graph       format biner, mmap, snapping, A*
-paper/               draf ACM + RESULTS.md (semua angka) + EXPERIMENTS.md
-scripts/             fetch.sh, build-national.sh, smoke.sh, loadtest.py,
-                     m6-osrm.sh + m6-compare.py (baseline OSRM, lihat docs/M6.md),
-                     motor-ab.py (A/B mobil vs motor pada pasangan tetap)
+cmd/rid-tagstats     census tag way untuk profil motor
+cmd/rid-snapcheck    ukur galat snapping
+
+internal/extract     parsing OSM, profil, restriction, Hilbert ordering
+internal/graph       format biner, mmap, snapping, A*, workspace
+internal/stats       helper statistik
+
+docs/                arsitektur, API, operasi, benchmark, roadmap, backlog
+paper/               draf ACM, RESULTS.md, ledger klaim, data mentah
+scripts/             fetch, build nasional, smoke, load test, harness OSRM
+web/                 demo peta yang di-embed ke gateway
 ```
 
-## Test
+## Test dan benchmark
 
 ```bash
-make test                                              # go vet + go test ./...
-go test ./internal/graph -run TestGoldenRoutes -update  # terima perubahan rute yang disengaja
+make test
+go test ./internal/graph -run TestGoldenRoutes
+scripts/smoke.sh http://127.0.0.1:8080
+
+bin/rid-bench -graph data/java.graph -pairs paper/results/pairs-java.csv
+scripts/loadtest.py http://127.0.0.1:8080 \
+  -from -7.8435,110.3929 -to -7.7393,110.3760 -c 4 -n 32
 ```
 
-Unit test mencakup round-trip format (termasuk Ban/Only), semantik
-`only_*`, pembuktian router memilih jalan memutar 2 hop saat belokan terlarang,
-round-trip provenance v3, snapping ruas (proyeksi, trim, spur), dan **golden test
-48 pasangan node + 48 pasangan snap**: kota sintetis 30x30
-ditulis ke disk, di-snap, dirutekan, lalu dibandingkan per pasangan
-(`dist_m`, `time_ds`, jumlah node, hash FNV urutan node). Perubahan tak sengaja
-pada profil, snapping, atau A* langsung tampak sebagai diff, sudah diverifikasi
-tidak vakum: mengubah satu kecepatan 8,0 -> 8,5 m/s menggagalkan 3 pasangan.
+Golden test memakai kota sintetis 30×30 dan 48 pasangan node + 48 pasangan snap,
+jadi perubahan profil, snapping, atau A* yang tidak disengaja langsung terlihat.
+Metodologi dan angka kanonik: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
-CI (GitHub Actions) menjalankan vet + test + build di tiap push.
+## Batasan
 
-## Benchmark
+- **Tidak ada klaim akurasi.** E2 (ground truth independen) tidak dijalankan.
+  E1 hanya membandingkan routeid dengan OSRM pada graph OSM yang sama; p95
+  selisih jarak 14,49% dan maksimum 70,44%.
+- **Tanpa traffic real-time.** Kecepatan statis per kelas jalan; ETA bukan
+  prediksi kemacetan. `restriction:conditional` dihitung tetapi tidak
+  dievaluasi.
+- **Tanpa hierarki.** Rute >100 km ditolak `422 too_far` secara default. Dengan
+  `-max-route-km 0`, koridor sangat panjang memakai epsilon bertingkat dan bisa
+  lambat atau `relaxed=true`.
+- **Graph nasional besar.** Artefak 1,6 GB; build butuh ±5 GB RAM. Halaman
+  `mmap` yang tersentuh tetap masuk RSS, walaupun bisa direklaim cgroup.
+- **Data OSM tidak sempurna.** Jalan baru, akses, dan ferry bisa berbeda dari
+  kondisi lapangan. Selalu tampilkan atribusi "© OpenStreetMap contributors".
 
-```bash
-bin/rid-bench -graph data/java.graph -n 120 -emit-pairs pairs.csv   # fix workload
-bin/rid-bench -graph data/java.graph -pairs pairs.csv -eps 1.5      # percentile
-```
-Temuan utama (601 pasang tetap, Java):
-- ε=1.5 → 28% lebih cepat dari ε=1.0, tanpa mengubah panjang rute (526/526 sama).
-- Hilbert ordering → p50 7-20% lebih cepat, RSS metropolitan 1.2 GB → 675 MB.
-- p50: 1.2 ms (≤5 km), 62 ms (38 km), 146 ms (63 km). p95 di 63 km: 472 ms.
+## Dokumentasi
+
+| Dokumen | Isi |
+|---|---|
+| [`docs/README.md`](docs/README.md) | indeks dokumen dan status |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | format graph, A*, snap, restriction, profil |
+| [`docs/API.md`](docs/API.md) | HTTP API, error, cache, Flutter |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | build, refresh, deploy, kapasitas, keamanan |
+| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | metodologi dan angka kanonik |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | north star, budget, milestone, non-goals |
+| [`docs/BACKLOG.md`](docs/BACKLOG.md) | pekerjaan aktif dan alasan item ditunda |
+| [`docs/MOTOR-MODEL.md`](docs/MOTOR-MODEL.md) | batas model motor |
+| [`paper/README.md`](paper/README.md) | status draf paper dan cara compile |
+| [`paper/RESULTS.md`](paper/RESULTS.md) | semua pengukuran + reproduksi |
 
 ## Paper
 
-`paper/` berisi draf short paper (ACM `acmart`), `refs.bib` (DOI terverifikasi),
-`RESULTS.md` (semua angka + cara reproduksi), `EXPERIMENTS.md` (checklist
-kekurangan: E2 dilewati dengan limitation, pembanding selain OSRM MLD).
-
-## Turn restriction
-
-A* berjalan di atas **edge**, bukan node (`internal/graph/astar.go`): state =
-edge yang baru dilewati, sehingga pasangan (edge masuk, edge keluar) bisa
-diperiksa terhadap larangan belok.
+Draf short paper ACM (`acmart`, `sigconf`, `nonacm`) ada di
+[`paper/main.tex`](paper/main.tex). Status: **draf lengkap, E1 selesai, E2
+dilewati dengan limitation eksplisit.** Paper belum submitted.
 
 ```bash
-bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph
-#   restrictions: seen=4654 usable=3962 via_node=2750 via_way=1212
-#                 ban=3808 only=154 skipped{...relaxed=116}
-bin/rid-restcheck -graph data/java.graph        # uji kepatuhan
-bin/rid-bench -graph data/java.graph -no-restrictions   # baseline A/B
+cd paper
+pdflatex main && bibtex main && pdflatex main && pdflatex main
 ```
 
-Yang dimodelkan: `no_left_turn`, `no_right_turn`, `no_u_turn`,
-`no_straight_on`, `no_entry`, `no_exit` → daftar pasangan terlarang;
-`only_*` → daftar pasangan yang diizinkan (sisanya dilarang). Via-node dan
-via-way (termasuk rantai beberapa via-way) didukung.
+## Lisensi dan atribusi
 
-Yang tidak dimodelkan (dan dilaporkan di statistik): `restriction:conditional`
-(berbasis waktu), `except=` untuk moda selain mobil, dan via-way yang tidak bisa
-dirantai. Via-way dilarang secara konservatif (blokir masuk via-way dari arah
-yang dibatasi). Saat build, setiap ban diuji reachability: ban dibuang bila
-endpoint-nya tidak bisa dihubungkan tanpa transisi terlarang dengan seluruh ban
-dan aturan `only_*` lain tetap berlaku, atau bila BFS mencapai batas 1 juta
-edge-state. Jumlahnya dilaporkan sebagai `relaxed=` dan `reach_cap=`. Jalur
-runtime tanpa restriction tetap ada sebagai jaring pengaman, tetapi pada data
-uji tidak terpakai (`"fallback": false`).
-
-Biaya format: 8 B per pasangan. Jawa: 3.847 pasangan = **30 KB** (0,004% dari
-graf). Bandingkan tabel CSR penuh: 8 B x 46,7 jt edge = 374 MB.
-
-## Format file
-
-Lihat doc comment `internal/graph/format.go`. Header 320 B + 14 section: Lat,
-Lon (int32 1e-7), CSR `Off`/`To`, `Len` (uint16 satuan 4 m), `Cls` dan `MCls`
-(uint8 = km/h x 2, 0 = terlarang), daftar edge ferry (sparse), grid snap
-(`GOff` uint32 byte offset + `GNodes` varint delta), lalu `Ban`/`Only` untuk
-mobil dan `BanM`/`OnlyM` untuk motor. **Waktu tempuh tidak disimpan**: dihitung
-dari `Len x 288/Cls` desisecond, jadi satu edge = 4 + 2 + 1 + 1 = 8 B dan satu
-node = 4 + 4 + 4 = 12 B.
-
-Versi 5 menyatukan profil: satu file per region untuk mobil dan motor, dua set
-turn restriction, dan grid delta varint. Header punya provenance sejak v3
-(SHA-256 pbf, waktu build) plus blob `key=value` di akhir file (sumber, profil +
-hash mobil/motor, batas kecepatan, versi extractor, order, grid). File v1-v4
-ditolak oleh reader v5 (layout `Cls`/grid beda, salah baca lebih buruk daripada
-error jelas): jalankan ulang extractor, 7-40 s per region.
-
-## Lisensi
-
-Kode: MIT (lihat `LICENSE`). Data: © OpenStreetMap contributors, ODbL,
-wajib tampilkan atribusi "© OpenStreetMap contributors" di app, dan turunan
-database (file `.graph`) tetap ODbL.
-Update: ekstrak ulang bulanan lalu swap file + restart (74 s untuk Java).
+Kode: [MIT](LICENSE). Data: © OpenStreetMap contributors, ODbL. File `.graph`
+adalah turunan database OSM dan tetap ODbL. Aplikasi yang memakai RouteID wajib
+menampilkan atribusi OpenStreetMap.

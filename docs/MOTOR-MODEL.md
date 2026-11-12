@@ -1,15 +1,16 @@
 # Model motor
 
-Status: **berlaku 2026-11-10**. Dokumen ini mencatat apa yang dimodelkan
+Status: **berlaku 2026-11-12**. Dokumen ini mencatat apa yang dimodelkan
 profil `motor`, apa yang sengaja tidak dimodelkan, dan bukti untuk setiap
 batas. Sumber implementasi: `internal/extract/extract.go`. Rencana dan angka
 lengkap: `docs/PLAN-2026-11-10.md` W1 dan W1b.
 
 ## 1. Yang dimodelkan
 
-Profil dipilih saat build, bukan saat query. Graph mobil dan motor adalah dua
-artifact terpisah karena snap region tidak boleh saling menutupi
-(`deploy/docker-compose.yml`).
+Profil dipilih saat query (`rid-server -profile car|motor`), bukan saat build.
+Sejak format v5 satu artefak menyimpan kelas mobil (`Cls`) dan motor (`MCls`)
+serta daftar turn restriction terpisah. Dua container hanya memilih profil
+berbeda dari graph yang sama; tidak ada artefak motor terpisah lagi.
 
 ### Akses per kelas
 
@@ -109,7 +110,7 @@ Batas model hanya boleh dibuka bila semua syarat berikut terpenuhi:
 3. Ada metrik evaluasi tetap, bukan satu rute contoh.
 4. Ada A/B sebelum/sesudah pada set pasangan yang sama.
 5. Jika data bergantung waktu, format graph dan evaluasi `*:conditional`
-   dibuka sebagai milestone baru. Format v4 tidak menyimpan jam.
+   dibuka sebagai milestone baru. Format v5 juga tidak menyimpan jam.
 
 Tag conditional yang sudah dihitung tetapi belum dievaluasi di Java:
 `access:conditional` 940 way, `motorcycle:conditional` 47 way,
@@ -118,18 +119,27 @@ Tag conditional yang sudah dihitung tetapi belum dievaluasi di Java:
 
 ## 5. Bukti terukur
 
-Graph motor dibangun ulang 2026-11-10 dengan commit `920558c`.
+Angka v4 di bawah adalah riwayat dua artefak terpisah; jangan dipakai sebagai
+ukuran sekarang.
 
-| region | node | edge | byte | build |
-|---|---:|---:|---:|---:|
-| Java | 23.368.736 | 48.203.970 | 714.502.968 | 28 s |
-| Sumatra | 11.934.134 | 24.466.989 | 365.707.149 | 11 s |
-| Nusa Tenggara | 5.052.896 | 10.224.352 | 154.646.379 | 5 s |
+| Region v4 | node | edge | byte |
+|---|---:|---:|---:|
+| Java motor | 23.368.736 | 48.203.970 | 714.502.968 |
+| Sumatra motor | 11.934.134 | 24.466.989 | 365.707.149 |
+| Nusa Tenggara motor | 5.052.896 | 10.224.352 | 154.646.379 |
 
-Sejak format v5 satu file per region memuat mobil dan motor sekaligus:
-Java 693.316.412 B, Sumatra 353.320.895 B, Nusa Tenggara 148.783.493 B
-(total 1.195 MB), dibanding 2.445 MB untuk pasangan artefak v4. Angka di atas
-tetap berlaku sebagai riwayat W1.
+Satu artefak v5 sekarang memuat mobil dan motor:
+
+| Region v5 | node | edge | byte |
+|---|---:|---:|---:|
+| Java | 23.458.512 | 48.319.115 | 693.316.412 |
+| Sumatra | 11.954.298 | 24.489.374 | 353.320.893 |
+| Nusa Tenggara | 5.057.066 | 10.231.622 | 148.783.491 |
+| Indonesia | **54.891.393** | **112.340.071** | **1.621.222.584** |
+
+Build nasional 11m40s termasuk unduh; ekstraksi 1m12s dengan `GOMEMLIMIT=5GiB`.
+Build v5 per region tidak diukur ulang secara terpisah. Rincian format dan
+invarian ada di [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 Artefak v5 mencatat hash tabel motor yang sama dengan `profile_sha256`
 artefak v4 motor:
@@ -137,14 +147,18 @@ artefak v4 motor:
 (field `motor_sha256`). Graph lama memakai
 `a0f80ef144b819fa10a36f0dad477bba64935d73063a273fe611cf1c3b1b983d`.
 
-Satu proses `-conc 4` memuat tiga graph:
+Satu proses motor `-conc 4` yang memuat tiga region v5 (pengukuran 2026-11-10,
+sebelum graph nasional):
 
 - `/healthz` menyebut `java`, `sumatra`, dan `nusa-tenggara` dengan
   `"profile":"motor"`.
 - Tujuh pasangan di `paper/results/pairs-motor-regions.csv` menjawab 200.
 - Idle setelah `/healthz`: VmRSS 15.904 kB, RssAnon 7.236 kB.
-- Setelah tujuh rute: VmRSS 83.380 kB, RssAnon 26.392 kB. Batas RssAnon
-  beban adalah 700 MB; target rollout W1b 350 MB.
+- Setelah tujuh rute: VmRSS 83.380 kB, RssAnon 26.392 kB.
+
+Graph nasional v5 idle 11,1 MB (`anon` 4,5 MB); beban campuran 4× rute 96 km
+memakai 225 MiB (`anon` 90 MiB). Itu pengukuran profil mobil; beban motor
+nasional belum diukur terpisah. Jangan mencampur keduanya.
 
 A/B 19 pasangan 0-5 km pada W1: 19/19 sukses, 0 perubahan geometri dan
 durasi motor. Tidak ada pasangan di subset itu yang memakai tag baru; aturan

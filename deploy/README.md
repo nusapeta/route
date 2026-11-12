@@ -68,7 +68,7 @@ sudo usermod -aG docker "$USER"   # sekali, lalu login ulang
 cd deploy
 COMMIT=$(git rev-parse --short HEAD) BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
   docker compose up -d --build
-docker compose ps                 # STATUS harus (healthy)
+docker compose ps                 # cek status container; jangan anggap sehat tanpa /healthz
 curl -s localhost:8080/healthz    # version harus sama dengan COMMIT di atas
 ```
 
@@ -270,8 +270,7 @@ curl -s "127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.9175,107.6191&format=g
 | 20x rute 15 km | 89 MB |
 | 1x rute 148 km | 401 MB |
 | 1x rute 578 km | 613 MB |
-| puncak, 600 pasang campuran (build `8e2dc11`) | ~1,1 GB (`anon` 415 MB) |
-| beban kontrak 40 km, `-conc 4`, `GOMEMLIMIT=1GiB` | 958 MB (`anon` 311 MB) |
+| puncak, 600 pasang campuran (build `8e2dc11`, historis) | ~1,1 GB (`anon` 415 MB) |
 | beban kontrak 100 km, `-conc 4 -workspace-mb 256` (Ryzen 5 5600G) | 1,02-1,10 GB (`anon` 343-425 MB, tabel 126-201 MB) |
 | homelab i3-6100T, v5, 6 rute campuran (3 region, sebelum nasional) | `routeid` 76 MB (`anon` 65 MB), `routeid-motor` 26 MB (`anon` 17 MB) |
 | graph nasional, 4x rute 96 km paralel (Ryzen, `-conc 4`) | 225 MiB (`anon` 90 MiB) |

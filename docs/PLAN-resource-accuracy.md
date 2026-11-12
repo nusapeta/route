@@ -1,3 +1,9 @@
+> **ARSIP (2026-11-12).** Dokumen perencanaan ini dipertahankan sebagai
+> catatan keputusan. Status dan angka terbaru ada di [`ROADMAP.md`](ROADMAP.md),
+> [`BENCHMARKS.md`](BENCHMARKS.md), dan [`../paper/RESULTS.md`](../paper/RESULTS.md).
+> Jangan memakai target lama (≤50 km, dua artefak motor, 24 MB) sebagai kondisi
+> sekarang.
+
 # Plan: resource serendah mungkin, akurasi setinggi mungkin
 
 **North star (tidak berubah):** router jalan Indonesia yang muat di puluhan MB,
