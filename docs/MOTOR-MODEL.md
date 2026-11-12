@@ -157,7 +157,7 @@ bin/rid-server \
   -graph data/java-motor.graph \
   -graph data/sumatra-motor.graph \
   -graph data/nusa-tenggara-motor.graph \
-  -addr 127.0.0.1:18081 -conc 4 -rate 0 -max-route-km 40
+  -addr 127.0.0.1:18081 -conc 4 -rate 0 -max-route-km 100
 curl '127.0.0.1:18081/healthz'
 ```
 

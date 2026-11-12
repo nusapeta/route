@@ -59,3 +59,31 @@ func TestMaxRouteDisabled(t *testing.T) {
 		t.Fatalf("errSnap = %d, want 1", got)
 	}
 }
+
+// TestMaxRoute100KmBoundary pins the product contract after the cap moved from
+// 40 to 100 km: a 96 km straight line is not refused by the cap, and a 116 km
+// one is refused before snapping.
+func TestMaxRoute100KmBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, to string
+		reject   bool
+	}{
+		{"96 km", "-6.5570,107.4430", false}, // Jakarta -> Purwakarta
+		{"116 km", "-6.9175,107.6191", true}, // Jakarta -> Bandung
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &server{maxRouteM: 100_000, m: &metrics{}}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/route?from=-6.2088,106.8456&to="+tc.to, nil)
+			s.handleRoute(rec, req)
+
+			body := rec.Body.String()
+			if got := strings.Contains(body, "route too long"); got != tc.reject {
+				t.Fatalf("rejected=%v, want %v: %q", got, tc.reject, body)
+			}
+			if rec.Code != 422 {
+				t.Fatalf("code %d, want 422 (no graph loaded)", rec.Code)
+			}
+		})
+	}
+}

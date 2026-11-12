@@ -59,8 +59,10 @@ var ErrWorkspaceOverflow = errors.New(workspaceOverflowMsg)
 const (
 	// maxSpeedMps bounds the A* heuristic in m/s (130 km/h).
 	maxSpeedMps = 130.0 / 3.6
-	// maxExpansions caps a single query.
-	maxExpansions = 6_000_000
+	// defaultMaxExpansions caps a single query. Sized so the slowest supported
+	// box (2 physical cores) reaches the cap before its request deadline and
+	// answers with a deterministic error instead of being cut off mid-search.
+	defaultMaxExpansions = 4_000_000
 	// maxSlots caps the open addressing table (33M entries).
 	maxSlots = 1 << 25
 	// initialSlots is the starting open-addressing table size (64K entries, ~0.75 MiB).
@@ -159,6 +161,8 @@ type Router struct {
 	turnScale float32 // multiplier on the turn cost table; 0 disables it
 
 	maxSpeedMps float64 // heuristic bound; never above maxSpeedMps global
+
+	maxExpansions uint32 // per-query expansion cap; see SetMaxExpansions
 }
 
 // NewRouter creates a router; concurrency bounds peak memory.
@@ -169,12 +173,13 @@ func NewRouter(g *Graph, concurrency int) *Router {
 // NewRouterWithPool creates a router reusing a shared WorkspacePool.
 func NewRouterWithPool(g *Graph, pool *WorkspacePool) *Router {
 	return &Router{
-		g:           g,
-		wp:          pool,
-		eps:         1.5,
-		strict:      true,
-		turnScale:   defaultTurnScale,
-		maxSpeedMps: g.MaxSpeedMps(),
+		g:             g,
+		wp:            pool,
+		eps:           1.5,
+		maxExpansions: defaultMaxExpansions,
+		strict:        true,
+		turnScale:     defaultTurnScale,
+		maxSpeedMps:   g.MaxSpeedMps(),
 	}
 }
 
@@ -187,6 +192,18 @@ func (r *Router) SetTurnScale(v float32) {
 	if v >= 0 {
 		r.turnScale = v
 	}
+}
+
+// SetMaxExpansions caps the expansions of one query; zero restores the
+// default. The flag exists because the cap, not the wall clock, must decide
+// whether a search gives up: a time budget turns a hard query into an
+// intermittent 504 whose timing depends on the machine, while a fixed cap
+// fails the same input the same way on every deployment.
+func (r *Router) SetMaxExpansions(n uint32) {
+	if n == 0 {
+		n = defaultMaxExpansions
+	}
+	r.maxExpansions = n
 }
 
 // SetEpsilon adjusts the heuristic weight (1.0 = optimal but slow).
@@ -550,7 +567,7 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 			continue // stale entry
 		}
 		expanded++
-		if expanded > maxExpansions {
+		if expanded > int(r.maxExpansions) {
 			return Route{}, ErrTooFar
 		}
 		// Checking a context costs a load and a compare; once per 256 pops it is

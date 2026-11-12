@@ -163,9 +163,9 @@ itu perbaikan harus menyentuh model biaya, bukan menambah penalti belok
 20 outlier teratas punya penjelasan tertulis (siapa yang salah dan kenapa).
 
 **Status (2026-11-08): belum dikerjakan.** Yang selesai di putaran ini hanya
-sisi *kontrak* kelas rute, bukan model biaya: `-max-route-km` (default 40)
-menolak lebih awal dan membuat segmentasi <= 40 km eksplisit, dan pada segmen
-itu p95 sudah 7,44% (§16c). Tabel kecepatan
+sisi *kontrak* kelas rute, bukan model biaya: `-max-route-km` (dulu default 40,
+kini 100 sejak 2026-11-12) menolak lebih awal dan membuat segmentasi <= 40 km
+eksplisit, dan pada segmen itu p95 sudah 7,44% (§16c). Tabel kecepatan
 (`internal/extract/extract.go:111-168`) tidak diubah: itu mengubah
 `ProfileHash()` dan menuntut rebuild graf 3 region + E1 ulang, jadi harus
 menjadi commit sendiri dengan diff statistik E1 yang dilampirkan.

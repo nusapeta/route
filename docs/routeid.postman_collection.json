@@ -102,7 +102,7 @@
     },
     {
       "name": "1. Route inti (Java)",
-      "description": "Format respons, POST, perbandingan restrictions, dan cache ETag. Pasangan Yogyakarta 15 km (aman untuk 40 km).",
+      "description": "Format respons, POST, perbandingan restrictions, dan cache ETag. Pasangan Yogyakarta 15 km (aman untuk batas 100 km).",
       "item": [
         {
           "name": "points (JSON default)",
@@ -465,10 +465,10 @@
     },
     {
       "name": "2. Kelas jarak (Java)",
-      "description": "Rute contoh per kelas; 42 km adalah batas desain aplikasi.",
+      "description": "Rute contoh per kelas; 100 km adalah batas desain aplikasi (§19 RESULTS).",
       "item": [
         {
-          "name": "Jakarta - Cikarang 42 km (batas aplikasi)",
+          "name": "Jakarta - Cikarang 41 km (di bawah batas)",
           "request": {
             "method": "GET",
             "header": [],
@@ -503,7 +503,43 @@
           ]
         },
         {
-          "name": "Jakarta - Bandung 148 km (di atas batas)",
+          "name": "Jakarta - Purwakarta 96 km (di bawah batas 100 km)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/route?from=-6.2088,106.8456&to=-6.5570,107.4430",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "-6.2088,106.8456"
+                },
+                {
+                  "key": "to",
+                  "value": "-6.5570,107.4430"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": "pm.test('200', () => pm.response.to.have.status(200));\nconst j = pm.response.json();\npm.test('jarak di bawah batas 100 km', () => {\n  pm.expect(j.distance_m).to.be.above(90000);\n  pm.expect(j.distance_m).to.be.below(100000);\n});\npm.test('region + durasi + snap', () => {\n  pm.expect(j.region).to.be.a('string');\n  pm.expect(j.duration_s).to.be.above(0);\n  pm.expect(j.snap_from_m).to.be.a('number');\n  pm.expect(j.snap_to_m).to.be.a('number');\n});\npm.test('points_n cocok dengan points', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\nconsole.log(j.region, j.distance_m + 'm', j.duration_s + 's', j.points_n + ' titik');"
+              }
+            }
+          ],
+          "description": "Jarak tempuh 96,5 km: kontrak 100 km, harus 200. Ini kelas terpanjang yang dilayani; p95 1,4-1,7 s (paper/RESULTS.md §19)."
+        },
+        {
+          "name": "Jakarta - Bandung 116 km garis lurus (di atas batas)",
           "request": {
             "method": "GET",
             "header": [],
@@ -527,13 +563,13 @@
               ]
             }
           },
-          "description": "Di atas batas 40 km: untuk uji kapasitas/tail, jangan dipakai app.",
+          "description": "Garis lurus 116,2 km > batas 100 km: pre-check menolak 422 sebelum snap/A*. Untuk uji kapasitas/tail jalankan server dengan -max-route-km 0 atau 200.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": "pm.test('200', () => pm.response.to.have.status(200));\nconst j = pm.response.json();\npm.test('region + jarak + durasi', () => {\n  pm.expect(j.region).to.be.a('string');\n  pm.expect(j.distance_m).to.be.above(0);\n  pm.expect(j.duration_s).to.be.above(0);\n});\npm.test('points_n cocok dengan points', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\npm.test('snap terisi', () => {\n  pm.expect(j.snap_from_m).to.be.a('number');\n  pm.expect(j.snap_to_m).to.be.a('number');\n});\npm.test('header X-Route-Ms ada', () => pm.expect(pm.response.headers.get('X-Route-Ms')).to.match(/^\\d+$/));\nconst ms = +pm.response.headers.get('X-Route-Ms');\nconsole.log(j.region, j.distance_m + 'm', j.duration_s + 's', j.points_n + ' titik', ms + 'ms');\npm.collectionVariables.set('region', j.region);\npm.collectionVariables.set('etag', pm.response.headers.get('ETag') || '');\n"
+                "exec": "const code = pm.response.code;\npm.test('422 dengan batas 100 km, atau 200 kalau batas dilonggarkan', () => pm.expect([200, 422]).to.include(code));\nif (code === 422) {\n  pm.test('ditolak pre-check garis lurus 100 km', () => {\n    const e = pm.response.json().error;\n    pm.expect(e).to.include('straight-line');\n    pm.expect(e).to.include('100 km');\n  });\n} else {\n  const j = pm.response.json();\n  pm.test('region + jarak + durasi', () => {\n    pm.expect(j.region).to.be.a('string');\n    pm.expect(j.distance_m).to.be.above(0);\n    pm.expect(j.duration_s).to.be.above(0);\n  });\n  pm.test('points_n cocok dengan points', () => pm.expect(j.points).to.have.lengthOf(j.points_n));\n  pm.test('snap terisi', () => {\n    pm.expect(j.snap_from_m).to.be.a('number');\n    pm.expect(j.snap_to_m).to.be.a('number');\n  });\n  console.log(j.region, j.distance_m + 'm', j.duration_s + 's', j.points_n + ' titik');\n}"
               }
             }
           ]
@@ -709,7 +745,7 @@
               ]
             }
           },
-          "description": "Butuh java.graph + sumatra.graph dan -max-route-km 0. Dengan cap default 40 km, precheck Haversine menjawab 422 too_far. Bila 200: region java+sumatra, tiga leg road/ferry/road, dan jumlah distance_m leg sama dengan total.",
+          "description": "Butuh java.graph + sumatra.graph dan -max-route-km 0. Dengan cap default 100 km, precheck Haversine menjawab 422 too_far. Bila 200: region java+sumatra, tiga leg road/ferry/road, dan jumlah distance_m leg sama dengan total.",
           "event": [
             {
               "listen": "test",

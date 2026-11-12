@@ -33,9 +33,11 @@ Kolom OSRM CH belum dijalankan. Binary/image routeid (6,6 MB statis, image
 Kolom yang paling penting untuk app: **rute <=50 km selesai 0,004-0,14 s (p50)
 dan prosesnya memakai 17 MB saat idle, bukan 2,4 GiB**. Trade-off yang diterima:
 tanpa CH/MLD rute jauh melambat (148 km = 2,7-4,2 s di v3/v4; p95 bucket 50-80 km
-E1 = 1,06 s), jadi batas 40 km di app justru menjaga angka ini tetap bagus.
-OSRM tetap ~25x lebih cepat di p50; keunggulan routeid ada di memori, artefak,
-dan preprocess.
+E1 = 1,06 s), jadi batas `-max-route-km` (kini 100 km) menjaga angka ini tetap
+bagus: segmen 50-80 km terukur p50 430-542 ms / p95 1,40-1,74 s, dan 1,3%
+pasangan terpanjang (8/600) berhenti di `422` setelah 5-9 s (batas ekspansi,
+bukan anggaran tabel; `paper/RESULTS.md` §19). OSRM tetap ~25x lebih cepat di
+p50; keunggulan routeid ada di memori, artefak, dan preprocess.
 
 ### Keunggulan yang bisa dipertahankan
 
@@ -73,9 +75,12 @@ dan preprocess.
 7. **Kapasitas terukur per kelas rute** (i3-6100T, `-conc 4`): 74,6 RPS @7 km,
    17 RPS @15 km, dan 42 km 13,8-16,0 RPS pada pengukuran v4 terakhir
    (sebelumnya 11 RPS), saturasi di 4 query paralel. Untuk campuran pasangan
-   <= 40 km (batas `-max-route-km`): p50 24,3 ms `-conc 1` dan plafon
-   23,5-24,9 RPS (`paper/RESULTS.md` §16). Ini kapasitas routeid
-   sendiri; E1 menunjukkan OSRM ~25x lebih cepat p50 untuk satu query.
+   himpunan uji §16 (jarak tempuh <= 40 km): p50 24,3 ms `-conc 1` dan plafon
+   23,5-24,9 RPS (`paper/RESULTS.md` §16). Batas `-max-route-km` produk kini
+   100 km, dan biayanya terukur di §19: bucket 50-80 km p50 430-542 ms,
+   p95 1,4-1,7 s.
+   Ini kapasitas routeid sendiri; E1 menunjukkan OSRM ~25x lebih cepat p50
+   untuk satu query.
 
 ### Batasan (jangan diklaim lebih)
 
@@ -87,7 +92,7 @@ dan preprocess.
   dilayani untuk pasangan ferry yang terdaftar: Merak-Bakauheni
   (`java` + `sumatra`) dan Ketapang-Gilimanuk (`java` + `nusa-tenggara`). Rute
   dijalankan per leg lalu digabung dengan `legs[]`; pasangan lain tetap `422`.
-  Batas `-max-route-km` default 40 km tetap berlaku, jadi rute antarpulau perlu
+  Batas `-max-route-km` default 100 km tetap berlaku, jadi rute antarpulau perlu
   `-max-route-km 0` secara eksplisit. Lihat "Rute lintas selat".
 - Restriction per kelas kendaraan diterapkan (`restriction:motorcar`/`motor_vehicle` untuk car, `motorcycle`/`motor_vehicle` untuk motor); 167 `restriction:conditional` (jam sekolah/pasar) tetap di-skip karena graf statis.
 - **E1 sudah dijalankan; E2 tidak dikerjakan.** Per 2026-11-10, setelah tabel kecepatan
@@ -206,7 +211,7 @@ respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
 | `GET /route?from=lat,lng&to=lat,lng` | rute. Opsional: `format=json\|points\|geojson\|polyline`, `simplify=<m>`, `pin=1`, `restrictions=0` |
 | `GET /healthz` | kesiapan + per region: node/edge, bbox, ban/only rule, dan provenance (`format`, `pbf_sha256`, `built_at`, `source`, `extractor`, `profile`, `profile_sha256`) |
 | `GET /version` | commit + waktu build binary (`-ldflags`), versi Go, OS/arch |
-| `GET /metrics` | Prometheus: `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `route_cross_region_resnapped_total`, `route_cross_region_stitched_total`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
+| `GET /metrics` | Prometheus (gateway publik menjawab `404`; scrape upstream 18080/18081): `route_requests_total{code}`, histogram `route_request_duration_seconds`, `route_inflight`, `route_expansions_total`, `route_fallback_total`, `route_snap_retry_total`, `route_rate_limited_total`, `route_canceled_total`, `route_errors_total{reason}`, `route_cross_region_resnapped_total`, `route_cross_region_stitched_total`, `routeid_workspace_slots`, `routeid_workspace_bytes`, `routeid_workspace_grows_total`, `routeid_workspace_shrinks_total` |
 
 `GET /` menyajikan demo peta untuk mencoba rute dari browser. Aset Leaflet,
 CSS, dan JS di-embed ke binary gateway dan dilayani dari `/assets/*`; halaman
@@ -263,14 +268,19 @@ pertama gagal, jadi jalur normal tidak berubah. Keberhasilannya dihitung di
   `504`) tidak pernah membawa `ETag` dan memakai `Cache-Control: no-store`.
   Semua respons memasang `Vary: Accept-Encoding`; `Content-Encoding: gzip`
   hanya pada respons yang punya body (tidak pada `304`/`204`).
-- **Deadline `-timeout` (default 10 s).** `context` diteruskan ke dalam A* dan
-  dicek tiap 256 ekspansi; lewat batas → `504 {"error":"deadline exceeded"}` dan
-  workspace langsung dilepas. Klien yang memutus koneksi juga membatalkan
-  pencarian.
+- **Batas waktu `-timeout` (default 10 s) dan batas lunak `-budget` (default
+  60% `-timeout` = 6 s).** `context` diteruskan ke dalam A* dan dicek tiap 256
+  ekspansi. Batas lunak lebih dulu: pencarian yang melewatinya menjawab
+  `422 {"error":"search budget 6s exceeded (route too long)"}`
+  (`route_errors_total{reason="budget"}`), supaya rute yang tidak bisa
+  diselesaikan tidak muncul sebagai `504` yang kemunculannya bergantung pada
+  beban mesin. `504 {"error":"deadline exceeded"}` tinggal untuk batas keras dan
+  klien yang memutus koneksi. Plafon ekspansi `-max-expansions` (default 4 juta)
+  tetap deterministik di semua mesin.
 - **Rate limit `-rate`/`-burst` (default 15/menit per IP, burst 5)** → `429` +
   `Retry-After`. Di belakang reverse proxy pakai `-trust-proxy` supaya IP diambil
   dari `X-Forwarded-For`; tanpa flag itu header diabaikan (tidak bisa dipalsukan).
-- **Batas jarak `-max-route-km` (default 40, `0` = nonaktif).** Dua penjagaan:
+- **Batas jarak `-max-route-km` (default 100, `0` = nonaktif).** Dua penjagaan:
   jarak garis lurus (great-circle, batas bawah jarak tempuh) ditolak `422` tepat
   setelah validasi koordinat, sebelum ETag/rate-limit/snap/A*; lalu jarak
   tempuh hasil rute dicek lagi setelah `RouteSnapCtx` supaya rute pendek yang
@@ -393,7 +403,7 @@ impor file environment Postman, jadi pakai folder `docs/bruno/` di atas):
 |---|---|
 | `docs/routeid.postman_collection.json` | 21 request inti (set sebelum gateway; koleksi Bruno di atas yang terbaru), tiap request punya test script Postman. |
 | `docs/routeid.postman_environment-local.json` | `baseUrl = http://127.0.0.1:8080` |
-| `docs/routeid.postman_environment-homelab.json` | `baseUrl = http://192.168.1.219:8080` |
+| `docs/routeid.postman_environment-homelab.json` | `baseUrl = https://route.arifsani.xyz` |
 
 Import collection lalu environment (Postman: File → Import; Hoppscotch:
 Collections → Import → Postman), pilih environment di kanan atas. Tanpa
@@ -405,12 +415,13 @@ memuat `data/java.graph` menjawab 422 dan test menerima itu; homelab memuat
 `java`, `sumatra`, `nusa-tenggara`. Homelab memakai `-rate 15` per menit
 (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang-ulang:
 request identik dengan `If-None-Match` dibalas 304 dan tidak memakan kuota.
-Di homelab kedua profil ada di satu base URL `http://192.168.1.219:8080`:
+Di homelab kedua profil ada di satu base URL `https://route.arifsani.xyz`:
 tambahkan `&profile=motor` untuk motor. Port 8081 tidak lagi dipakai klien;
-upstream-nya hanya mendengarkan di loopback homelab (18080/18081).
+upstream-nya hanya mendengarkan di loopback homelab (18080/18081). Akses
+publik lewat Cloudflare Tunnel; port 8080 host hanya loopback.
 
 Kalau dijalankan di emulator/HP, ganti `127.0.0.1` jadi `10.0.2.2` (emulator
-Android) atau IP LAN mesin (`hostname -I`) lewat environment variable.
+Android) atau IP LAN mesin (`ip -4 addr show scope global`) lewat environment variable.
 
 Atau manual di Hoppscotch:
 
@@ -421,8 +432,9 @@ Atau manual di Hoppscotch:
 
 `http://127.0.0.1:8080` boleh dipanggil dari `hoppscotch.io` (HTTPS) karena
 server mengirim `Access-Control-Allow-Private-Network: true`. Kalau browser
-tetap memblokir, pakai Hoppscotch desktop, atau tunnel:
-`cloudflared tunnel --url http://localhost:8080`.
+tetap memblokir, pakai Hoppscotch desktop. Untuk domain tetap, ikuti
+`deploy/README.md` §1d (Cloudflare Tunnel); quick tunnel
+`cloudflared tunnel --url http://localhost:8080` hanya untuk uji sementara.
 
 ### Cek hasil rute tanpa app
 
@@ -490,8 +502,8 @@ Load test: `scripts/loadtest.py`.
 | 15 km (Yogyakarta) | 136 ms | ~17 | 4 |
 | 148 km (Jakarta–Bandung) | 4,2 s | ~0,6 | 4 |
 
-Kalau rute dibatasi maksimum 40 km (batas desain aplikasi), acuan yang dipakai
-adalah baris 42 km (Jakarta -> Cikarang), bukan 148 km:
+Kalau rute dibatasi maksimum 100 km (batas aplikasi), acuan tetap baris 42 km
+(Jakarta -> Cikarang) untuk segmen pendek, ditambah himpunan 100 km di §19:
 
 Angka sebelum M3 (baris 42 km Jakarta -> Cikarang, `-conc 4`): RPS puncak 10,9
 dan server p50 326 ms. Sesudah M3, di box yang sama, rute 41,7 km dengan
@@ -528,18 +540,22 @@ himpunan pasangan <= 40 km, bukan satu rute contoh: 298 dari 600 pasang
 | 8 | 24,9 | 192,7 ms | 1.205,0 ms |
 
 Plafon ~24-25 RPS di 2 core fisik; `-conc 2` memberi p50 sepertiga `-conc 4`
-pada RPS yang sama, jadi untuk batas 40 km `-conc 2` cukup. Untuk segmen ini
+pada RPS yang sama, jadi untuk himpunan <= 40 km `-conc 2` cukup. Pada kontrak
+100 km `-conc 4` yang dipakai: 4 query paralel 50-80 km tetap stabil
+(p95 ok 899 ms, RSS tidak melejit; §19). Untuk segmen ini
 akurasi E1 juga lulus: p95 selisih jarak 7,44% (median 0,03%) pada 324 pasang
 OSRM <= 40 km. Rincian: `paper/RESULTS.md` §16.
 
 Memori dengan build pool bersama (600 pasang `pairs-java.csv`, tiga region,
-`-conc 4`, sesudah beban; `paper/RESULTS.md` §17e):
+`-conc 4`, sesudah beban; `paper/RESULTS.md` §17e; baris terakhir §19, mesin
+Ryzen 5 5600G):
 
 | build | beban | anon | RSS | tabel workspace |
 |---|---|---|---|---|
 | `f9693f8` (12 tabel) | 600 pasang, tanpa batas | 462 MB | 1.138 MB | tak terukur |
 | `8e2dc11` (pool 4) | 600 pasang, tanpa batas | 415 MB | 1.087 MB | 126 MB |
 | `8e2dc11` | 40 km (`-max-route-km 40`), `GOMEMLIMIT=1GiB` | 311 MB | 958 MB | 201 MB dari 256 MB |
+| build M6 | 100 km (`-max-route-km 100`), `-conc 4 -workspace-mb 256` | 425 MB | 1.087 MB | 125,8 MB dari 256 MB |
 
 RSS di atas menghitung halaman `mmap` graf yang tersentuh (Java+Sumatra+
 Nusa-Tenggara = 1,21 GB berkas, `Pss` ~= `Rss`); bagian yang dikendalikan
@@ -655,7 +671,8 @@ merutekan tiap leg di graph masing-masing, lalu menyambung ferry:
 di dalam leg Sumatra. `relaxed=true` muncul karena leg Sumatra 1.797 km masih
 menabrak batas ekspansi yang sama seperti graph nasional; W5 tidak mengubah
 heuristik atau batas itu. Tanpa `-max-route-km 0`, precheck Haversine menolak
-kedua query dengan `422` `too_far` sebelum snap. Default produk tetap 40 km.
+kedua query dengan `422` `too_far` sebelum snap. Default produk kini 100 km;
+533 km dan 1.942 km keduanya di atas itu.
 
 Hanya pasangan yang terdaftar yang dilayani. Pasangan lain, misalnya
 Jakarta -> Pontianak, tetap `422` dengan pesan

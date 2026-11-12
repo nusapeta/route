@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -37,6 +38,8 @@ type gateway struct {
 	mobil, motor *upstream
 	def          string
 	client       *http.Client
+	trustProxy   bool
+	blockMetrics bool
 }
 
 func main() {
@@ -44,12 +47,14 @@ func main() {
 	mobil := flag.String("mobil", "http://127.0.0.1:18080", "car profile upstream")
 	motor := flag.String("motor", "http://127.0.0.1:18081", "motorcycle profile upstream")
 	def := flag.String("default", profileMobil, "profile served when the request has no profile parameter")
+	trustProxy := flag.Bool("trust-proxy", false, "take the client IP from CF-Connecting-IP or X-Forwarded-For (only behind a trusted proxy)")
+	blockMetrics := flag.Bool("block-metrics", false, "answer /metrics with 404 instead of proxying it")
 	flag.Parse()
 
 	if *def != profileMobil && *def != profileMotor {
 		log.Fatalf("-default must be %q or %q", profileMobil, profileMotor)
 	}
-	g := newGateway(*mobil, *motor, *def)
+	g := newGateway(*mobil, *motor, *def, *trustProxy, *blockMetrics)
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -64,7 +69,7 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
-func newGateway(mobil, motor, def string) *gateway {
+func newGateway(mobil, motor, def string, trustProxy, blockMetrics bool) *gateway {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.MaxIdleConnsPerHost = 32
 	tr.IdleConnTimeout = 90 * time.Second
@@ -72,7 +77,12 @@ func newGateway(mobil, motor, def string) *gateway {
 	// decided whether to gzip.
 	tr.DisableCompression = true
 
-	g := &gateway{def: def, client: &http.Client{Timeout: 15 * time.Second}}
+	g := &gateway{
+		def:          def,
+		client:       &http.Client{Timeout: 15 * time.Second},
+		trustProxy:   trustProxy,
+		blockMetrics: blockMetrics,
+	}
 	for _, u := range []struct {
 		name string
 		raw  string
@@ -96,6 +106,12 @@ func newGateway(mobil, motor, def string) *gateway {
 				pr.Out.Header.Del("X-Forwarded-For")
 				pr.Out.Header.Del("X-Real-IP")
 				pr.SetXForwarded()
+				if g.trustProxy {
+					if ip := forwardedClientIP(pr.In.Header); ip != "" {
+						pr.Out.Header.Set("X-Forwarded-For", ip)
+						pr.Out.Header.Set("X-Real-IP", ip)
+					}
+				}
 			},
 			ModifyResponse: func(res *http.Response) error {
 				res.Header.Set("X-Route-Profile", up.name)
@@ -115,8 +131,37 @@ func newGateway(mobil, motor, def string) *gateway {
 	return g
 }
 
+// forwardedClientIP reads the address a trusted proxy put in front of the
+// request. Cloudflare Tunnel sets CF-Connecting-IP; other proxies only set
+// X-Forwarded-For. Invalid values fall back to the transport address, because
+// using an arbitrary string as a rate-limit key would let one client mint
+// unlimited buckets.
+func forwardedClientIP(h http.Header) string {
+	for _, name := range []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"} {
+		raw := h.Get(name)
+		if raw == "" {
+			continue
+		}
+		if i := strings.IndexByte(raw, ','); i >= 0 {
+			raw = raw[:i]
+		}
+		ip := strings.TrimSpace(raw)
+		if host, _, err := net.SplitHostPort(ip); err == nil {
+			ip = host
+		}
+		if net.ParseIP(ip) != nil {
+			return ip
+		}
+	}
+	return ""
+}
+
 func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if g.serveStatic(w, r) {
+		return
+	}
+	if g.blockMetrics && r.URL.Path == "/metrics" {
+		http.NotFound(w, r)
 		return
 	}
 	if r.URL.Path == "/healthz" && r.URL.Query().Get("profile") == "" {

@@ -124,8 +124,8 @@ normal tidak berubah, dan keberhasilannya dihitung di `route_snap_retry_total`.
 
 Monas di `/route` motor: `422` → `200` (3806 m, snap 338 m). Satu pasangan mobil
 yang sebelumnya `no_route` sekarang berakhir di `too_far` (46,4 km, melewati
-`-max-route-km` 40 km), jadi `422` anggaran ekspansi tetap 4-7 dan itu batasan
-anggaran, bukan snap. Diulang pada image `81722ea` di homelab dengan pasangan
+`-max-route-km` lama 40 km), jadi `422` anggaran ekspansi tetap 4-7 dan itu
+batasan anggaran, bukan snap. Diulang pada image `81722ea` di homelab dengan pasangan
 yang sama: motor 196 ok / 0 `no_route` / 4 (habis `-timeout` 10 s), mobil
 193 / 0 / 7, `route_snap_retry_total` 6 dan 10.
 
@@ -157,22 +157,37 @@ menaikkan RPS tanpa core tambahan hanya mengurangi ekspansi.
    graf berarah juga jarak ke landmark (arah balik).
 3. Heuristik: `max_l max(|d(l,v) - d(l,t)|, |d(v,l) - d(t,l)|)`, di-scale eps.
    Tetap admissible karena Dijkstra penuh.
-4. Ukur: ekspansi, latency, RSS tambahan (16 x 4 B x 22,7 jt = 145 MB untuk Java,
-   **terlalu besar**; alternatif: 8 landmark uint32 = 72 MB, atau simpan
-   `uint24`, atau landmark hanya untuk node di jalan kelas >= tertiary).
+4. Ukur: ekspansi, latency, RSS tambahan. Aritmetika Java (22.712.775 node):
+   satu array uint32 per landmark = 90,9 MB, jadi 16 landmark = **1,45 GB satu
+   arah** (2,9 GB kalau arah balik ikut) — jelas tidak mungkin. Dengan uint16
+   bersaturasi: 2 landmark x 2 arah = **182 MB**, 4 landmark x 2 arah = **364 MB**.
 
-**Status M3: ditunda, dengan angka.** Setelah M3 menurunkan biaya per ekspansi
-1,9-2,0x (lihat RESULTS §10), ALT harus dinilai ulang: keuntungannya sekarang
-hanya mengurangi ekspansi, bukan lagi menghilangkan 39% CPU trigonometri. Biaya
-terukur: `d(l,·)` sebagai `uint16` (skala 1/8 detik, saturasi admissible karena
-`min(d,cap)` tetap batas bawah) = 4 landmark x 2 B x 22,7 jt = **182 MB Java**,
-2 landmark = 91 MB. Rencana sidecar: file `map.alt` terpisah (magic, jumlah
-landmark, id landmark, array uint16), dibuka hanya kalau flag `-alt map.alt`
-diberikan, sehingga budget "ringan" tetap berlaku untuk deploy default.
+**Status M3: ditunda karena manfaatnya belum terbukti, bukan karena mustahil.**
+Setelah M3 menurunkan biaya per ekspansi 1,9-2,0x (lihat RESULTS §10), ALT hanya
+mengurangi ekspansi; 39% CPU trigonometri sudah hilang. Gerbang keputusannya:
+kalau +182 MB menaikkan RPS 2x, kerjakan; kalau hanya 1,2x, tolak.
 
-**Catatan penting.** Karena biaya memorinya besar, ALT harus diuji terhadap
-budget: kalau +91 MB menaikkan RPS 2x, densitas tetap naik, jadi masih layak;
-kalau hanya 1,2x, tolak dan pilih opsi lain.
+**Aritmetika memori (dikoreksi 2026-11-12; versi lama salah 10x di baris
+uint32 dan lupa arah balik di baris uint16).** `d(l,·)` sebagai `uint16` (skala
+1/8 detik, saturasi admissible karena `min(d,cap)` tetap batas bawah): per
+landmark butuh dua array (dari dan ke landmark) = 90,9 MB Java. Jadi 2 landmark
+= **182 MB**, 4 landmark = **364 MB**. Rencana sidecar tetap: file `map.alt`
+terpisah (magic, jumlah landmark, id landmark, array uint16), dibuka hanya
+kalau flag `-alt map.alt` diberikan.
+
+**Biaya build terukur 2026-11-12 (bukan perkiraan).** Satu Dijkstra penuh
+(heap 4-ary, tanpa turn cost) atas Java 22,7 jt node / 46,7 jt edge: 2,03 /
+2,07 / 2,07 s, 22,6 jt pop per pass, single thread di Ryzen 5 5600G. ALT 2
+landmark = 4 pass (maju + balik) ~= 8 s; 4 landmark ~= 17 s; tujuh region
+selesai dalam hitungan menit. Build bukan penghalang.
+
+**Baseline runtime 2026-11-12 (satu region Java, `-conc 4`, rute 42 km).**
+`Rss` 141 MB, `Anonymous` 102 MB, tabel workspace 52,7 MB. 2 landmark: 141 +
+182 = **323 MB**, masih di bawah anggaran 350 MB dengan sisa ~27 MB; 4 landmark:
+505 MB, **tidak muat**. Karena itu kalau ALT dikerjakan, batasnya 2 landmark
+(atau sidecar `mmap` yang RSS-nya hanya sebesar halaman tersentuh). Angka Rss
+1,02-1,10 GB pada cap 100 km berasal dari tiga region ter-mmap, bukan heap
+(lihat item 8).
 
 **Lulus bila.** >= 20 RPS @42 km di i3-6100T, RSS beban <= 350 MB, jarak rute
 identik (golden).
@@ -192,6 +207,14 @@ Dua arah juga menggandakan frontier, jadi penghematan workspace hanya ~25%.
 Opsi berikutnya kalau tetap dikerjakan: reverse CSR sebagai sidecar opt-in
 sama seperti ALT, dibangun `rid-extract -reverse` setelah graph utama.
 
+**Koreksi bingkai 2026-11-12.** "Tertahan" di sini berarti keputusan produk,
+bukan ketidakmungkinan: build reverse CSR hanya satu pass 46,7 jt edge (<1 s di
+mesin ini, bandingkan Dijkstra penuh 2,07 s), dan TOTAL 278 MB Java itu nyata
+(46.676.434 x 4 B = 186,7 MB `Rto` + 22.712.776 x 4 B = 90,9 MB `Roff`). Yang
+menolak adalah anggaran 350 MB: 141 MB baseline + 278 MB = 419 MB. Karena itu
+jalurnya sidecar opt-in dengan anggaran sendiri, atau diterima hanya untuk
+deploy 1 region ber-`mem_limit` lebih besar.
+
 **Lulus bila.** Ekspansi turun >= 30% untuk rute 15-42 km tanpa perubahan jarak.
 
 ### 8. Prealokasi workspace A* (S), selesai sebagian (M3)
@@ -209,6 +232,16 @@ berhenti; yang lebih menentukan puncak adalah ukuran tabel, bukan penyalinan.
 **Lulus bila.** Rute 148 km memakai <= 60% heap sekarang; tidak ada regresi
 latency > 5%. (Butuh pengukuran ulang puncak heap dengan graph 148 km; angka
 876 MB berasal dari graph sebelum v3.)
+
+**Hasil ukur 2026-11-12 (graph v4, `-conc 1 -workspace-mb 256`).** Jakarta-Bandung
+148 km: `200` dalam 2,04 s, `Anonymous` 164 MB, `Rss` 233 MB, tabel workspace
+100.663.296 B / 8,39 jt slot (dari 22,3 jt slot yang diizinkan). Diulang 20x
+berturut-turut: `Anonymous` stabil di 163,7 MB, `Rss` 238,9 MB, tabel tidak
+tumbuh lagi. Batas 60% dari puncak lama (876 MB) = 526 MB, jadi kriteria heap
+lulus dengan margin ~3x; yang tersisa hanya "tidak ada regresi latency > 5%",
+dan itu menunggu baseline latency dari graph yang sama. Untuk konteks, satu
+region (Java, `-conc 4`) setelah rute 42 km: `Rss` 141 MB, `Anonymous` 102 MB —
+masih di bawah anggaran 350 MB item 6/7.
 
 ---
 
@@ -230,18 +263,23 @@ tersedia untuk request berikutnya.
 `ctx.Err()` di loop A*, dan membalas `504 {"error":"deadline exceeded"}`.
 Default 10 s lewat `-timeout`; test handler menutup kontrak ini.
 
-### 10. Rate limit & bind (S), selesai sebagian (M4)
+### 10. Rate limit & bind (S), selesai (M4)
 
 **Rencana.** Pembatas token-bucket per IP (15/menit, burst 5) sebagai middleware;
-`-bind 127.0.0.1` default di `deploy/docker-compose.yml` + Caddy `reverse_proxy`.
+bind loopback + reverse proxy/TLS di depan.
 
 **Lulus bila.** `ab`/loop 100 request dari satu IP menghasilkan `429` setelah
 jatah, tanpa memengaruhi IP lain.
 
 **Hasil (M4).** Token bucket per IP (default 15/menit, burst 5) aktif, dengan
 `-trust-proxy` untuk `X-Forwarded-For`; balasan `429` memuat `Retry-After`.
-**Sisa:** bind `127.0.0.1` + Caddy belum dipasang karena homelab tidak memakai
-reverse proxy dan bind loopback akan memutus akses LAN/Postman.
+
+**Bind & TLS (2026-11-11).** Gateway dipetakan `127.0.0.1:8080:8080` di
+`deploy/docker-compose.yml`; upstream tetap `127.0.0.1:18080/18081`. TLS dan
+nama domain datang dari Cloudflare Tunnel milik 1Panel, bukan Caddy: tidak ada
+port yang mendengarkan di `0.0.0.0`, dan `192.168.1.219:8080` menolak koneksi.
+Karena edge Cloudflare, `-trust-proxy` mengambil `CF-Connecting-IP` lebih dulu
+supaya bucket tetap per pengunjung, bukan per container `cloudflared`.
 
 ### 11. `/metrics` (S), selesai (M4)
 
@@ -258,6 +296,11 @@ yang dilakukan manual.
 `route_relaxed_total`, `route_rate_limited_total`, `route_canceled_total`,
 `route_errors_total{reason}`, `route_cross_region_*`, `route_snap_retry_total`,
 dan `routeid_build_info`.
+
+**Publik (2026-11-11).** Gateway compose memakai `-block-metrics`, jadi
+`https://route.arifsani.xyz/metrics` menjawab `404`; scrape tetap langsung ke
+upstream loopback `127.0.0.1:18080/metrics` dan `127.0.0.1:18081/metrics`
+(`200`). Filter dilakukan di aplikasi, bukan lewat aturan path Cloudflare.
 
 ### 12. ETag & cache (S), selesai (M4)
 
@@ -336,7 +379,8 @@ Smoke `java.graph,sumatra.graph` dengan `-max-route-km 0`: Jakarta -> Palembang
 200, 533,5 km, 3 leg, 0,35 s, tanpa `relaxed`; Jakarta -> Medan 200, 1.941,9 km,
 3 leg, 3,2 s, `relaxed=true`. Leg Sumatra 1.797 km masih menabrak batas
 ekspansi, jadi kriteria "tanpa relaxed kalau bisa dihindari" belum lulus tanpa
-pekerjaan W6. Default `-max-route-km 40` tidak diubah; rute antarpulau harus
+pekerjaan W6. Default `-max-route-km` 40 pada saat itu (kini 100, lihat
+`paper/RESULTS.md` §19); rute antarpulau harus
 menaikkan flag.
 
 **Sisa.** Konektor baru butuh entri tabel dan verifikasi koordinat pelabuhan;
@@ -350,6 +394,27 @@ besar (1,65 GB, 8 menit).
 ini tanda batas: rute >800 km sebaiknya lewat hierarki (highway graph dulu,
 lalu detail di sekitar ujung), bukan menaikkan `maxExpansions`.
 
+**Kontrak 100 km (2026-11-12).** Setelah `-max-route-km` dinaikkan 40 -> 100,
+7-8 dari 600 pasangan `pairs-java.csv` gagal `422 search space exhausted`
+setelah 5-9 s. Diulang dengan `-workspace-mb` 256/512/2048 hasilnya identik,
+jadi yang habis `maxExpansions`, bukan tabel; menaikkan anggaran tabel tidak
+menolong.
+Sampai hierarki ada, biaya ini diterima dan didokumentasikan di
+`paper/RESULTS.md` §19.
+
+**Ekor 80-100 km dan 504 (ditutup 2026-11-12).** Bench 600 pasangan berhenti di
+79,9 km garis lurus, jadi pita 80-100 km tidak pernah terukur. Di i3-6100T
+pasangan 98,4 km menghabiskan 6 juta ekspansi dalam 12,8 s sehingga lewat
+`-timeout 10s` dan dijawab `504`; pasangan 91,8 km selesai 10,01-10,02 s,
+jadi statusnya 422 atau 504 tergantung beban. Biaya ekspansi i3: 3 jt = 9,0 s,
+4 jt = 11,2 s, 6 jt = 12,8 s, sehingga tidak ada plafon statis yang selalu
+mendahului batas waktu keras. Perbaikan yang dipakai: `-budget` 6 s (batas lunak
+-> `422 search budget 6s exceeded`, metrik `reason="budget"`) plus
+`-max-expansions` 4 juta sebagai plafon deterministik. 481 rute 200 pada bench
+maksimum 3.186.176 ekspansi (p99 2,73 jt, median 141 rb), jadi 4 juta tidak
+memotong satu pun rute yang berhasil. Verifikasi homelab: 98,4 dan 91,8 km ->
+422 pada 6,02 s, 96,4 km -> 200 0,18 s, `code="504"` tetap 0.
+
 ### 14b. Jadwal ferry (S)
 
 `duration` OSM sering kosong atau kasar; untuk Merak-Bakauheni hasilnya 1,45 jam
@@ -362,10 +427,12 @@ Ketujuh region punya artefak motor: Java 682 MB, Sumatra 349, Kalimantan 207,
 Sulawesi 167, Bali-Nusra 148, Maluku 25, Papua 35. Total 1,6 GB untuk 7 region
 (dibangun 1m09s..3m53s per region, 4 worker).
 
-Sisa: server belum bisa mengalihkan profil per-request; satu proses = satu
-profil (dua file graph, dua container, atau buka dua region dengan nama
-`java-motor`). Kalau perlu satu proses dua profil, `region` harus menyimpan
-pasangan graph dan `pickSnap` memilih berdasarkan param `profile`.
+Sisa: satu proses tetap satu profil. Pengalihan per-request sekarang
+ditangani `rid-gateway` di depannya (`routeid` mobil di 18080, `routeid-motor`
+di 18081, satu base URL `https://route.arifsani.xyz` dengan `profile=motor`),
+bukan oleh `rid-server`. Kalau kelak ingin satu proses dua profil, `region`
+harus menyimpan pasangan graph dan `pickSnap` memilih berdasarkan param
+`profile`.
 
 ### 16a. Restriction per kelas kendaraan, selesai (E1 audit)
 **Hasil.** Pemilihan tag kini mengikuti profil: car `restriction:motorcar` ->
@@ -411,7 +478,7 @@ ETA +1,6% median (0,25x). 1x memperbaiki outlier ekstrem (max 48,30% ->
 **Kriteria lulus (p95 turun tanpa ETA +2%) tidak tercapai** untuk p95; dipilih
 0,25x sebagai tie-break termurah. Sisa selisih -> 16d.
 
-### 16d. Kalibrasi tabel kecepatan kelas jalan (M)
+### 16d. Kalibrasi tabel kecepatan kelas jalan (M), selesai lewat D4
 **Masalah.** Ekor p95 E1 (21%) tidak bergerak oleh penalti belok
 (`RESULTS.md` §15). Routeid 1-3% lebih cepat di modelnya sendiri dengan jarak
 15-30% lebih panjang: tabel kecepatan per kelas (dipakai juga oleh OSRM
@@ -429,6 +496,12 @@ Gerbang jarak belum lulus; D4 mengganti metrik primer ke p95 durasi absolut
 
 **Lulus bila.** p95 selisih jarak < 12% pada 332 pasangan E1 tanpa menaikkan
 durasi median > 2%, atau metrik primer E1 diganti durasi secara eksplisit.
+
+**Status: lulus lewat klausa kedua (D4).** Gerbang jarak tidak tercapai (p95
+14,49%), dan keputusan D4 mengganti metrik primer E1 ke p95 durasi absolut
+10,22%; lihat `docs/ROADMAP.md` baris D4 dan `paper/RESULTS.md` §18. Tidak ada
+pekerjaan kalibrasi tabel yang tersisa di backlog ini; tabel mobil sudah sama
+dengan `car.lua` OSRM (`profile_sha256=c2240e41...`).
 
 ### 16. Restriction via-way (M), selesai (E1)
 
@@ -456,7 +529,7 @@ yang tersimpan; 116 aturan yang dilonggarkan tidak masuk sampel.
 
 ## Demo publik
 
-### 18. Peta coba publik (M), selesai sebagian (kode + LAN)
+### 18. Peta coba publik (M), selesai sebagian (kode + HTTPS publik)
 
 **Masalah.** Saat ini orang hanya bisa mencoba routeid lewat curl/Bruno/Postman
 atau integrasi Flutter. Belum ada halaman yang bisa dibuka di browser dan
@@ -482,6 +555,8 @@ manual dan menempel GeoJSON ke geojson.io.
    daripada menambah tile server ke repo.
 7. Deploy di belakang HTTPS (Caddy/tunnel yang sama dengan gateway). `/metrics`
    tidak diekspos ke publik; rate limit 15/menit per IP tetap berlaku.
+   **[x] 2026-11-11:** live di `https://route.arifsani.xyz` lewat Cloudflare
+   Tunnel 1Panel.
 
 **Status (2026-11-10).** Langkah 1-6 selesai. `web/` di-embed ke `rid-gateway`;
 `GET /` dan `/assets/*` dilayani same-origin dengan CSP dan `no-cache`, tanpa
@@ -490,17 +565,42 @@ memulihkan rute, dan panel hasil hanya menampilkan field respons. Verifikasi
 lokal di Chromium: rute Jakarta 2,39 km, 3 mnt, snap 4/16 m; ponsel 320 dan 360
 px tanpa overflow, tombol 44 px, rute tetap di atas panel.
 
-**Deploy LAN (2026-11-10, diperbarui 2026-11-11).** Stack Compose aktif di
-homelab pada `http://192.168.1.19:8080/`, image `routeid:local` dari commit
-`a7ad841` (built `2026-11-11T11:30:04Z`).
-`/healthz` melaporkan profil mobil dan motor sehat. `/route` mobil 2390 m /
-208,7 s dan motor 2390 m / 212,1 s; peta memuat aset dan rute di Chromium tanpa
-error console. `/metrics` masih menjawab `200` dari LAN.
+**Deploy publik (2026-11-11).** Stack Compose homelab aktif dengan gateway
+hanya `127.0.0.1:8080`; LAN `192.168.1.219:8080` menolak koneksi. Image
+`routeid:local` dari commit `ca6d050-dirty` (built
+`2026-11-11T14:58:55Z`), rollback tag `routeid:pre-cloudflare`. Container
+`cloudflared-tunnel` milik 1Panel sudah berjalan di `1panel-network`; gateway
+diberi alias network `gateway` lewat `deploy/docker-compose.homelab.yml`, jadi
+ingress `http://gateway:8080` resolve tanpa membuka port host. Tidak memakai
+profile compose `cloudflare` karena connector kedua tidak bisa me-resolve
+origin 1Panel lain.
 
-**Sisa deploy.** Belum ada reverse proxy, HTTPS, atau tunnel, jadi ini belum
-endpoint internet. Sebelum port dibuka ke internet: pasang edge TLS, blokir
-`/metrics` dari publik tanpa memutus monitoring internal, dan pasang rate limit
-edge. Image serta graph sudah dibangun ulang.
+Verifikasi publik: `https://route.arifsani.xyz/healthz` `200` dan melaporkan
+mobil + motor sehat; `/version` mengembalikan `ca6d050-dirty`; `/`,
+`/assets/app.js`, dan `/route` masing-masing `200`; `/metrics` `404`.
+Rate limit per IP di gateway homelab: dua header `CF-Connecting-IP` berbeda
+masing-masing `200` lima kali lalu `429`; dari publik, request berurutan
+menghabiskan bucket yang sama. Scrape upstream `127.0.0.1:18080/metrics` tetap
+`200`.
+
+**Catatan insiden.** Route Cloudflare sempat `502` dengan log
+`lookup gateway ... no such host` karena cloudflared ada di `1panel-network`
+sedangkan gateway hanya di `deploy_default`. Perbaikan: gateway ikut
+`1panel-network` dengan alias `gateway`; tidak perlu mengubah route Cloudflare.
+
+**Verifikasi ponsel (2026-11-12, viewport 360x740, sentuh).** Dari publik,
+klik dua titik di Jakarta (-6,16923/106,79672 -> -6,20336/106,84479) lalu
+"Hitung rute": 9,97 km / 11 mnt dalam 232 ms. Toggle "Motor" mengubah hasil ke
+12 mnt dengan `profile=motor` di request dan region `java-motor` di panel. URL
+state Monas -> Kuningan memulihkan rute (8,98 km, snap 311/6 m) dalam 319 ms;
+"Salin tautan" menyalin URL yang sama; pin di laut (Teluk Jakarta) menampilkan
+pesan 422 sebagai teks panel, bukan JSON; `scrollWidth` 360 = lebar viewport dan
+semua tombol 44 px. Jadi kriteria ponsel di bawah lulus.
+
+**Sisa.** `http://route.arifsani.xyz/healthz` masih menjawab `200` (dicek ulang
+2026-11-12), belum redirect; aktifkan **Always Use HTTPS** di Cloudflare
+(SSL/TLS -> Edge Certificates) kalau ingin HTTPS-only. Itu setelan dashboard,
+bukan kode.
 
 **Lulus bila.** Dari browser ponsel, buka `/`, klik dua titik, dan dapat garis
 serta jarak/durasi < 2 s untuk rute 10 km. Toggle mobil/motor mengubah rute; URL
@@ -510,6 +610,40 @@ tetap lulus dan binary tetap satu file. Tidak ada API key di client.
 **Biaya.** M.
 **Risiko.** Kebijakan tile OSM dan kuota publik; mitigasi: atribusi, tanpa
 prefetch, batas zoom, dan siap pindah tile source.
+
+### 18b. Pesan 422 yang bisa dibaca pengguna (S)
+
+**Masalah.** Pin di luar jaringan jalan (laut, hutan, pulau kecil tanpa jalan di
+graf) menjawab `422` dengan teks internal `no road within snap distance (region
+not loaded?)`, dan panel demo menampilkannya apa adanya
+("Gagal menghitung rute. Titik tidak bisa dirutekan. no road within snap
+distance (region not loaded?)"). Tanda tanya "region not loaded?" membingungkan
+pengguna yang memang menaruh pin di laut.
+
+**Bukti.** Pin Teluk Jakarta `-6.02926,106.81664` -> `422` di publik
+(2026-11-12). Pada 600 pasangan `pairs-java.csv` dengan cap 100 km, 72/600
+(12%) gagal dengan pesan yang sama; angka itu identik di cap 40 km, jadi ini
+bukan regresi batas jarak (`paper/RESULTS.md` §19).
+
+Sejak batas lunak `-budget` (2026-11-12) ada dua teks internal lagi yang
+tampil di panel: `search budget 6s exceeded (route too long)` dan
+`search space exhausted (route too long)`. Pecahan `reason` yang direncanakan:
+`no_road_near_point`, `too_far`, `search_budget`, `exhausted`,
+`deadline_exceeded`; teks Indonesia dipetakan di `web/static/app.js`, `error`
+tetap stabil supaya Bruno/Postman tidak perlu berubah.
+
+**Rencana.** Pertahankan `error` mesin yang stabil (dipakai
+`cmd/rid-server/distance_test.go`), tambah field `reason` bertipe
+(`no_road_near_point`, `too_far`, `search_space_exhausted`,
+`deadline_exceeded`) dan peta teks Indonesia di klien (`web/app.js`). Server
+tidak perlu tahu bahasa. Kalau `reason` diterima klien lain (Flutter), versi
+berikutnya bisa memakai teks server.
+
+**Lulus bila.** Panel demo menampilkan kalimat Indonesia tanpa istilah internal
+untuk keempat `reason`, `error` lama tidak berubah, dan Bruno/Postman tetap
+lulus tanpa penyesuaian assertion.
+
+**Biaya.** S.
 
 ---
 

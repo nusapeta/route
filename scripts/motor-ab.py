@@ -17,8 +17,8 @@ Contoh lewat gateway (profil dipilih di query string):
         --motor 'http://192.168.1.219:8080?profile=motor' \
         --pause 4.2 --csv paper/results/motor-ab.csv
 
-Pasangan yang jaraknya >40 km akan 422 di profil motor; itu dicatat sebagai
-error, bukan dibuang, supaya batas produk tetap terlihat di data.
+Pasangan yang jaraknya >100 km akan 422; itu dicatat sebagai error, bukan
+dibuang, supaya batas produk tetap terlihat di data.
 """
 import argparse
 import csv

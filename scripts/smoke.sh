@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Quick end-to-end check against a running server.
 # Usage: scripts/smoke.sh [base-url]   (default http://127.0.0.1:8080)
+# Public gateway blocks /metrics; set METRICS_BASE=http://127.0.0.1:18080.
 set -euo pipefail
 base="${1:-http://127.0.0.1:8080}"
+metrics_base="${METRICS_BASE:-$base}"
 from="${2:--6.2088,106.8456}"   # Jakarta
 to="${3:--6.2297,106.8166}"
 
@@ -29,7 +31,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $etag" "$base/r
 echo "If-None-Match: $etag -> $code"
 
 echo "== metrics =="
-curl -sf "$base/metrics" | grep -E "^route_(requests_total|request_duration_seconds_count|inflight|expansions_total)" | head -8
+curl -sf "$metrics_base/metrics" | grep -E "^route_(requests_total|request_duration_seconds_count|inflight|expansions_total)" | head -8
 
 echo "== rate limit (a burst over the configured -rate must give 429) =="
 for i in $(seq 1 12); do curl -s -o /dev/null -w '%{http_code} ' "$base/route?from=$from&to=$to"; done; echo

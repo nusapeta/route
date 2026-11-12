@@ -864,6 +864,9 @@ Bacaan:
 
 ## 16. Kapasitas pada batas desain 40 km (i3-6100T, build terbaru)
 
+> Sejak 2026-11-12 batas desain produk 100 km; §19 mengukur himpunan penuh pada
+> batas itu. Angka di sini tetap dipakai sebagai acuan segmen <= 40 km.
+
 §12b mengukur satu rute contoh 42 km; bagian ini mengukur **himpunan pasangan**
 yang jaraknya <= 40 km dengan build yang sekarang dikirim (penalti belok 0,25x,
 3 region termuat), karena aplikasi membatasi rute maksimum 40 km.
@@ -1069,4 +1072,114 @@ scripts/m6-compare.py --pairs paper/results/pairs-java.csv \
   --routeid http://127.0.0.1:18085 --osrm http://127.0.0.1:5000 \
   --csv paper/results/e1-osrm-aligned.csv
 python3 scripts/e1-stats.py paper/results/e1-osrm-aligned.csv
+```
+
+## 19. Batas jarak 100 km: apa yang berubah (2026-11-12)
+
+`-max-route-km` dinaikkan 40 -> 100. Semua angka di bawah dari build sumber
+saat ini, Ryzen 5 5600G, tiga region termuat (`java`, `sumatra`,
+`nusa-tenggara`), `-rate 0`, 600 pasangan `paper/results/pairs-java.csv`,
+`nocache` supaya cache rute tidak menutupi biaya.
+
+| cap | 200 | 422 | wall p50 | wall p95 | max |
+|---|---:|---:|---:|---:|---:|
+| 40 km | 296 | 304 | — | — | 40,0 km |
+| 100 km | 481 | 119 | 47 ms | 1,29 s | 9,5 s (97,4 km sukses) |
+
+Empat run `-conc 4 -workspace-mb 256 -timeout 20s` (`format=line` dan
+`polyline`, 600 pasangan, `nocache`) semuanya 481/119 dengan p50 39-47 ms,
+p95 0,94-1,32 s, wall 56-57 s. Sebaran p50/p95 antar run lebih lebar daripada
+antar setelan (`-workspace-mb` 256 vs 512), jadi yang dilaporkan rentangnya.
+Per bucket (run terakhir): 0-5 km 120/120 (p50 5 ms / p95 22 ms), 5-15 km
+114/120 (p50 30 / p95 142 ms), 15-30 km 110/120 (p50 114 / p95 551 ms),
+30-50 km 91/120 (p50 277 / p95 917 ms), 50-80 km 46/120 (p50 542 /
+p95 1,74 s). Ekor ~9 s berasal dari pasangan `too_far`/anggaran yang berjalan
+sampai batas internal, bukan dari rute yang dilayani.
+
+**Klasifikasi 119 kegagalan (cap 100 km).** 72 `no road within snap distance
+(region not loaded?)` — pre-existing, identik pada cap 40 km (titik jatuh di
+laut/hutan). 39 `too_far` (jarak tempuh > 100 km). 8 `search space exhausted
+(route too long)` pada koridor panjang tanpa hierarki.
+
+**Anggaran tabel bukan pengikat.** Pasangan yang gagal `search space
+exhausted` diulang pada `-workspace-mb` 256, 512, dan 2048 (`-conc 1`,
+`-timeout 30s`): tetap 422 dengan pesan sama, selesai 5,0-6,8 s, tabel hanya
+8,39 M slot / 100 MB `anon` pada run 2048 MB. Yang habis adalah anggaran
+ekspansi (`internal/graph/astar.go`, `maxExpansions` = 6 juta saat itu; sekarang
+`-max-expansions` default 4 juta), bukan ruang
+tabel; menaikkan `-workspace-mb` tidak memindahkan satu pun pasangan dari 422
+ke 200.
+
+**Ekor 80-100 km: 504, bukan 422 (ditemukan 2026-11-12 di homelab).**
+`pairs-java.csv` berhenti di 79,9 km garis lurus, jadi pita 80-100 km tidak
+pernah masuk bench. Di i3-6100T pasangan `-6.2088,106.8456 ->
+-6.7500,107.5500` (98,4 km garis lurus) menghabiskan anggaran ekspansi dalam
+12,8 s, melewati `-timeout 10s`, sehingga jawabannya
+`504 {"error":"deadline exceeded (10s)"}`; pasangan 91,8 km sekelas selesai
+10,01-10,02 s sehingga statusnya bisa 422 atau 504 tergantung beban. Biaya
+ekspansi di i3: 3 jt = 9,0-9,1 s, 4 jt = 11,2 s, 6 jt = 12,8 s — tidak ada
+plafon ekspansi statis yang menjamin 422 sebelum batas waktu keras di mesin
+2 core.
+
+**Perbaikan 2026-11-12.** Pencarian memakai batas lunak `-budget` (default
+60% `-timeout` = 6 s): rute yang tidak selesai dijawab
+`422 {"error":"search budget 6s exceeded (route too long)"}` dan dihitung di
+`route_errors_total{reason="budget"}`; `504` tinggal untuk klien yang memutus
+koneksi atau server yang kehabisan waktu keras. `-max-expansions` (default
+4 juta, `internal/graph/astar.go`) tetap ada sebagai plafon deterministik yang
+tidak bergantung kecepatan mesin. Distribusi 481 rute 200 pada bench 600
+pasangan (Ryzen, `-timeout 20s`): maksimum 3.186.176 ekspansi, p99 2.729.088,
+median 141.567 — 4 juta tidak memotong satu pun rute yang berhasil.
+
+**Verifikasi homelab sesudah deploy.** 98,4 km dan 91,8 km -> `422 search
+budget 6s exceeded` pada 6,02 s; 96,4 km -> 200 pada 0,18 s, 227.614 ekspansi;
+70,7 km -> 200 pada 0,12 s, 311.992 ekspansi; `route_requests_total{code="504"}`
+tetap 0.
+
+**Memori cap 100 km** (`-conc 4 -workspace-mb 256`, sesudah dua run 600
+pasangan): `routeid_workspace_bytes` 201 MB / 16,8 M slot dari 256 MB
+anggaran (grows 562, shrinks 222), `Rss` 1,02 GB, `Anonymous` 343 MB —
+dibanding baris kontrak 40 km di §17e (`anon` 311 MB, tabel 201 MB).
+`GOMEMLIMIT=1GiB` dan `mem_limit: 1536m` tidak berubah. Di homelab
+(i3-6100T, cap 100 km terpasang) kontainer `routeid` 25-64 MB RSS setelah
+12 rute 96 km, `routeid-motor` 180 MB.
+
+**Latensi kelas 50-80 km** (bucket `50-80km`, 120 pasangan, `-conc 4`):
+46x200 / 33 snap / 38 `too_far` / 3 anggaran. Yang 200: p50 430-542 ms,
+p95 1,40-1,74 s, maksimum 2,04 s (97,4 km). Uji 4 query paralel pada bucket
+yang sama: 91 ok dari 120, wall 16,4 s, ok p50 242 ms / p95 899 ms / maks
+1,41 s; kegagalan 25 snap + 3 anggaran + 1 `too_far`. Tidak ada pertumbuhan
+memori di luar anggaran.
+
+**Kesimpulan produk.** 100 km aman untuk batas keras: tidak ada pasangan yang
+sebelumnya 200 menjadi 422, tidak ada OOM, dan yang gagal adalah batas yang
+sudah ada di 40 km. Sisa pekerjaan untuk menaikkan cap lebih jauh adalah
+hierarki (CH/MLD, `docs/BACKLOG.md` 13c), bukan memori.
+
+Reproduksi:
+
+```bash
+go build -o /tmp/rid-server ./cmd/rid-server
+/tmp/rid-server -graph data/java.graph -graph data/sumatra.graph \
+  -graph data/nusa-tenggara.graph -addr 127.0.0.1:18099 \
+  -conc 4 -rate 0 -workspace-mb 256 -max-route-km 100 -timeout 20s
+python3 - <<'PY'
+import csv, json, statistics, time, urllib.request
+pairs = list(csv.DictReader(open('paper/results/pairs-java.csv')))
+lat, dist, codes = [], [], {}
+for i, p in enumerate(pairs):
+    u = (f"http://127.0.0.1:18099/route?from={p['from_lat']},{p['from_lon']}"
+         f"&to={p['to_lat']},{p['to_lon']}&format=polyline&nocache={i}")
+    t0 = time.time()
+    try:
+        r = urllib.request.urlopen(u, timeout=60); body, code = r.read(), r.status
+    except urllib.error.HTTPError as e:
+        body, code = e.read(), e.code
+    lat.append((time.time() - t0) * 1000); codes[code] = codes.get(code, 0) + 1
+    if code == 200:
+        dist.append(json.loads(body)['distance_m'])
+lat.sort(); dist.sort()
+print(codes, 'p50 %.0f ms' % lat[len(lat)//2], 'p95 %.0f ms' % lat[int(len(lat)*.95)],
+      'max %.1f km' % (dist[-1]/1000))
+PY
 ```

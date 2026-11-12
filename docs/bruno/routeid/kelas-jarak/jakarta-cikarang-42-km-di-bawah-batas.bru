@@ -1,0 +1,42 @@
+meta {
+  name: Jakarta - Cikarang 41 km (di bawah batas)
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/route?from=-6.2088,106.8456&to=-6.2561,107.1450
+  body: none
+  auth: none
+}
+
+docs {
+  Jarak tempuh 41,0 km, garis lurus 37 km: keduanya di bawah -max-route-km 100,
+  jadi harus 200. Kasus 422 karena batas ada di request berikutnya (>100 km).
+}
+
+tests {
+  const code = res.getStatus();
+  const j = res.getBody();
+  test("200", function () {
+    expect(code).to.equal(200);
+  });
+  test("region + jarak + durasi", function () {
+    expect(j.region).to.be.a("string");
+    expect(j.distance_m).to.be.above(0);
+    expect(j.duration_s).to.be.above(0);
+  });
+  test("points_n cocok dengan points", function () {
+    expect(j.points).to.have.lengthOf(j.points_n);
+  });
+  test("snap terisi", function () {
+    expect(j.snap_from_m).to.be.a("number");
+    expect(j.snap_to_m).to.be.a("number");
+  });
+  test("header X-Route-Ms ada", function () {
+    expect(res.getHeader("X-Route-Ms")).to.match(/^\d+$/);
+  });
+  console.log(j.region, j.distance_m + "m", j.duration_s + "s", j.points_n + " titik");
+  bru.setVar("region", j.region);
+  bru.setVar("etag", res.getHeader("ETag") || "");
+}

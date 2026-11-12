@@ -24,6 +24,7 @@ type metrics struct {
 	req200, req304, req400, req422, req429, req500, req504 atomic.Int64
 	rateLimited                                            atomic.Int64
 	expansions, fallback, canceled, tooFar, relaxed        atomic.Int64
+	budget                                                 atomic.Int64
 	crossRegionFixed                                       atomic.Int64
 	crossRegionStitched                                    atomic.Int64
 	errNoRoute, errSnap, errCrossRegion                    atomic.Int64
@@ -140,6 +141,7 @@ func (m *metrics) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# HELP route_canceled_total Searches stopped by the request deadline\n# TYPE route_canceled_total counter\nroute_canceled_total %d\n", m.canceled.Load())
 	fmt.Fprintf(w, "# HELP route_errors_total Failed routes by reason\n# TYPE route_errors_total counter\n")
 	fmt.Fprintf(w, "route_errors_total{reason=\"too_far\"} %d\n", m.tooFar.Load())
+	fmt.Fprintf(w, "route_errors_total{reason=\"budget\"} %d\n", m.budget.Load())
 	fmt.Fprintf(w, "# HELP route_cross_region_resnapped_total Requests whose endpoints snapped to two overlapping region files but routed inside one\n# TYPE route_cross_region_resnapped_total counter\nroute_cross_region_resnapped_total %d\n", m.crossRegionFixed.Load())
 	fmt.Fprintf(w, "# HELP route_cross_region_stitched_total Cross-region routes assembled from two graph legs and a ferry connector\n# TYPE route_cross_region_stitched_total counter\nroute_cross_region_stitched_total %d\n", m.crossRegionStitched.Load())
 	fmt.Fprintf(w, "# HELP route_snap_retry_total Requests answered from an alternative snap after the nearest segment gave no route\n# TYPE route_snap_retry_total counter\nroute_snap_retry_total %d\n", m.snapRetry.Load())

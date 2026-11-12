@@ -10,3 +10,4 @@ r.json
 rp.json
 r.polyline
 *.geojson
+deploy/.env

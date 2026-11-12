@@ -39,7 +39,7 @@ func newTestGateway(t *testing.T, hits chan hit) *gateway {
 	t.Helper()
 	mobil := stubUpstream(t, "mobil", hits)
 	motor := stubUpstream(t, "motor", hits)
-	return newGateway(mobil.URL, motor.URL, profileMobil)
+	return newGateway(mobil.URL, motor.URL, profileMobil, false, false)
 }
 
 func get(t *testing.T, h http.Handler, target string, header map[string]string) *http.Response {
@@ -121,13 +121,70 @@ func TestForwardedForReplaced(t *testing.T) {
 	g := newTestGateway(t, hits)
 
 	get(t, g, "/route?from=-6.2,106.8&to=-6.21,106.81&profile=motor",
-		map[string]string{"X-Forwarded-For": "1.2.3.4", "X-Real-IP": "1.2.3.4"})
+		map[string]string{
+			"CF-Connecting-IP": "203.0.113.7",
+			"X-Forwarded-For":  "1.2.3.4",
+			"X-Real-IP":        "1.2.3.4",
+		})
 	got := <-hits
 	if strings.Contains(got.xff, "1.2.3.4") {
 		t.Errorf("X-Forwarded-For %q kept the forged address", got.xff)
 	}
 	if got.xff != "192.0.2.1" {
 		t.Errorf("X-Forwarded-For %q, want the client address", got.xff)
+	}
+}
+
+// TestCloudflareClientIPForwarded checks that the gateway hands the real
+// client address from Cloudflare to the upstream rate limiter. Without this,
+// every visitor behind the tunnel shares cloudflared's container IP.
+func TestCloudflareClientIPForwarded(t *testing.T) {
+	hits := make(chan hit, 1)
+	mobil := stubUpstream(t, "mobil", hits)
+	g := newGateway(mobil.URL, "http://127.0.0.1:1", profileMobil, true, false)
+
+	res := get(t, g, "/route?from=-6.2,106.8&to=-6.21,106.81",
+		map[string]string{
+			"CF-Connecting-IP": "203.0.113.7",
+			"X-Forwarded-For":  "1.2.3.4",
+			"X-Real-IP":        "1.2.3.4",
+		})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want the upstream 422", res.StatusCode)
+	}
+	got := <-hits
+	if got.xff != "203.0.113.7" {
+		t.Errorf("X-Forwarded-For %q, want Cloudflare's client address", got.xff)
+	}
+}
+
+// TestTrustedXForwardedFor checks the fallback for a tunnel that does not set
+// CF-Connecting-IP.
+func TestTrustedXForwardedFor(t *testing.T) {
+	hits := make(chan hit, 1)
+	mobil := stubUpstream(t, "mobil", hits)
+	g := newGateway(mobil.URL, "http://127.0.0.1:1", profileMobil, true, false)
+
+	get(t, g, "/route?from=-6.2,106.8&to=-6.21,106.81",
+		map[string]string{"X-Forwarded-For": "198.51.100.9, 10.0.0.1"})
+	got := <-hits
+	if got.xff != "198.51.100.9" {
+		t.Errorf("X-Forwarded-For %q, want the first proxy hop", got.xff)
+	}
+}
+
+// TestMetricsBlocked checks the public gateway cannot expose the Prometheus
+// surface; monitoring scrapes the upstream loopback ports directly.
+func TestMetricsBlocked(t *testing.T) {
+	hits := make(chan hit, 1)
+	g := newGateway("http://127.0.0.1:1", "http://127.0.0.1:1", profileMobil, false, true)
+
+	res := get(t, g, "/metrics?profile=motor", nil)
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", res.StatusCode)
+	}
+	if len(hits) != 0 {
+		t.Fatal("blocked metrics reached an upstream")
 	}
 }
 
@@ -176,7 +233,7 @@ func TestHealthAggregatesBothProfiles(t *testing.T) {
 func TestHealthFailsWhenOneUpstreamIsDown(t *testing.T) {
 	hits := make(chan hit, 8)
 	mobil := stubUpstream(t, "mobil", hits)
-	g := newGateway(mobil.URL, "http://127.0.0.1:1", profileMobil)
+	g := newGateway(mobil.URL, "http://127.0.0.1:1", profileMobil, false, false)
 
 	res := get(t, g, "/healthz", nil)
 	if res.StatusCode != http.StatusServiceUnavailable {
@@ -225,7 +282,7 @@ func TestHealthSingleProfile(t *testing.T) {
 func TestUpstreamDownIs502(t *testing.T) {
 	hits := make(chan hit, 1)
 	mobil := stubUpstream(t, "mobil", hits)
-	g := newGateway(mobil.URL, "http://127.0.0.1:1", profileMobil)
+	g := newGateway(mobil.URL, "http://127.0.0.1:1", profileMobil, false, false)
 
 	res := get(t, g, "/route?from=-6.2,106.8&to=-6.21,106.81&profile=motor", nil)
 	if res.StatusCode != http.StatusBadGateway {

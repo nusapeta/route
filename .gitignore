@@ -8,3 +8,6 @@ r.json
 rp.json
 r.polyline
 *.geojson
+
+# Cloudflare Tunnel token; jangan commit.
+deploy/.env

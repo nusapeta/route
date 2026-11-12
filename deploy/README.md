@@ -1,8 +1,8 @@
 # Deploy di homelab (Jawa + Sumatra)
 
-Dua cara: Docker Compose (paling cepat) atau systemd (tanpa Docker).
-Dua-duanya memakai graph yang sudah dibangun di host; image tidak pernah
-memuat data 1,5 GB.
+Tiga cara: Docker Compose (paling cepat), systemd (tanpa Docker), atau
+Compose + Cloudflare Tunnel untuk akses domain saja. Semua memakai graph yang
+sudah dibangun di host; image tidak pernah memuat data 1,5 GB.
 
 ## 0. Bangun dan refresh graph (di host)
 
@@ -45,6 +45,20 @@ lihat catatan di bawah):
 make static
 rsync -a bin/static/ host:~/Projects/routeid/bin/
 ```
+
+Kirim juga source kalau image dibangun di host (Dockerfile build dari konteks):
+
+```bash
+rsync -az --delete \
+  --exclude '.git/' --exclude 'data/' --exclude 'bin/' --exclude 'paper/' \
+  --exclude 'deploy/.env' --exclude '*.graph' --exclude '*.osm.pbf' \
+  --exclude '*.geojson' --exclude '*.bak*' \
+  ./ host:~/Projects/routeid/
+```
+
+`--delete` menghapus apa pun yang tidak ada di mesin pengembang, termasuk
+cadangan lokal `deploy/*.bak-*` di host, jadi kecualikan `*.bak*` sebelum
+menjalankannya. `.env`, `data/`, dan `bin/` hanya ada di host.
 
 > **Jebakan yang sudah memakan waktu:** binary hasil `go build` biasa ter-link
 > dinamis ke glibc. Di image alpine (musl) hasilnya error
@@ -91,13 +105,17 @@ Unit sudah membatasi `MemoryMax=1200M` dan mengeraskan filesystem
 Mobil dan motor memakai artefak graf berbeda, dan pemilihan region memakai snap
 terdekat, sehingga dua graf dengan geometri hampir sama tidak boleh berada di
 satu proses: yang satu akan menutupi yang lain. Karena itu compose menjalankan
-tiga container dari image yang sama:
+tiga container inti dari image yang sama:
 
 | container | port | isi |
 |---|---|---|
-| `routeid-gateway` | `0.0.0.0:8080` (publik) | proxy pemilih profil |
+| `routeid-gateway` | `127.0.0.1:8080` (loopback) | proxy pemilih profil |
 | `routeid` | `127.0.0.1:18080` (loopback) | `java`, `sumatra`, `nusa-tenggara` (mobil) |
 | `routeid-motor` | `127.0.0.1:18081` (loopback) | `java-motor`, `sumatra-motor`, `nusa-tenggara-motor` (motor) |
+| `routeid-cloudflared` | tanpa port | opsional, profil compose `cloudflare` |
+
+Tidak ada port yang mendengarkan di `0.0.0.0`; akses dari luar host hanya lewat
+Cloudflare Tunnel (bagian 1d).
 
 Klien memakai satu base URL dan memilih profil lewat parameter:
 
@@ -110,11 +128,13 @@ curl -s 127.0.0.1:8080/healthz | head -c 200        # kedua profil sekaligus (50
 curl -s '127.0.0.1:8080/healthz?profile=motor'      # satu profil saja
 ```
 
-`profile=mobil|motor` berlaku untuk `/route`, `/version`, dan `/metrics`;
-parameter itu dicopot sebelum diteruskan, jadi yang dicatat upstream adalah
-request apa adanya. Nilai lain dijawab `400`, bukan diam-diam memakai default.
-Respons mendapat header `X-Route-Profile` supaya klien tahu profil mana yang
-melayani. Tanpa parameter, profil mobil yang dipakai (perilaku lama port 8080).
+`profile=mobil|motor` berlaku untuk `/route` dan `/version`; parameter itu
+dicopot sebelum diteruskan, jadi yang dicatat upstream adalah request apa
+adanya. Nilai lain dijawab `400`, bukan diam-diam memakai default. Respons
+mendapat header `X-Route-Profile` supaya klien tahu profil mana yang melayani.
+Tanpa parameter, profil mobil yang dipakai (perilaku lama port 8080).
+`/metrics` sengaja tidak diteruskan gateway publik; scrape upstream langsung
+(bagian 3).
 
 ```bash
 make static                                   # bin/static/rid-extract + rid-gateway
@@ -140,9 +160,104 @@ boleh dihapus dari compose tanpa mengubah yang lain; gateway lalu melaporkan
 profil motor tidak sehat.
 
 Kedua upstream memakai `-trust-proxy` karena rate limit harus memakai IP klien,
-bukan IP gateway: gateway menimpa `X-Forwarded-For` dengan alamat peer-nya
-(bukan menambahkan), jadi nilai dari klien tidak bisa dipakai memilih bucket.
-Port upstream yang loopback-only membuat spoofing butuh akses ke host.
+bukan IP gateway. Gateway menimpa `X-Forwarded-For`/`X-Real-IP` (bukan
+menambahkan). Dengan `-trust-proxy`, gateway mengambil `CF-Connecting-IP` dari
+Cloudflare Tunnel atau hop pertama `X-Forwarded-For`; tanpa flag itu, alamat
+peer yang dipakai. Port upstream yang loopback-only membuat spoofing butuh
+akses ke host.
+
+## 1d. Cloudflare Tunnel (domain saja)
+
+Tujuan: satu-satunya pintu masuk publik adalah `https://route.arifsani.xyz`.
+Port 8080 tetap loopback; tidak ada IP/LAN yang bisa dipanggil dari internet.
+
+### Di Cloudflare
+
+1. **Networking > Tunnels > Create Tunnel**, beri nama `routeid`.
+2. Pilih lingkungan **Docker**. Salin token dari perintah
+   `cloudflared tunnel --no-autoupdate run --token ...`.
+3. Di tunnel itu, **Routes > Add route > Published application**:
+   - Hostname: `route`
+   - Domain: `arifsani.xyz`
+   - Service URL: `http://gateway:8080`
+   - Jangan memakai `http://127.0.0.1:8080`: itu loopback container
+     `cloudflared`, bukan gateway.
+4. Simpan. Cloudflare membuat CNAME `route.arifsani.xyz` yang proxied ke
+   `<tunnel-id>.cfargotunnel.com`; jangan matikan proxy/orange cloud.
+5. SSL/TLS zona: **Automatic SSL/TLS** (atau Full). Tunnel sudah terenkripsi
+   dari edge ke `cloudflared`; origin HTTP internal tidak butuh sertifikat.
+   Nyalakan **Always Use HTTPS**.
+6. Opsional: **Security > WAF > Custom rules** blokir
+   `http.request.uri.path eq "/metrics"` sebagai lapisan kedua. Gateway sudah
+   mengembalikan `404` untuk path itu (`-block-metrics`), jadi aturan ini tidak
+   wajib.
+
+### Di host
+
+```bash
+cd deploy
+cp .env.example .env
+$EDITOR .env                 # isi CLOUDFLARE_TUNNEL_TOKEN=...
+docker compose --profile cloudflare up -d --build
+docker compose --profile cloudflare ps
+docker logs --tail 30 routeid-cloudflared   # cari "Registered tunnel connection"
+```
+
+Token hanya ada di `deploy/.env`, yang di-ignore git. Jangan menaruhnya di
+`docker-compose.yml` atau command line shell yang tersimpan di history.
+
+### Kalau cloudflared sudah berjalan
+
+Homelab memakai container `cloudflared-tunnel` dari 1Panel, jadi service
+`cloudflared` di compose tidak perlu dinyalakan. Yang wajib: cloudflared dan
+gateway berada di network Docker yang sama. Override
+`docker-compose.homelab.yml` menambahkan gateway ke `1panel-network` dengan
+alias `gateway`:
+
+```bash
+docker inspect cloudflared-tunnel \
+  --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}'
+docker compose -f docker-compose.yml -f docker-compose.homelab.yml up -d
+```
+
+Di homelab, `deploy/.env` memuat
+`COMPOSE_FILE=docker-compose.yml:docker-compose.homelab.yml`, jadi
+`docker compose up -d` biasa juga otomatis memakai override. Jangan hapus baris
+itu, dan jangan menimpa `.env` dengan `cp .env.example .env` di host ini.
+
+Jangan memakai `--profile cloudflare` di host itu: connector kedua akan
+menerima seluruh ingress tunnel, tetapi hanya bisa me-resolve origin yang ada
+di network compose ini, bukan origin 1Panel lainnya. Kalau network berbeda,
+gejalanya `502` dan log cloudflared berisi
+`lookup gateway ... no such host`.
+
+### Verifikasi
+
+```bash
+curl -sS https://route.arifsani.xyz/healthz | head -c 300; echo
+curl -sS https://route.arifsani.xyz/version; echo
+curl -sS 'https://route.arifsani.xyz/route?from=-6.2088,106.8456&to=-6.2297,106.8166&format=polyline' | head -c 120; echo
+curl -sS -o /dev/null -w 'metrics: %{http_code}\n' https://route.arifsani.xyz/metrics   # 404
+lan_ip=$(ip -4 addr show scope global | awk '/inet /{print $2; exit}' | cut -d/ -f1)
+curl -sS -o /dev/null -w 'LAN: %{http_code}\n' "http://$lan_ip:8080/healthz" || true
+METRICS_BASE=http://127.0.0.1:18080 scripts/smoke.sh https://route.arifsani.xyz
+```
+
+`metrics: 404` dan `LAN` gagal/connection refused adalah hasil yang benar.
+Kalau `cloudflared` restart terus: token salah/kedaluwarsa, atau host tidak bisa
+keluar ke Cloudflare port `7844`. Kalau domain 502: untuk tunnel compose cek
+`docker compose --profile cloudflare ps`; untuk tunnel 1Panel cek
+`docker logs --tail 50 cloudflared-tunnel`. Log
+`lookup gateway ... no such host` berarti cloudflared dan gateway tidak berada
+di network Docker yang sama; pakai `docker-compose.homelab.yml` di atas.
+
+Rate limit upstream tetap per klien karena gateway membaca `CF-Connecting-IP`
+dan menimpa `X-Forwarded-For` sebelum meneruskan. Tanpa `-trust-proxy`, semua
+pengunjung akan berbagi satu bucket milik container `cloudflared`.
+
+Server ini tanpa autentikasi. Kalau tidak ingin API terbuka untuk siapa saja,
+tambahkan **Cloudflare Access** pada hostname yang sama; aplikasi tidak perlu
+diubah.
 
 ## 2. Verifikasi
 
@@ -168,6 +283,8 @@ curl -s "127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.9175,107.6191&format=g
 | 1x rute 578 km | 613 MB |
 | puncak, 600 pasang campuran (build `8e2dc11`) | ~1,1 GB (`anon` 415 MB) |
 | beban kontrak 40 km, `-conc 4`, `GOMEMLIMIT=1GiB` | 958 MB (`anon` 311 MB) |
+| beban kontrak 100 km, `-conc 4 -workspace-mb 256` (Ryzen 5 5600G) | 1,02-1,10 GB (`anon` 343-425 MB, tabel 126-201 MB) |
+| homelab i3-6100T, cap 100 km, 12 rute 96 km | `routeid` 25-64 MB, `routeid-motor` 180 MB |
 
 CPU 1 core penuh selama satu query: 128 ms (15 km), 3,6 s (148 km),
 1,7 s (578 km). Disk 1,48 GB, wajib SSD (halaman mmap dibaca saat disentuh).
@@ -182,16 +299,22 @@ Dua flag yang dipakai container sejak build `8e2dc11`:
   (12 B/slot, jadi 64 MB/slot pada `-conc 4`). Tabel mulai 0,75 MB, tumbuh saat
   rute panjang, dan menyusut balik bila kapasitas > 8x pemakaian. Bila anggaran
   habis, klien menerima `422 search space exhausted (route too long)`, bukan
-  OOM. `0` = tanpa anggaran eksplisit (plafon lama 384 MB/slot).
-- `-max-route-km 40`: kontrak aplikasi, rute di atas 40 km (garis lurus lebih
-  dulu, lalu jarak tempuh) ditolak `422`, jadi segmen <= 40 km tetap di p50
-  24-73 ms dan p95 246-705 ms (`paper/RESULTS.md` §16).
+  OOM. `0` = tanpa anggaran eksplisit (plafon lama 384 MB/slot). Pada kontrak
+  100 km tabel terukur 126-201 MB dari 256 MB, dan menaikkan anggaran ke
+  512/2048 tidak mengubah pasangan yang gagal (yang habis anggaran ekspansi
+  A*, bukan tabel), jadi 256 tetap dipakai (`paper/RESULTS.md` §19).
+- `-max-route-km 100`: kontrak aplikasi, rute di atas 100 km (garis lurus lebih
+  dulu, lalu jarak tempuh) ditolak `422`. Segmen <= 50 km tetap p50 24-73 ms dan
+  p95 246-705 ms (`paper/RESULTS.md` §16); bucket 50-80 km p50 430-542 ms,
+  p95 1,40-1,74 s (§19). Rute > 100 km tidak lagi dilayani tanpa menaikkan flag.
 
 Ukur sendiri sesudah beban:
 
 ```bash
-scripts/memcheck.sh http://127.0.0.1:8080            # gauge workspace + smaps_rollup
-curl -s http://127.0.0.1:8080/metrics | grep ^routeid_workspace_
+# Gateway publik menolak /metrics; scrape proses upstream langsung.
+scripts/memcheck.sh http://127.0.0.1:18080           # mobil
+scripts/memcheck.sh http://127.0.0.1:18081           # motor
+curl -s http://127.0.0.1:18080/metrics | grep ^routeid_workspace_
 ```
 
 ## 3b. Kapasitas (terukur di i3-6100T, 2C/4T)
@@ -210,12 +333,13 @@ hanya menambah antrean. Ukur sendiri:
 scripts/loadtest.py http://127.0.0.1:8080 -from -7.8435,110.3929 -to -7.7393,110.3760 -c 4 -n 32
 ```
 
-Untuk pemakaian bersama, batasi di reverse proxy (Caddy):
+Gateway sudah membatasi per IP (15/menit, burst 5). Kalau butuh batas
+kasar tambahan di reverse proxy, kuncinya harus IP klien, bukan IP proxy:
 
 ```
 routeid.lan {
     rate_limit {
-        zone routeid { key {remote_host} events 30 window 1m }
+        zone routeid { key {http.request.header.CF-Connecting-IP} events 30 window 1m }
     }
     reverse_proxy 127.0.0.1:8080 {
         transport http { response_header_timeout 30s }
@@ -223,9 +347,15 @@ routeid.lan {
 }
 ```
 
-`GET /` dan `/assets/*` sekarang dilayani gateway untuk demo peta. `/metrics`
-tetap diteruskan gateway; di reverse proxy publik, tutup path itu dan akses
-metrics langsung dari localhost agar dashboard internal tidak ikut terbuka.
+`{remote_host}` di belakang Cloudflare Tunnel adalah IP container
+`cloudflared`, jadi semua pengunjung akan berbagi satu bucket. Gateway sendiri
+sudah membaca `CF-Connecting-IP` lewat `-trust-proxy`.
+
+`GET /` dan `/assets/*` dilayani gateway untuk demo peta. Gateway compose
+memakai `-block-metrics`, jadi `https://route.arifsani.xyz/metrics` selalu
+`404`; dashboard internal membaca `127.0.0.1:18080/metrics` dan
+`127.0.0.1:18081/metrics` langsung. Jangan mengganti flag itu di deployment
+publik.
 
 ## 4. Keamanan
 
@@ -233,11 +363,14 @@ Server ini **tanpa autentikasi**, `Access-Control-Allow-Origin: *`, dan rate
 limit per IP aktif secara default (`-rate 15 -burst 5`, lihat M4 di bawah).
 Untuk homelab:
 
-- bind ke LAN saja: `-addr 192.168.x.x:8080`, jangan `0.0.0.0` bila tak perlu.
-- taruh di belakang reverse proxy (Caddy/nginx) kalau harus HTTPS; proxy juga
-  sebaiknya membatasi ukuran/rate.
+- bind ke loopback (`127.0.0.1:8080`) dan pakai Cloudflare Tunnel; jangan
+  publish port 8080 ke `0.0.0.0` atau router.
+- Cloudflare Tunnel sudah memberi TLS di edge; tidak perlu Caddy hanya untuk
+  HTTPS. Kalau tetap memakai reverse proxy lokal, pastikan proxy menimpa
+  `X-Forwarded-For`.
 - jangan expose ke internet tanpa auth + rate limit: satu query rute panjang
-  memakan 1 core selama beberapa detik.
+  memakan 1 core selama beberapa detik. Tambahkan Cloudflare Access bila API
+  tidak boleh publik.
 
 ## 5. Update data OSM
 
@@ -252,20 +385,28 @@ jalankan dua server di port berbeda dan alihkan proxy.
 
 ## M4: cache, batas waktu, batas laju, metrics
 
-Compose sekarang meneruskan `-timeout 10s -rate 15 -burst 5 -maxage 3600`.
+Compose sekarang meneruskan
+`-timeout 10s -budget 6s -max-expansions 4000000 -rate 15 -burst 5 -maxage 3600`.
 Arti praktisnya:
 
 - Query yang sama (graph sama, binary sama) dijawab `304` kalau klien mengirim
   `If-None-Match`: ~0,2 ms, nyaris tidak memakai slot. `Cache-Control` membuat
   app/browser menyimpannya selama `-maxage` detik.
-- Rute yang tidak selesai dalam `-timeout` dijawab `504` dan slotnya dikembalikan
-  ke antrean, jadi satu permintaan rute 148 km tidak menyandera server.
+- Rute yang tidak selesai dalam `-budget` (6 s) dijawab
+  `422 search budget 6s exceeded`, bukan `504`: di i3-6100T anggaran ekspansi
+  lama (6 juta) baru habis pada 12,8 s, jadi batas waktu keras selalu menang dan
+  statusnya berubah-ubah mengikuti beban. Slot dikembalikan ke antrean, jadi satu
+  permintaan rute 148 km tidak menyandera server.
 - Per IP: 15 permintaan/menit (burst 5) -> `429` + `Retry-After`.
-- `curl localhost:8080/metrics` untuk dashboard.
+- `curl 127.0.0.1:18080/metrics` (mobil) atau `:18081` (motor) untuk dashboard.
+  Gateway publik memakai `-block-metrics` dan menjawab `404`.
 
 ### Menaruh Caddy di depan gateway
 
-Gateway sudah menjadi pintu depan, jadi Caddy hanya perlu meneruskan ke sana:
+Deployment homelab tidak memakai Caddy: TLS dan nama domain datang dari
+Cloudflare Tunnel (`https://route.arifsani.xyz`). Bagian ini hanya untuk host
+yang belum punya tunnel dan butuh TLS lokal. Gateway sudah menjadi pintu depan,
+jadi Caddy hanya perlu meneruskan ke sana:
 
 ```caddyfile
 route.example.com {
@@ -274,8 +415,8 @@ route.example.com {
 }
 ```
 
-Batasan yang perlu diketahui: gateway mengisi `X-Forwarded-For` dengan alamat
-peer-nya, yaitu Caddy, sehingga rate limit di upstream menjadi satu bucket
-untuk semua klien. Kalau Caddy dipakai, batasi laju di Caddy (`rate_limit`)
-dan jangan mengandalkan `-rate` di server. Port upstream 18080/18081 tetap
-loopback, jadi tidak ada jalur yang melewati gateway.
+Compose mengaktifkan `-trust-proxy`, jadi gateway memakai `CF-Connecting-IP`
+(Cloudflare Tunnel) atau hop pertama `X-Forwarded-For`. Kalau Caddy dipakai,
+pastikan Caddy menimpa header itu dengan IP klien; kalau tidak, semua klien
+berbagi bucket Caddy. Port upstream 18080/18081 tetap loopback, jadi tidak ada
+jalur yang melewati gateway.

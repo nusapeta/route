@@ -54,7 +54,7 @@ sebanyak mungkin rute per detik.
 | M1 metadata + golden test | ✅ | format v3/v4 provenance, `/version`, regresi otomatis |
 | M2 snap ke ruas | ✅ | galat ujung 67,3 -> 16,1 m p50 |
 | M3 biaya per ekspansi | ✅ | latensi ~2x, memori -25 % |
-| M4 produksi | ✅ (bind LAN ditunda) | deadline, rate limit, ETag (304 p50 0,2 ms Ryzen / 0,39 ms i3-6100T), `/metrics` |
+| M4 produksi | ✅ | deadline, rate limit, ETag (304 p50 0,2 ms Ryzen / 0,39 ms i3-6100T), `/metrics`; live di `https://route.arifsani.xyz` |
 | M5 cakupan | ✅ | v4 (Java 693 MB), ferry, motor, 7 pulau, tangga ε |
 | M6 bukti (paper) | 🟡 | E1 OSRM selesai (Ryzen, `RESULTS.md` §13); E2 dilewati (D1: limitation eksplisit) |
 
@@ -152,11 +152,14 @@ opsinya ada di BACKLOG 6/7 (ALT atau reverse CSR sebagai sidecar, keduanya
 menambah, bukan mengurangi), atau turunkan `maxSlots` dan terima `ErrTooFar`
 untuk koridor >150 km.
 
-### M4. Siap dipakai app (SELESAI; bind LAN ditunda)
+### M4. Siap dipakai app (SELESAI; live via Cloudflare Tunnel)
 
 - [x] Timeout per request + `context` yang membatalkan A* di tengah jalan:
-      dicek tiap 256 ekspansi, `504 {"error":"deadline exceeded"}`, workspace
-      langsung dilepas. Default 10 s, flag `-timeout`.
+      dicek tiap 256 ekspansi, workspace langsung dilepas. Default 10 s, flag
+      `-timeout`. Batas lunak `-budget` (60% dari `-timeout`) membuat rute yang
+      tidak selesai dijawab `422 search budget ... exceeded`
+      (`route_errors_total{reason="budget"}`); `504 {"error":"deadline exceeded"}`
+      tinggal untuk batas keras dan klien yang memutus koneksi.
 - [x] Rate limit per IP (default 15/menit, burst 5) -> `429` + `Retry-After`.
       `-trust-proxy` supaya IP diambil dari `X-Forwarded-For`; tanpa flag itu
       header diabaikan.
@@ -169,9 +172,11 @@ untuk koridor >150 km.
       (`pbf_sha256`, node/edge, commit) + query ternormalisasi, jadi urutan
       parameter dan GET-vs-POST berbagi entri cache.
 - [x] `points`/`simplify` sudah terdokumentasi di README bagian Flutter.
-- [ ] Bind `127.0.0.1` di belakang Caddy: **belum**, karena di homelab sekarang
-      tidak ada reverse proxy untuk routeid; mengubah bind akan memutus akses
-      LAN yang dipakai Postman. Resepnya ada di `deploy/README.md`.
+- [x] Bind loopback + TLS publik: gateway dipetakan `127.0.0.1:8080:8080` dan
+      dilayani `https://route.arifsani.xyz` lewat Cloudflare Tunnel 1Panel
+      (2026-11-11). Tidak ada Caddy; LAN `192.168.1.219:8080` menolak koneksi.
+      `-trust-proxy` membaca `CF-Connecting-IP` supaya bucket tetap per
+      pengunjung. Resep lengkap di `deploy/README.md`.
 
 **Selesai bila:** tidak ada request yang bisa menahan slot >10 s, dan dashboard
 menampilkan RPS/p95/fallback.
@@ -221,7 +226,8 @@ Artinya deadline mengembalikan slot ke antrean, jadi satu klien yang meminta rut
 - [x] Stitching antar-file dengan tabel connector statis
       (Merak-Bakauheni, Ketapang-Gilimanuk), `legs[]`, dan
       `route_cross_region_stitched_total`. Pasangan tak terdaftar tetap `422`.
-      Default `-max-route-km 40` tidak diubah; rute antarpulau memakai flag
+      Default `-max-route-km` 40 tidak diubah saat itu (2026-11-12 dinaikkan ke
+      100, `paper/RESULTS.md` §19); rute antarpulau tetap memakai flag
       eksplisit `-max-route-km 0`. Jakarta -> Medan masih `relaxed=true` pada
       leg Sumatra, dicatat sebagai batas W6.
 
@@ -308,9 +314,9 @@ p95 durasi absolut 10,22% sebagai metrik primer. Tidak ada klaim akurasi.
       ground truth; keterbatasan dinyatakan eksplisit di abstrak dan §Limitations.
 - [x] Tabel positioning diisi angka nyata, bukan "documented".
 - [x] Deploy build penalti belok ke homelab (graf Java/Sumatra dibangun ulang,
-      Bali-Nusra dari PBF baru) + kapasitas pada batas desain 40 km
+      Bali-Nusra dari PBF baru) + kapasitas pada batas desain saat itu, 40 km
       (`paper/RESULTS.md` §16: p50 24,3 ms / p95 246,2 ms `-conc 1`, plafon
-      24-25 RPS, p95 jarak 7,44%).
+      24-25 RPS, p95 jarak 7,44%). Batas desain kini 100 km (§19, 2026-11-12).
 
 **Selesai bila:** `paper/COMPARISON.md` tidak lagi punya baris berstatus
 "belum diukur" untuk metrik inti, setiap klaim di README punya angka

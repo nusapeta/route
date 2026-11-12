@@ -62,6 +62,7 @@ func testServer(t *testing.T, snapM float64) *server {
 		regions:  []*region{rg},
 		maxSnapM: snapM,
 		timeout:  5 * time.Second,
+		budget:   3 * time.Second,
 		maxAge:   3600,
 		m:        &metrics{},
 		fp:       graphFingerprint([]*region{rg}, 0, snapM, 1.5, 0.25),
@@ -180,6 +181,27 @@ func TestRouteCanceled(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "deadline exceeded") {
 		t.Fatalf("body %q, want deadline message", rec.Body.String())
+	}
+}
+
+// TestRouteBudgetExceeded checks the soft-budget contract: when the search
+// gives up on its own the answer is a 422 the client can act on, not a 504.
+func TestRouteBudgetExceeded(t *testing.T) {
+	s := testServer(t, 3000)
+	s.budget = time.Nanosecond
+	h := testHandler(s)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", routeQuery, nil))
+	res := rec.Result()
+	if res.StatusCode != 422 {
+		t.Fatalf("code %d, want 422 (%s)", res.StatusCode, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "search budget") {
+		t.Fatalf("body %q, want budget message", rec.Body.String())
+	}
+	if got := res.Header.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control %q, want no-store", got)
 	}
 }
 

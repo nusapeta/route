@@ -11,29 +11,37 @@ get {
 }
 
 docs {
-  Server harus memuat java.graph + sumatra.graph dan dijalankan dengan
-  -max-route-km 0. Default 40 km menjawab 422 too_far sebelum snap.
-  Respons harus 200 dengan region java+sumatra dan tiga leg: road, ferry, road.
+  Butuh java.graph + sumatra.graph dan -max-route-km 0: garis lurus
+  Jakarta-Medan 1.9 ribu km, jadi cap default 100 km menjawab 422 too_far
+  sebelum snap. Dengan flag 0 respons harus 200, region java+sumatra, tiga leg
+  road/ferry/road.
 }
 
 tests {
-  test("200", function () {
-    expect(res.getStatus()).to.equal(200);
+  const code = res.getStatus();
+  test("200, atau 422 kalau -max-route-km tidak 0", function () {
+    expect([200, 422]).to.include(code);
   });
-  const j = res.getBody();
-  test("region gabungan", function () {
-    expect(j.region).to.equal("java+sumatra");
-  });
-  test("tiga leg", function () {
-    expect(j.legs).to.be.an("array").with.lengthOf(3);
-    expect(j.legs[0].mode).to.equal("road");
-    expect(j.legs[1].mode).to.equal("ferry");
-    expect(j.legs[2].mode).to.equal("road");
-  });
-  test("ferry dan jarak", function () {
-    expect(j.ferry_m).to.be.above(0);
-    expect(j.ferry_spans).to.be.an("array").that.is.not.empty;
-    const sum = j.legs.reduce((m, leg) => m + leg.distance_m, 0);
-    expect(sum).to.equal(j.distance_m);
-  });
+  if (code === 422) {
+    test("ditolak batas jarak, bukan gagal lain", function () {
+      expect(res.getBody().error).to.include("straight-line");
+    });
+  } else {
+    const j = res.getBody();
+    test("region gabungan", function () {
+      expect(j.region).to.equal("java+sumatra");
+    });
+    test("tiga leg", function () {
+      expect(j.legs).to.be.an("array").with.lengthOf(3);
+      expect(j.legs[0].mode).to.equal("road");
+      expect(j.legs[1].mode).to.equal("ferry");
+      expect(j.legs[2].mode).to.equal("road");
+    });
+    test("ferry dan jarak", function () {
+      expect(j.ferry_m).to.be.above(0);
+      expect(j.ferry_spans).to.be.an("array").that.is.not.empty;
+      const sum = j.legs.reduce((m, leg) => m + leg.distance_m, 0);
+      expect(sum).to.equal(j.distance_m);
+    });
+  }
 }

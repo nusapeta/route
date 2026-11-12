@@ -10,13 +10,24 @@ get {
   auth: none
 }
 
+docs {
+  Gateway publik dijalankan dengan -block-metrics, jadi lewat domain jawabannya
+  404. Scrape proses upstream langsung (http://127.0.0.1:18080/metrics dan
+  :18081/metrics) atau jalankan environment Local tanpa gateway untuk 200.
+}
+
 tests {
-  test("200", function () {
-    expect(res.getStatus()).to.equal(200);
+  const code = res.getStatus();
+  test("200, atau 404 kalau gateway memblokir /metrics", function () {
+    expect([200, 404]).to.include(code);
   });
-  const body = res.getBody();
-  test("metrik routeid ada", function () {
-    expect(body).to.include("routeid_build_info");
-    expect(body).to.include("route_requests_total");
-  });
+  if (code === 200) {
+    const body = res.getBody();
+    test("metrik routeid ada", function () {
+      expect(body).to.include("routeid_build_info");
+      expect(body).to.include("route_requests_total");
+    });
+  } else {
+    console.log("404: blokir /metrics di gateway, scrape upstream langsung");
+  }
 }

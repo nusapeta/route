@@ -1,0 +1,39 @@
+meta {
+  name: Jakarta - Purwakarta 96 km (di bawah batas 100 km)
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{baseUrl}}/route?from=-6.2088,106.8456&to=-6.5570,107.4430
+  body: none
+  auth: none
+}
+
+docs {
+  Jarak tempuh 96,5 km: kontrak 100 km yang baru, jadi harus 200. Ini kelas
+  terpanjang yang dilayani produk; p95-nya 1,4 s (paper/RESULTS.md §19), jadi
+  kalau request ini 504 berarti batas waktu/timeout klien terlalu ketat.
+}
+
+tests {
+  const code = res.getStatus();
+  const j = res.getBody();
+  test("200", function () {
+    expect(code).to.equal(200);
+  });
+  test("jarak di bawah batas 100 km", function () {
+    expect(j.distance_m).to.be.above(90000);
+    expect(j.distance_m).to.be.below(100000);
+  });
+  test("region + durasi + snap", function () {
+    expect(j.region).to.be.a("string");
+    expect(j.duration_s).to.be.above(0);
+    expect(j.snap_from_m).to.be.a("number");
+    expect(j.snap_to_m).to.be.a("number");
+  });
+  test("points_n cocok dengan points", function () {
+    expect(j.points).to.have.lengthOf(j.points_n);
+  });
+  console.log(j.region, j.distance_m + "m", j.duration_s + "s", j.points_n + " titik");
+}

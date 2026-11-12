@@ -51,7 +51,8 @@ type server struct {
 	maxSnapM   float64
 	maxRouteM  float64 // straight-line/road distance cap; 0 disables it
 	timeout    time.Duration
-	maxAge     int // Cache-Control max-age for /route, seconds
+	budget     time.Duration // soft search budget, always <= timeout
+	maxAge     int           // Cache-Control max-age for /route, seconds
 	fp         string
 	m          *metrics
 	rl         *limiter
@@ -77,8 +78,10 @@ func main() {
 	conc := flag.Int("conc", 4, "concurrent routing workspaces (shared across all regions)")
 	workspaceMB := flag.Int("workspace-mb", 0, "total workspace memory budget in MB across all concurrency slots (0 = default 384 MB/slot)")
 	snap := flag.Float64("snap", 3000, "max snap distance in meters")
-	maxRouteKm := flag.Float64("max-route-km", 40, "reject routes longer than this in km (straight-line pre-check + driven distance); 0 disables")
-	timeout := flag.Duration("timeout", 10*time.Second, "per-request deadline; longer routes get 504")
+	maxRouteKm := flag.Float64("max-route-km", 100, "reject routes longer than this in km (straight-line pre-check + driven distance); 0 disables")
+	timeout := flag.Duration("timeout", 10*time.Second, "per-request deadline; searches that outrun it get 504")
+	budget := flag.Duration("budget", 0, "soft search budget; a search that outruns it gives up with 422 (0 = 60% of -timeout)")
+	maxExp := flag.Uint("max-expansions", 4_000_000, "expansion cap per query; exceeding it returns 422 (0 = default)")
 	turnPenalty := flag.Float64("turn-penalty", 0.25, "turn cost multiplier; 0 = pure edge time")
 	eps := flag.Float64("eps", 1.5, "heuristic weight (1.0 = optimal but slow)")
 	rate := flag.Float64("rate", 15, "requests per minute per IP (0 disables the limiter)")
@@ -105,6 +108,14 @@ func main() {
 		maxSlotsPerSlot = uint32((uint64(mbPerSlot) * 1024 * 1024) / 12)
 	}
 
+	softBudget := *budget
+	if softBudget <= 0 {
+		softBudget = *timeout * 3 / 5
+	}
+	if softBudget > *timeout {
+		softBudget = *timeout
+	}
+
 	wsPool := graph.NewWorkspacePool(*conc, maxSlotsPerSlot)
 	m := &metrics{
 		wsPoolFn: func() (uint64, uint64, uint64, uint64) {
@@ -117,6 +128,7 @@ func main() {
 		maxSnapM:   *snap,
 		maxRouteM:  *maxRouteKm * 1000,
 		timeout:    *timeout,
+		budget:     softBudget,
 		maxAge:     *maxAge,
 		m:          m,
 	}
@@ -130,6 +142,7 @@ func main() {
 		r := graph.NewRouterWithPool(g, wsPool)
 		r.SetEpsilon(float32(*eps))
 		r.SetTurnScale(float32(*turnPenalty))
+		r.SetMaxExpansions(uint32(*maxExp))
 		rg := &region{
 			name: strings.TrimSuffix(filepath.Base(p), ".graph"), g: g, r: r,
 			minLat: mnLat - pad, maxLat: mxLat + pad,
@@ -333,10 +346,17 @@ const (
 )
 
 // failRoute maps a routing error to the documented HTTP contract. Cross-region
-// legs use the same mapping as a single-region search.
-func (s *server) failRoute(w http.ResponseWriter, err error) {
+// legs use the same mapping as a single-region search. searchCtx is the soft
+// budget context: when it expired but the request deadline did not, the engine
+// gave up on a route it could not finish, which is a 422, not a 504.
+func (s *server) failRoute(w http.ResponseWriter, err error, budget time.Duration) {
 	switch {
 	case errors.Is(err, graph.ErrCanceled):
+		if budget > 0 {
+			s.m.budget.Add(1)
+			httpErr(w, 422, "search budget "+budget.String()+" exceeded (route too long)")
+			return
+		}
 		s.m.canceled.Add(1)
 		httpErr(w, 504, "deadline exceeded ("+s.timeout.String()+")")
 	case errors.Is(err, graph.ErrTooFar):
@@ -465,6 +485,25 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	// the search stops at the next check instead of burning a workspace slot.
 	ctx, cancel := context.WithTimeout(req.Context(), s.timeout)
 	defer cancel()
+	// The search works against the soft budget, which expires first. A search
+	// that cannot finish then reports a route-level failure the client can act
+	// on, instead of racing the hard deadline and surfacing as a 504 whose
+	// occurrence depends on how busy the box is.
+	budget := s.budget
+	if budget <= 0 || budget > s.timeout {
+		budget = s.timeout
+	}
+	sctx, scancel := context.WithTimeout(ctx, budget)
+	defer scancel()
+	// fail closes over both contexts: only the soft budget expiring on its own
+	// is the engine's own decision, and only that maps to 422.
+	fail := func(err error) {
+		var b time.Duration
+		if sctx.Err() != nil && ctx.Err() == nil {
+			b = budget
+		}
+		s.failRoute(w, err, b)
+	}
 
 	var cross *stitchedRoute
 	rg := rgF
@@ -478,9 +517,9 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		} else if sa, sb, ok := s.snapBoth(rgT, fLat, fLon, tLat, tLon); ok {
 			rg, snapF, snapT = rgT, sa, sb
 		} else if c, portF, portT, ok := connectorFor(s.connectors, rgF.name, rgT.name); ok {
-			cross, err = s.routeStitched(ctx, rgF, rgT, snapF, snapT, c, portF, portT, p)
+			cross, err = s.routeStitched(sctx, rgF, rgT, snapF, snapT, c, portF, portT, p)
 			if err != nil {
-				s.failRoute(w, err)
+				fail(err)
 				return
 			}
 			s.m.crossRegionStitched.Add(1)
@@ -496,17 +535,17 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 
 	var res graph.SnapRoute
 	if cross == nil {
-		res, err = rg.r.RouteSnapCtx(ctx, snapF, snapT, p.restrictions)
+		res, err = rg.r.RouteSnapCtx(sctx, snapF, snapT, p.restrictions)
 		if err != nil && errors.Is(err, graph.ErrNoRoute) {
 			// A dead-end snap is worth one more look before the client sees 422.
-			if res2, a, b, ok := s.retryNoRoute(ctx, rg, p, fLat, fLon, tLat, tLon, snapF, snapT); ok {
+			if res2, a, b, ok := s.retryNoRoute(sctx, rg, p, fLat, fLon, tLat, tLon, snapF, snapT); ok {
 				res, snapF, snapT, err = res2, a, b, nil
 				s.m.snapRetry.Add(1)
 			}
 		}
 	}
 	if err != nil {
-		s.failRoute(w, err)
+		fail(err)
 		return
 	}
 	if cross != nil {

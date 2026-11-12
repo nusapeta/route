@@ -8,12 +8,13 @@
 # Format v3 (java-v3.graph.bak) hanya terbaca oleh image pre-m5; untuk rollback
 # simpan image lama: docker tag routeid:local routeid:pre-m5
 #
-# Tiga layanan, satu image: pemilihan region memakai snap terdekat, jadi profil
-# mobil dan motor tidak boleh berada di proses yang sama (dua graph dengan
-# geometri hampir identik akan saling menutupi). Kedua proses itu karena itu
-# hanya mendengarkan di loopback (18080/18081, untuk debug langsung), dan
-# `gateway` memegang port publik 8080: profil dipilih lewat ?profile=motor,
-# tanpa parameter dilayani profil mobil.
+# Tiga layanan inti, satu image: pemilihan region memakai snap terdekat, jadi
+# profil mobil dan motor tidak boleh berada di proses yang sama (dua graph
+# dengan geometri hampir identik akan saling menutupi). Kedua proses itu hanya
+# mendengarkan di loopback (18080/18081, untuk debug langsung), dan `gateway`
+# memegang port loopback 8080: profil dipilih lewat ?profile=motor, tanpa
+# parameter dilayani profil mobil. Akses publik lewat Cloudflare Tunnel
+# (`cloudflared`, profil compose `cloudflare`), bukan IP/LAN.
 x-routeid: &routeid
   image: routeid:local
   restart: unless-stopped
@@ -67,17 +68,29 @@ services:
       # 2 core fisik: 4 workspace -> throughput ~2,4x dibanding conc 1
       - -conc
       - "4"
-      # Anggaran tabel A*: 256 MB / 4 slot = 64 MB/slot (12 B/slot). Rute <= 40 km
-      # terukur 126 MB untuk 2 slot, jadi 64 MB/slot tidak mengikat kelas rute
-      # yang dilayani (paper/RESULTS.md §17).
+      # Anggaran tabel A*: 256 MB / 4 slot = 64 MB/slot (12 B/slot). Rute <= 100 km
+      # terukur 126 MB tabel untuk 4 slot (puncak), jadi anggaran ini tidak
+      # mengikat: menaikkannya ke 512/2048 tidak mengubah satu pun pasangan yang
+      # gagal (paper/RESULTS.md §19).
       - -workspace-mb
       - "256"
-      # Kontrak aplikasi: rute > 40 km ditolak 422 (garis lurus + jarak tempuh).
+      # Kontrak aplikasi: rute > 100 km ditolak 422 (garis lurus + jarak tempuh).
       - -max-route-km
-      - "40"
+      - "100"
       # M4: batas waktu per request, rate limit per IP, cache browser/app.
       - -timeout
       - 10s
+      # Batas lunak pencarian = 60% dari -timeout. Rute yang tidak selesai
+      # berhenti sendiri dan dijawab 422 "search budget", bukan 504 yang
+      # kemunculannya bergantung pada beban mesin (i3: 6 juta ekspansi = 12,8 s,
+      # jadi batas waktu keras selalu menang sebelum plafon ekspansi tercapai).
+      - -budget
+      - 6s
+      # Plafon ekspansi per query: deterministik, tidak bergantung kecepatan
+      # mesin. Lulusan terukur maksimum 3,19 juta ekspansi (600 pasangan bench),
+      # jadi 4 juta tidak memotong satu pun rute yang berhasil.
+      - -max-expansions
+      - "4000000"
       - -rate
       - "15"
       - -burst
@@ -96,7 +109,9 @@ services:
     # Binary yang sama, entrypoint berbeda: satu image untuk server dan gateway.
     entrypoint: ["/usr/local/bin/rid-gateway"]
     ports:
-      - "8080:8080"
+      # Hanya loopback: Cloudflare Tunnel yang memegang akses publik. Jangan
+      # ganti ke 0.0.0.0 kecuali memang ingin membuka IP LAN lagi.
+      - "127.0.0.1:8080:8080"
     depends_on:
       - routeid
       - routeid-motor
@@ -109,6 +124,12 @@ services:
       - http://routeid-motor:8080
       - -default
       - mobil
+      # Cloudflare Tunnel mengirim CF-Connecting-IP; pakai itu supaya rate
+      # limit upstream tetap per klien, bukan per container cloudflared.
+      - -trust-proxy
+      # Jangan pernah menerbitkan /metrics lewat domain publik. Monitoring
+      # membaca http://127.0.0.1:18080/metrics dan :18081/metrics langsung.
+      - -block-metrics
     # Cuma proxy: tanpa graf, tanpa tabel A*.
     mem_limit: 64m
     memswap_limit: 64m
@@ -118,6 +139,29 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Akses publik hanya lewat domain. Service ini memakai jaringan compose
+  # internal, jadi route Cloudflare diarahkan ke http://gateway:8080, bukan
+  # port host. Aktifkan dengan --profile cloudflare dan isi
+  # CLOUDFLARE_TUNNEL_TOKEN di deploy/.env.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: routeid-cloudflared
+    restart: unless-stopped
+    profiles: ["cloudflare"]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      gateway:
+        condition: service_healthy
+    mem_limit: 128m
+    memswap_limit: 128m
     logging:
       driver: json-file
       options:
@@ -146,9 +190,20 @@ services:
       - -workspace-mb
       - "256"
       - -max-route-km
-      - "40"
+      - "100"
       - -timeout
       - 10s
+      # Batas lunak pencarian = 60% dari -timeout. Rute yang tidak selesai
+      # berhenti sendiri dan dijawab 422 "search budget", bukan 504 yang
+      # kemunculannya bergantung pada beban mesin (i3: 6 juta ekspansi = 12,8 s,
+      # jadi batas waktu keras selalu menang sebelum plafon ekspansi tercapai).
+      - -budget
+      - 6s
+      # Plafon ekspansi per query: deterministik, tidak bergantung kecepatan
+      # mesin. Lulusan terukur maksimum 3,19 juta ekspansi (600 pasangan bench),
+      # jadi 4 juta tidak memotong satu pun rute yang berhasil.
+      - -max-expansions
+      - "4000000"
       - -rate
       - "15"
       - -burst
