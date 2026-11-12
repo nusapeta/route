@@ -526,16 +526,6 @@ h2 {
   stroke-width: 1.8;
 }
 
-.map-locate__button[aria-busy="true"] .map-locate__icon {
-  animation: locate-pulse 1s ease-in-out infinite;
-}
-
-@keyframes locate-pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-
 .leaflet-bar a {
   width: 44px !important;
   height: 44px !important;
