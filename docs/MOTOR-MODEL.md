@@ -131,14 +131,16 @@ Java 693.316.412 B, Sumatra 353.320.895 B, Nusa Tenggara 148.783.493 B
 (total 1.195 MB), dibanding 2.445 MB untuk pasangan artefak v4. Angka di atas
 tetap berlaku sebagai riwayat W1.
 
-Ketiga artifact v4 memakai `profile_sha256` yang sama:
-`1b7cabf164bfdf16d6df28e8c1d9b532365f8f4bf7923e511c938af40221a3a0`.
-Graph lama memakai `a0f80ef144b819fa10a36f0dad477bba64935d73063a273fe611cf1c3b1b983d`.
+Artefak v5 mencatat hash tabel motor yang sama dengan `profile_sha256`
+artefak v4 motor:
+`1b7cabf164bfdf16d6df28e8c1d9b532365f8f4bf7923e511c938af40221a3a0`
+(field `motor_sha256`). Graph lama memakai
+`a0f80ef144b819fa10a36f0dad477bba64935d73063a273fe611cf1c3b1b983d`.
 
 Satu proses `-conc 4` memuat tiga graph:
 
-- `/healthz` menyebut `java-motor`, `sumatra-motor`, dan
-  `nusa-tenggara-motor`.
+- `/healthz` menyebut `java`, `sumatra`, dan `nusa-tenggara` dengan
+  `"profile":"motor"`.
 - Tujuh pasangan di `paper/results/pairs-motor-regions.csv` menjawab 200.
 - Idle setelah `/healthz`: VmRSS 15.904 kB, RssAnon 7.236 kB.
 - Setelah tujuh rute: VmRSS 83.380 kB, RssAnon 26.392 kB. Batas RssAnon
