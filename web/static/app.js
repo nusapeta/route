@@ -3,6 +3,8 @@
 
   var JAKARTA = { lat: -6.2, lng: 106.816666 };
   var PROFILE_LABELS = { mobil: "mobil", motor: "motor" };
+  var AUTO_LOCATE_KEY = "routeid:auto-locate";
+  var LOCATE_STATUS = "Mencari lokasi Anda...";
 
   var els = {
     panel: document.querySelector(".panel"),
@@ -42,6 +44,12 @@
   var fromMarker = null;
   var toMarker = null;
   var routeLayer = null;
+  var locateButton = null;
+  var locateLabel = null;
+  var locatePending = false;
+  var locateRequest = 0;
+  var interaction = 0;
+  var programmaticView = false;
 
   if (typeof L === "undefined") {
     setStatus("Pustaka peta gagal dimuat. Muat ulang halaman.", "error");
@@ -71,8 +79,16 @@
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
 
+  addLocateControl();
+
   map.on("click", function (event) {
+    noteInteraction();
     addMapPoint(event.latlng);
+  });
+  map.on("dragstart zoomstart", function () {
+    if (!programmaticView) {
+      noteInteraction();
+    }
   });
 
   var mapElement = map.getContainer();
@@ -80,7 +96,11 @@
     mapElement.setAttribute("tabindex", "0");
   }
   mapElement.addEventListener("keydown", function (event) {
-    if (event.key !== "Enter" || event.target !== mapElement) {
+    if (event.target !== mapElement) {
+      return;
+    }
+    noteInteraction();
+    if (event.key !== "Enter") {
       return;
     }
     event.preventDefault();
@@ -98,6 +118,7 @@
   });
 
   restoreFromURL();
+  maybeAutoLocate();
 
   function restoreFromURL() {
     var params = new URLSearchParams(window.location.search);
@@ -120,6 +141,169 @@
     } else {
       setStatus(nextStepText(), "neutral");
     }
+  }
+
+  function maybeAutoLocate() {
+    if (state.from || state.to) {
+      return;
+    }
+    try {
+      if (window.sessionStorage.getItem(AUTO_LOCATE_KEY) === "1") {
+        return;
+      }
+      window.sessionStorage.setItem(AUTO_LOCATE_KEY, "1");
+    } catch (error) {
+      // Storage may be unavailable; one attempt per load is still safe.
+    }
+    locateUser(true);
+  }
+
+  function addLocateControl() {
+    var LocateControl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var container = L.DomUtil.create("div", "leaflet-bar map-locate");
+        var button = L.DomUtil.create("button", "map-locate__button", container);
+        button.type = "button";
+        button.title = "Pusatkan peta di lokasi Anda";
+        button.innerHTML =
+          '<svg class="map-locate__icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">' +
+            '<circle cx="12" cy="12" r="4"></circle>' +
+            '<path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path>' +
+          '</svg>' +
+          '<span class="map-locate__label">Lokasi saya</span>';
+        locateButton = button;
+        locateLabel = button.querySelector(".map-locate__label");
+
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.on(button, "click", function (event) {
+          L.DomEvent.stop(event);
+          locateUser(false);
+        });
+        return container;
+      }
+    });
+    new LocateControl().addTo(map);
+  }
+
+  function locateUser(automatic) {
+    if (locatePending) {
+      return;
+    }
+    if (window.isSecureContext === false) {
+      setStatus("Lokasi hanya tersedia lewat HTTPS.", "neutral");
+      return;
+    }
+    if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
+      setStatus(
+        automatic
+          ? "Lokasi tidak didukung. Peta tetap di Jakarta."
+          : "Perangkat ini tidak mendukung lokasi.",
+        "neutral"
+      );
+      return;
+    }
+
+    var request = ++locateRequest;
+    var epoch = interaction;
+    locatePending = true;
+    setLocateBusy(true);
+    setStatus(LOCATE_STATUS, "loading");
+
+    try {
+      navigator.geolocation.getCurrentPosition(function (position) {
+        if (!finishLocate(request) || epoch !== interaction) {
+          return;
+        }
+        var lat = Number(position.coords.latitude);
+        var lng = Number(position.coords.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) ||
+            lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          setStatus("Lokasi tidak tersedia. Coba lagi.", "neutral");
+          return;
+        }
+        centerOnLocation(lat, lng);
+        setStatus("Peta dipusatkan di lokasi Anda. " + nextStepText(), "neutral");
+      }, function (error) {
+        if (!finishLocate(request) || epoch !== interaction) {
+          return;
+        }
+        setStatus(geolocationErrorMessage(error, automatic), "neutral");
+      }, {
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 300000
+      });
+    } catch (error) {
+      if (finishLocate(request)) {
+        setStatus("Lokasi tidak tersedia. Coba lagi.", "neutral");
+      }
+    }
+  }
+
+  function centerOnLocation(lat, lng) {
+    programmaticView = true;
+    try {
+      map.setView([lat, lng], 15);
+    } finally {
+      programmaticView = false;
+    }
+  }
+
+  function finishLocate(request) {
+    if (request !== locateRequest) {
+      return false;
+    }
+    locatePending = false;
+    setLocateBusy(false);
+    return true;
+  }
+
+  function setLocateBusy(busy) {
+    if (!locateButton) {
+      return;
+    }
+    if (busy) {
+      locateButton.setAttribute("aria-busy", "true");
+      locateButton.setAttribute("aria-disabled", "true");
+      locateButton.title = "Mencari lokasi Anda";
+      if (locateLabel) {
+        locateLabel.textContent = "Mencari...";
+      }
+      return;
+    }
+    locateButton.removeAttribute("aria-busy");
+    locateButton.removeAttribute("aria-disabled");
+    locateButton.title = "Pusatkan peta di lokasi Anda";
+    if (locateLabel) {
+      locateLabel.textContent = "Lokasi saya";
+    }
+  }
+
+  function noteInteraction() {
+    interaction += 1;
+    if (!locatePending) {
+      return;
+    }
+    locateRequest += 1;
+    locatePending = false;
+    setLocateBusy(false);
+    if (els.status.textContent === LOCATE_STATUS) {
+      setStatus(nextStepText(), "neutral");
+    }
+  }
+
+  function geolocationErrorMessage(error, automatic) {
+    var code = error && typeof error.code === "number" ? error.code : 0;
+    if (code === 1) {
+      return automatic
+        ? "Izin lokasi ditolak. Peta tetap di Jakarta."
+        : "Izin lokasi ditolak. Peta tidak dipusatkan.";
+    }
+    if (code === 3) {
+      return "Pencarian lokasi melewati batas waktu. Coba lagi.";
+    }
+    return "Lokasi tidak tersedia. Coba lagi.";
   }
 
   function addMapPoint(latlng) {
@@ -182,6 +366,7 @@
       }
 
       marker.on("dragend", function () {
+        noteInteraction();
         var moved = marker.getLatLng();
         state[kind] = { lat: moved.lat, lng: moved.lng };
         pointChanged();
@@ -231,6 +416,7 @@
       return;
     }
 
+    noteInteraction();
     cancelRequest();
     var sequence = state.sequence;
     var controller = new AbortController();
@@ -524,6 +710,7 @@
   }
 
   function resetAll() {
+    noteInteraction();
     cancelRequest();
     state.from = null;
     state.to = null;

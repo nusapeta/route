@@ -223,7 +223,10 @@ respons: `X-Route-Ms`, `X-Route-Expansions`, `X-Route-Region`, `X-Route-Trim`
 
 `GET /` menyajikan demo peta untuk mencoba rute dari browser. Aset Leaflet,
 CSS, dan JS di-embed ke binary gateway dan dilayani dari `/assets/*`; halaman
-memanggil `/route` same-origin tanpa API key.
+memanggil `/route` same-origin tanpa API key. Tanpa `from`/`to` di URL, tab baru
+mencoba lokasi browser sekali dan memusatkan peta ke sana; tombol "Lokasi saya"
+memusatkan ulang kapan saja. Izin ditolak atau lokasi tidak tersedia jatuh ke
+Jakarta tanpa membuat titik rute.
 
 **Dua profil lewat satu base URL.** Satu proses memuat satu profil (snap
 terdekat membuat dua graf hampir identik saling menutupi), jadi compose

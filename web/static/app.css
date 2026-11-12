@@ -482,6 +482,60 @@ h2 {
   box-shadow: 0 1px 3px rgba(28, 36, 32, 0.22) !important;
 }
 
+.map-locate {
+  border-color: var(--muted) !important;
+  border-radius: var(--radius);
+}
+
+.map-locate__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: inherit;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.map-locate__button:hover:not([aria-disabled="true"]) {
+  background: #eef1eb;
+}
+
+.map-locate__button:active:not([aria-disabled="true"]) {
+  background: #e3e8e0;
+}
+
+.map-locate__button[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: progress;
+}
+
+.map-locate__icon {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.map-locate__button[aria-busy="true"] .map-locate__icon {
+  animation: locate-pulse 1s ease-in-out infinite;
+}
+
+@keyframes locate-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .leaflet-bar a {
   width: 44px !important;
   height: 44px !important;
