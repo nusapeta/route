@@ -94,17 +94,6 @@ func TestSpeedClass(t *testing.T) {
 	}
 }
 
-func TestParseProfile(t *testing.T) {
-	for _, in := range []string{"", "car", "CAR", "motor", "Motor"} {
-		if _, err := ParseProfile(in); err != nil {
-			t.Errorf("ParseProfile(%q): %v", in, err)
-		}
-	}
-	if _, err := ParseProfile("truck"); err == nil {
-		t.Error("ParseProfile(truck) should fail")
-	}
-}
-
 func TestProfileHashPerProfile(t *testing.T) {
 	car, motor := ProfileHash(ProfileCar), ProfileHash(ProfileMotor)
 	if car == motor {

@@ -113,11 +113,7 @@ func fileSHA256(ctx context.Context, path string, progress func(string, int64)) 
 // Options tunes the extraction.
 type Options struct {
 	GridStep float64 // spatial grid cell size in degrees (default 0.02)
-	// Profile selects the vehicle the graph is built for: "car" (default) or
-	// "motor". The choice is baked into the graph (access rules + speeds), so
-	// one graph serves one vehicle.
-	Profile string
-	Workers int // pbf decode workers
+	Workers  int     // pbf decode workers
 	// Order selects the node numbering: "hilbert" (default, page-local) or
 	// "osm" (keep the id order; used for A/B measurements).
 	Order string
@@ -217,16 +213,6 @@ const (
 )
 
 // ParseProfile maps a flag value to a Profile.
-func ParseProfile(s string) (Profile, error) {
-	switch Profile(strings.ToLower(s)) {
-	case "", ProfileCar:
-		return ProfileCar, nil
-	case ProfileMotor:
-		return ProfileMotor, nil
-	}
-	return "", fmt.Errorf("extract: unknown profile %q (want car|motor)", s)
-}
-
 func speedTable(p Profile) map[string]float64 {
 	if p == ProfileMotor {
 		return motorSpeedKMH
@@ -234,12 +220,32 @@ func speedTable(p Profile) map[string]float64 {
 	return defaultSpeedKMH
 }
 
-// wayInfo is what the way pass remembers per routable way.
+// wayInfo is one profile's verdict on a routable way.
 type wayInfo struct {
 	speed  float64 // km/h, used directly unless durSec applies (ferries)
 	dir    int8    // 1 forward only, -1 backward only, 0 both
 	durSec float64 // crossing time from route=duration, 0 = unknown
 	ferry  bool
+}
+
+// wayUnion is what the way pass remembers for a v5 artefact: both profiles
+// share the way list, the node list, and the ferry data, and differ only in
+// the per-edge speed class and direction.
+type wayUnion struct {
+	car, motor     wayInfo
+	okCar, okMotor bool
+	durSec         float64
+	ferry          bool
+}
+
+// fwd reports whether the way needs an edge from node i to node i+1, bwd the
+// other direction. A way is kept when either profile can use it.
+func (u wayUnion) fwd() bool {
+	return (u.okCar && u.car.dir >= 0) || (u.okMotor && u.motor.dir >= 0)
+}
+
+func (u wayUnion) bwd() bool {
+	return (u.okCar && u.car.dir <= 0) || (u.okMotor && u.motor.dir <= 0)
 }
 
 // Build parses pbfPath and writes a graph to outPath.
@@ -249,10 +255,6 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	}
 	if opt.Workers <= 0 {
 		opt.Workers = 2
-	}
-	prof, err := ParseProfile(opt.Profile)
-	if err != nil {
-		return err
 	}
 	progress := opt.Progress
 	if progress == nil {
@@ -273,7 +275,7 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	}
 
 	// pass 1: ways
-	flat, wayOff, ways, wayIDs, err := readWays(ctx, f, opt.Workers, prof, progress)
+	flat, wayOff, ways, wayIDs, err := readWays(ctx, f, opt.Workers, progress)
 	if err != nil {
 		return err
 	}
@@ -312,16 +314,16 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	deg := make([]uint32, n+1)
 	nWays := len(wayOff) - 1
 	for w := 0; w < nWays; w++ {
-		d := ways[w].dir
+		inf := ways[w]
 		for i := wayOff[w]; i+1 < wayOff[w+1]; i++ {
 			a, b := flat[i], flat[i+1]
 			if a == b || !valid[a] || !valid[b] {
 				continue
 			}
-			if d >= 0 {
+			if inf.fwd() {
 				deg[a]++
 			}
-			if d <= 0 {
+			if inf.bwd() {
 				deg[b]++
 			}
 		}
@@ -343,12 +345,13 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	progress("edges", int64(total))
 
 	b := &graph.Builder{
-		Lat: make([]int32, n),
-		Lon: make([]int32, n),
-		Off: off,
-		To:  make([]uint32, edgeCount),
-		Len: make([]uint16, edgeCount),
-		Cls: make([]uint8, edgeCount),
+		Lat:  make([]int32, n),
+		Lon:  make([]int32, n),
+		Off:  off,
+		To:   make([]uint32, edgeCount),
+		Len:  make([]uint16, edgeCount),
+		Cls:  make([]uint8, edgeCount),
+		MCls: make([]uint8, edgeCount),
 	}
 	copy(b.Lat, lat)
 	copy(b.Lon, lon)
@@ -358,7 +361,7 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	// need the pre-pass, and there are a few thousand of them.
 	ferryLen := make([]float64, nWays)
 	for w := 0; w < nWays; w++ {
-		if ways[w].durSec <= 0 {
+		if !ways[w].ferry || ways[w].durSec <= 0 {
 			continue
 		}
 		var sum float64
@@ -381,20 +384,27 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 	var ferryEdges []uint32 // sorted below; sparse, a few thousand nationwide
 	for w := 0; w < nWays; w++ {
 		inf := ways[w]
-		speed := inf.speed
-		if inf.ferry && inf.durSec > 0 && ferryLen[w] > 0 {
-			// duration tag wins over the class fallback: a 30 km crossing
-			// that takes 2 h is 15 km/h, not 20.
-			speed = ferryLen[w] / inf.durSec * 3.6
-			if speed < 1 {
-				speed = 1
+		// A ferry duration replaces the fallback speed for both profiles; the
+		// two profiles only diverge on the class table and the direction.
+		speed := func(leg wayInfo) uint8 {
+			if !leg.ferry && leg.speed == 0 {
+				return 0
+			}
+			v := leg.speed
+			if leg.ferry && inf.durSec > 0 && ferryLen[w] > 0 {
+				v = ferryLen[w] / inf.durSec * 3.6
+				if v < 1 {
+					v = 1
+				}
+			}
+			return speedClass(v)
+		}
+		clsCar, clsMotor := speed(inf.car), speed(inf.motor)
+		for _, c := range []uint8{clsCar, clsMotor} {
+			if c > maxCls {
+				maxCls = c
 			}
 		}
-		cls := speedClass(speed)
-		if cls > maxCls {
-			maxCls = cls
-		}
-		d := inf.dir
 		for i := wayOff[w]; i+1 < wayOff[w+1]; i++ {
 			a, b2 := flat[i], flat[i+1]
 			if a == b2 || !valid[a] || !valid[b2] {
@@ -410,17 +420,29 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 				m4 = graph.MaxLen4
 				lenClamped++
 			}
-			if d >= 0 {
+			if inf.fwd() {
 				e := cur[a]
-				b.To[e], b.Len[e], b.Cls[e] = uint32(b2), m4, cls
+				b.To[e], b.Len[e] = uint32(b2), m4
+				if inf.okCar && inf.car.dir >= 0 {
+					b.Cls[e] = clsCar
+				}
+				if inf.okMotor && inf.motor.dir >= 0 {
+					b.MCls[e] = clsMotor
+				}
 				if inf.ferry {
 					ferryEdges = append(ferryEdges, e)
 				}
 				cur[a]++
 			}
-			if d <= 0 {
+			if inf.bwd() {
 				e := cur[b2]
-				b.To[e], b.Len[e], b.Cls[e] = uint32(a), m4, cls
+				b.To[e], b.Len[e] = uint32(a), m4
+				if inf.okCar && inf.car.dir <= 0 {
+					b.Cls[e] = clsCar
+				}
+				if inf.okMotor && inf.motor.dir <= 0 {
+					b.MCls[e] = clsMotor
+				}
 				if inf.ferry {
 					ferryEdges = append(ferryEdges, e)
 				}
@@ -450,13 +472,24 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 			ids:      ids,
 			perm:     perm,
 		}
-		rs, err := buildRestrictions(ctx, f, opt.Workers, progress, rv, prof)
+		// Two builds over the same union CSR: each profile skips edges its
+		// class forbids, so a restriction that touches a motor-only way (or
+		// an except=motorcycle relation) lands in the right list only.
+		rv.cls = b.Cls
+		car, err := buildRestrictions(ctx, f, opt.Workers, progress, rv, ProfileCar)
 		if err != nil {
 			return err
 		}
-		b.Ban, b.Only, b.RestSkipped = rs.ban, rs.only, rs.stats.Skipped()
+		rv.cls, rv.seen, rv.gen, rv.queue = b.MCls, nil, 0, nil
+		motor, err := buildRestrictions(ctx, f, opt.Workers, progress, rv, ProfileMotor)
+		if err != nil {
+			return err
+		}
+		b.Ban, b.Only, b.BanM, b.OnlyM = car.ban, car.only, motor.ban, motor.only
+		b.RestSkipped = car.stats.Skipped() + motor.stats.Skipped()
 		if opt.OnRestrictions != nil {
-			opt.OnRestrictions(rs.stats)
+			opt.OnRestrictions(car.stats)
+			opt.OnRestrictions(motor.stats)
 		}
 	}
 
@@ -467,8 +500,9 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 		"pbf_bytes":      strconv.FormatInt(pbfBytes, 10),
 		"pbf_sha256":     hex.EncodeToString(pbfHash),
 		"extractor":      Version,
-		"profile_sha256": ProfileHash(prof),
-		"profile":        string(prof),
+		"profile":        "car+motor",
+		"profile_sha256": ProfileHash(ProfileCar),
+		"motor_sha256":   ProfileHash(ProfileMotor),
 		"max_speed_kmh":  strconv.FormatFloat(float64(maxCls)/graph.SpeedClassScale, 'f', 1, 64),
 		"order":          orderName(opt.Order),
 		"grid_step":      strconv.FormatFloat(opt.GridStep, 'f', 4, 64),
@@ -497,7 +531,7 @@ func boolName(v bool) string {
 	return "off"
 }
 
-func readWays(ctx context.Context, f *os.File, workers int, prof Profile, progress func(string, int64)) (flat []int64, wayOff []int, ways []wayInfo, wayIDs []int64, err error) {
+func readWays(ctx context.Context, f *os.File, workers int, progress func(string, int64)) (flat []int64, wayOff []int, ways []wayUnion, wayIDs []int64, err error) {
 	sc := osmpbf.New(ctx, f, workers)
 	defer sc.Close()
 	sc.SkipNodes = true
@@ -505,7 +539,7 @@ func readWays(ctx context.Context, f *os.File, workers int, prof Profile, progre
 
 	wayOff = append(wayOff, 0)
 	flat = make([]int64, 0, 1<<22)
-	ways = make([]wayInfo, 0, 1<<20)
+	ways = make([]wayUnion, 0, 1<<20)
 	wayIDs = make([]int64, 0, 1<<20)
 
 	var scanned int64
@@ -518,15 +552,22 @@ func readWays(ctx context.Context, f *os.File, workers int, prof Profile, progre
 		if scanned%5_000_000 == 0 {
 			progress("ways scanned", scanned)
 		}
-		inf, ok := wayProfile(prof, w.Tags)
-		if !ok {
+		car, okCar := wayProfile(ProfileCar, w.Tags)
+		motor, okMotor := wayProfile(ProfileMotor, w.Tags)
+		if !okCar && !okMotor {
 			continue
 		}
 		for _, nd := range w.Nodes {
 			flat = append(flat, int64(nd.ID))
 		}
 		wayOff = append(wayOff, len(flat))
-		ways = append(ways, inf)
+		u := wayUnion{car: car, motor: motor, okCar: okCar, okMotor: okMotor}
+		if okCar {
+			u.durSec, u.ferry = car.durSec, car.ferry
+		} else {
+			u.durSec, u.ferry = motor.durSec, motor.ferry
+		}
+		ways = append(ways, u)
 		wayIDs = append(wayIDs, int64(w.ID))
 	}
 	if err := sc.Err(); err != nil {

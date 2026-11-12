@@ -25,13 +25,13 @@ func otherEndpoint(s Snap) uint32 {
 }
 
 // alongTime converts Along (metres from Node to the projection) into
-// deciseconds at the segment's own speed.
-func (g *Graph) alongTime(s Snap) float64 {
-	l := float64(g.EdgeLenM(s.Edge))
+// deciseconds at the segment's own speed for this router's profile.
+func (r *Router) alongTime(s Snap) float64 {
+	l := float64(r.g.EdgeLenM(s.Edge))
 	if l == 0 {
 		return 0
 	}
-	return s.Along * float64(g.EdgeTimeDs(s.Edge)) / l
+	return s.Along * float64(r.edgeTimeDs(s.Edge)) / l
 }
 
 // RouteSnap routes between two snapped points. When the returned path leaves
@@ -63,30 +63,30 @@ func (r *Router) RouteSnapCtx(ctx context.Context, a, b Snap, strict bool) (Snap
 	// start: does the path leave along the snapped segment?
 	if len(nodes) >= 2 && nodes[1] == otherEndpoint(a) {
 		dist -= a.Along
-		tds -= g.alongTime(a)
+		tds -= r.alongTime(a)
 		out.TrimStart = true
 		nodes = nodes[1:]
 	} else {
 		dist += a.Along
-		tds += g.alongTime(a)
+		tds += r.alongTime(a)
 	}
 
 	// end: does the path arrive along the snapped segment?
 	if len(nodes) >= 2 && nodes[len(nodes)-2] == otherEndpoint(b) {
 		dist -= b.Along
-		tds -= g.alongTime(b)
+		tds -= r.alongTime(b)
 		out.TrimEnd = true
 		nodes = nodes[:len(nodes)-1]
 	} else {
 		dist += b.Along
-		tds += g.alongTime(b)
+		tds += r.alongTime(b)
 	}
 
 	// both endpoints on the same segment: the node path is degenerate, so take
 	// the distance along the segment when possible.
 	if len(nodes) <= 1 && a.Edge == b.Edge {
 		dist = math.Abs(a.T-b.T) * float64(g.EdgeLenM(a.Edge))
-		tds = math.Abs(a.T-b.T) * float64(g.EdgeTimeDs(a.Edge))
+		tds = math.Abs(a.T-b.T) * float64(r.edgeTimeDs(a.Edge))
 		nodes = nil
 	}
 	if dist < 0 {

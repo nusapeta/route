@@ -310,9 +310,78 @@ func smallGraph(t testing.TB, coords [][2]float64, edges []testEdge) *Builder {
 	return b
 }
 
-// TestMotorGoldenRoutes pins the motor graph's shape: a path shortcut that only
-// motorcycles may use, and a motorway that only the car graph contains. The
-// access and speed decisions themselves are pinned by TestMotorGoldenRules in
+// TestUnionStartEdgeProfile guards the first hop of a query: the frontier is
+// seeded from every edge leaving the source, and a class-0 edge is free if the
+// seed is not filtered. Here the motor-only shortcut A-B is free for a car and
+// leads to a car edge, so an unfiltered seed would return a route through it.
+func TestUnionStartEdgeProfile(t *testing.T) {
+	const lat0, lon0 = -7.8, 110.4
+	// A(0) - B(1) is the motor-only shortcut; A(0) - D(2) - C(3) is the car
+	// detour, and B(1) - C(3) lets a motorcycle continue past the shortcut.
+	coords := [][2]float64{
+		{lat0, lon0},
+		{lat0, lon0 + 0.001},
+		{lat0 + 0.001, lon0},
+		{lat0, lon0 + 0.002},
+	}
+	b := smallGraph(t, coords, []testEdge{
+		{0, 1, 50}, {1, 3, 50},
+		{0, 2, 50}, {2, 3, 50},
+	})
+	b.MCls = make([]uint8, len(b.Cls))
+	copy(b.MCls, b.Cls)
+	for u := uint32(0); u < uint32(len(coords)); u++ {
+		for e := b.Off[u]; e < b.Off[u+1]; e++ {
+			v := b.To[e]
+			if (u == 0 && v == 1) || (u == 1 && v == 0) {
+				b.Cls[e] = 0 // motor-only shortcut
+			}
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "start-edge.graph")
+	if err := b.Write(path); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	g, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer g.Close()
+	src, _, ok1 := g.Nearest(lat0, lon0, 3000)
+	dst, _, ok2 := g.Nearest(lat0, lon0+0.002, 3000)
+	if !ok1 || !ok2 {
+		t.Fatal("snap failed")
+	}
+
+	for _, c := range []struct {
+		name  string
+		motor bool
+		want  []uint32
+	}{
+		{"car", false, []uint32{0, 2, 3}},
+		{"motor", true, []uint32{0, 1, 3}},
+	} {
+		r := NewRouter(g, 1)
+		r.SetMotor(c.motor)
+		rt, err := r.Route(src, dst)
+		if err != nil {
+			t.Fatalf("%s route: %v", c.name, err)
+		}
+		if len(rt.Nodes) != len(c.want) {
+			t.Fatalf("%s nodes = %v, want %v", c.name, rt.Nodes, c.want)
+		}
+		for i := range c.want {
+			if rt.Nodes[i] != c.want[i] {
+				t.Fatalf("%s nodes = %v, want %v", c.name, rt.Nodes, c.want)
+			}
+		}
+	}
+}
+
+// TestMotorGoldenRoutes pins the union graph's shape: a path shortcut that
+// only motorcycles may use, and a motorway that only cars may use. The access
+// and speed decisions themselves are pinned by TestMotorGoldenRules in
 // internal/extract; this test pins the routes that result from them.
 func TestMotorGoldenRoutes(t *testing.T) {
 	const lat0, lon0 = -7.8, 110.4
@@ -325,41 +394,54 @@ func TestMotorGoldenRoutes(t *testing.T) {
 		{lat0 + 0.001, lon0},
 		{lat0 + 0.001, lon0 + 0.001},
 	}
-	cases := []struct {
-		profile string
-		b       *Builder
-	}{
-		{"motor", smallGraph(t, coords, []testEdge{
-			{0, 1, 12}, {1, 2, 12}, // path + motorcycle=yes
-		})},
-		{"car", smallGraph(t, coords, []testEdge{
-			{0, 3, 100}, {3, 4, 100}, {4, 2, 100}, // motorway
-		})},
+	b := smallGraph(t, coords, []testEdge{
+		{0, 1, 12}, {1, 2, 12}, // path + motorcycle=yes
+		{0, 3, 100}, {3, 4, 100}, {4, 2, 100}, // motorway
+	})
+	// v5 union rules: the path has no car class, the motorway no motor class.
+	b.MCls = make([]uint8, len(b.Cls))
+	copy(b.MCls, b.Cls)
+	for u := 0; u < len(coords); u++ {
+		for e := b.Off[u]; e < b.Off[u+1]; e++ {
+			v := b.To[e]
+			path := (u == 0 && v == 1) || (u == 1 && v == 0) ||
+				(u == 1 && v == 2) || (u == 2 && v == 1)
+			if path {
+				b.Cls[e] = 0
+			} else {
+				b.MCls[e] = 0
+			}
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "union.graph")
+	if err := b.Write(path); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	g, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer g.Close()
+	src, _, ok1 := g.Nearest(lat0, lon0, 3000)
+	dst, _, ok2 := g.Nearest(lat0, lon0+0.002, 3000)
+	if !ok1 || !ok2 {
+		t.Fatal("snap failed")
 	}
 
 	var got []string
-	for _, c := range cases {
-		path := filepath.Join(t.TempDir(), c.profile+".graph")
-		if err := c.b.Write(path); err != nil {
-			t.Fatalf("%s write: %v", c.profile, err)
-		}
-		g, err := Open(path)
+	for _, c := range []struct {
+		name  string
+		motor bool
+	}{{"motor", true}, {"car", false}} {
+		r := NewRouter(g, 1)
+		r.SetMotor(c.motor)
+		rt, err := r.Route(src, dst)
 		if err != nil {
-			t.Fatalf("%s open: %v", c.profile, err)
-		}
-		src, _, ok1 := g.Nearest(lat0, lon0, 3000)
-		dst, _, ok2 := g.Nearest(lat0, lon0+0.002, 3000)
-		if !ok1 || !ok2 {
-			g.Close()
-			t.Fatalf("%s snap failed", c.profile)
-		}
-		rt, err := NewRouter(g, 1).Route(src, dst)
-		g.Close()
-		if err != nil {
-			t.Fatalf("%s route: %v", c.profile, err)
+			t.Fatalf("%s route: %v", c.name, err)
 		}
 		got = append(got, fmt.Sprintf("%s,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%s",
-			c.profile, lat0, lon0, lat0, lon0+0.002,
+			c.name, lat0, lon0, lat0, lon0+0.002,
 			rt.DistanceM, rt.TimeDs, len(rt.Nodes), seqHash(rt.Nodes)))
 	}
 

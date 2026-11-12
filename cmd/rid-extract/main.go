@@ -18,7 +18,6 @@ func main() {
 	grid := flag.Float64("grid", 0.02, "snap grid cell size in degrees")
 	workers := flag.Int("workers", runtime.GOMAXPROCS(0), "pbf decoder workers")
 	order := flag.String("order", "hilbert", "node numbering: hilbert|osm")
-	profile := flag.String("profile", "car", "vehicle profile: car|motor")
 	noRest := flag.Bool("no-restrictions", false, "skip OSM turn restriction relations")
 	flag.Parse()
 
@@ -32,7 +31,6 @@ func main() {
 		GridStep:       *grid,
 		Workers:        *workers,
 		Order:          *order,
-		Profile:        *profile,
 		NoRestrictions: *noRest,
 		OnRestrictions: func(s extract.RestrictionStats) {
 			log.Printf("%s", s.String())

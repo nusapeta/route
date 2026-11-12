@@ -102,16 +102,15 @@ Unit sudah membatasi `MemoryMax=1200M` dan mengeraskan filesystem
 
 ## 1c. Dua profil, satu base URL
 
-Mobil dan motor memakai artefak graf berbeda, dan pemilihan region memakai snap
-terdekat, sehingga dua graf dengan geometri hampir sama tidak boleh berada di
-satu proses: yang satu akan menutupi yang lain. Karena itu compose menjalankan
-tiga container inti dari image yang sama:
+Mobil dan motor memakai satu artefak graf v5 per region, tetapi satu proses
+hanya melayani satu profil (`-profile car|motor`). Karena itu compose
+menjalankan tiga container inti dari image yang sama:
 
 | container | port | isi |
 |---|---|---|
 | `routeid-gateway` | `127.0.0.1:8080` (loopback) | proxy pemilih profil |
 | `routeid` | `127.0.0.1:18080` (loopback) | `java`, `sumatra`, `nusa-tenggara` (mobil) |
-| `routeid-motor` | `127.0.0.1:18081` (loopback) | `java-motor`, `sumatra-motor`, `nusa-tenggara-motor` (motor) |
+| `routeid-motor` | `127.0.0.1:18081` (loopback) | `java`, `sumatra`, `nusa-tenggara` dengan `-profile motor` |
 | `routeid-cloudflared` | tanpa port | opsional, profil compose `cloudflare` |
 
 Tidak ada port yang mendengarkan di `0.0.0.0`; akses dari luar host hanya lewat
@@ -139,23 +138,19 @@ Tanpa parameter, profil mobil yang dipakai (perilaku lama port 8080).
 ```bash
 make static                                   # bin/static/rid-extract + rid-gateway
 for r in java sumatra nusa-tenggara; do
-  make graph REGION=$r PROFILE=motor          # data/$r-motor.graph
+  make graph REGION=$r                        # satu artefak: mobil + motor
 done
 cd deploy && docker compose up -d             # gateway ikut dibuat
 curl -s 127.0.0.1:8080/healthz | head -c 300
 ```
 
-Graf motor memuat jalan/gang yang tidak boleh dilalui mobil. Angka dari
-`/healthz?profile=motor` homelab, 2026-11-10:
-
-| region | node | edge | file |
-|---|---|---|---|
-| Jawa | 23.366.670 | 48.199.022 | 682 MiB |
-| Sumatra | 11.932.931 | 24.464.359 | 349 MiB |
-| Nusa Tenggara + Bali | 5.051.959 | 10.220.481 | 148 MiB |
+Sejak format v5 satu file per region memuat kedua profil; `routeid-motor`
+membuka file yang sama dengan `-profile motor`. Angka lama (dua artefak
+terpisah, 2026-11-10) tetap dicatat di `docs/PLAN-2026-11-10.md`; ukuran v5
+diukur ulang setelah rollout.
 
 Satu proses memuat ketiganya: VmRSS idle 11,75 MB, RssAnon 19,80 MB setelah
-tiga rute lintas region. Kalau hanya mobil yang dipakai, layanan `routeid-motor`
+tiga rute lintas region (v4, idle-release). Kalau hanya mobil yang dipakai, layanan `routeid-motor`
 boleh dihapus dari compose tanpa mengubah yang lain; gateway lalu melaporkan
 profil motor tidak sehat.
 

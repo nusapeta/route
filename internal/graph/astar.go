@@ -210,6 +210,7 @@ type Router struct {
 	eps       float32 // heuristic weight: 1.0 = optimal, 1.25 = ~4x faster
 	strict    bool    // enforce turn restrictions
 	turnScale float32 // multiplier on the turn cost table; 0 disables it
+	motor     bool    // weights and restrictions from the motor profile
 
 	maxSpeedMps float64 // heuristic bound; never above maxSpeedMps global
 
@@ -236,6 +237,41 @@ func NewRouterWithPool(g *Graph, pool *WorkspacePool) *Router {
 
 // SetStrict toggles turn restriction enforcement (used for A/B measurement).
 func (r *Router) SetStrict(v bool) { r.strict = v }
+
+// SetMotor selects the motorcycle profile: MCls weights and the motor turn
+// restriction lists. A graph built in format v5 carries both profiles.
+func (r *Router) SetMotor(v bool) { r.motor = v }
+
+// edgeTimeDs is the profile-specific cost of edge e.
+func (r *Router) edgeTimeDs(e uint32) float32 {
+	if r.motor {
+		return r.g.MotorTimeDs(e)
+	}
+	return r.g.EdgeTimeDs(e)
+}
+
+// SnapEdge attaches a coordinate to the closest segment this profile can use.
+func (r *Router) SnapEdge(lat, lon, maxMeters float64) (Snap, bool) {
+	got := r.SnapEdges(lat, lon, maxMeters, 1)
+	if len(got) == 0 {
+		return Snap{}, false
+	}
+	return got[0], true
+}
+
+// SnapEdges returns up to k usable segments, nearest first.
+func (r *Router) SnapEdges(lat, lon, maxMeters float64, k int) []Snap {
+	return r.g.SnapEdgesFor(lat, lon, maxMeters, k, r.motor)
+}
+
+// usable reports whether this profile may drive edge e. A zero class is the
+// format's "no access" marker, used by v5 union graphs.
+func (r *Router) usable(e uint32) bool {
+	if r.motor {
+		return r.g.MCls[e] != 0
+	}
+	return r.g.Cls[e] != 0
+}
 
 // SetTurnScale scales the turn cost table; 0 disables turn costs entirely
 // (used for A/B measurement against pure edge-time routing).
@@ -636,7 +672,10 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 	h := r.newHctx(dst, eps)
 	for e := g.Off[src]; e < g.Off[src+1]; e++ {
 		ee := uint32(e)
-		g0 := g.EdgeTimeDs(ee)
+		if !r.usable(ee) {
+			continue
+		}
+		g0 := r.edgeTimeDs(ee)
 		if !w.set(ee, g0, invalidEdge) {
 			return Route{}, ErrTooFar
 		}
@@ -683,14 +722,17 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 		}
 		var span RestrictionSpan
 		if restrict {
-			span = g.Span(cur.node)
+			span = g.SpanFor(cur.node, r.motor)
 		}
 		for e := head; e < headEnd; e++ {
-			ee := uint32(e)
+			ee := e
+			if !r.usable(ee) {
+				continue
+			}
 			if restrict && !span.Empty() && span.Forbidden(ee) {
 				continue
 			}
-			ng := gCur + g.EdgeTimeDs(ee)
+			ng := gCur + r.edgeTimeDs(ee)
 			if inDx != 0 || inDy != 0 {
 				odx, ody := g.dirTo(v, g.To[ee])
 				ng += turnCostDs(inDx, inDy, odx, ody) * r.turnScale
@@ -801,7 +843,7 @@ func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
 		nodes = append(nodes, r.g.To[x])
 		l := r.g.EdgeLenM(x)
 		dist += l
-		tm += r.g.EdgeTimeDs(x)
+		tm += r.edgeTimeDs(x)
 		if r.g.IsFerry(x) {
 			ferry += l
 			// node index of this edge's head in the finished slice

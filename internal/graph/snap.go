@@ -31,6 +31,25 @@ func (g *Graph) gridRing(lat, lon, maxMeters float64) (ri, ci, maxRing int, cell
 // Nearest finds the closest graph node to a coordinate. The grid is expanded
 // ring by ring and stops as soon as no closer node can exist.
 func (g *Graph) Nearest(lat, lon float64, maxMeters float64) (uint32, float64, bool) {
+	return g.nearest(lat, lon, maxMeters, nil)
+}
+
+// NearestFor is Nearest restricted to nodes that carry at least one outgoing
+// edge usable by the profile. On the union graph a motor-only edge can end at a
+// node whose coordinate is closer than any car node; snapping a car query there
+// yields a node with no exit.
+func (g *Graph) NearestFor(lat, lon, maxMeters float64, motor bool) (uint32, float64, bool) {
+	return g.nearest(lat, lon, maxMeters, func(n uint32) bool {
+		for e := g.Off[n]; e < g.Off[n+1]; e++ {
+			if g.edgeUsable(e, motor) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func (g *Graph) nearest(lat, lon, maxMeters float64, keep func(uint32) bool) (uint32, float64, bool) {
 	ri, ci, maxRing, cellM, ok := g.gridRing(lat, lon, maxMeters)
 	if !ok {
 		return 0, 0, false
@@ -38,6 +57,7 @@ func (g *Graph) Nearest(lat, lon float64, maxMeters float64) (uint32, float64, b
 
 	best := uint32(0)
 	bestD := math.MaxFloat64
+	buf := make([]uint32, 0, 128)
 
 	for ring := 0; ring <= maxRing; ring++ {
 		if ring > 0 && bestD <= float64(ring-1)*cellM {
@@ -49,12 +69,12 @@ func (g *Graph) Nearest(lat, lon float64, maxMeters float64) (uint32, float64, b
 			}
 			if ring == 0 || r == ri-ring || r == ri+ring {
 				for c := ci - ring; c <= ci+ring; c++ {
-					g.scanCell(lat, lon, r, c, &best, &bestD)
+					g.scanCell(lat, lon, r, c, &best, &bestD, &buf, keep)
 				}
 				continue
 			}
-			g.scanCell(lat, lon, r, ci-ring, &best, &bestD)
-			g.scanCell(lat, lon, r, ci+ring, &best, &bestD)
+			g.scanCell(lat, lon, r, ci-ring, &best, &bestD, &buf, keep)
+			g.scanCell(lat, lon, r, ci+ring, &best, &bestD, &buf, keep)
 		}
 		if bestD <= maxMeters && bestD <= float64(ring)*cellM {
 			break
@@ -66,16 +86,20 @@ func (g *Graph) Nearest(lat, lon float64, maxMeters float64) (uint32, float64, b
 	return best, bestD, true
 }
 
-func (g *Graph) scanCell(lat, lon float64, r, c int, best *uint32, bestD *float64) {
+func (g *Graph) scanCell(lat, lon float64, r, c int, best *uint32, bestD *float64, buf *[]uint32, keep func(uint32) bool) {
 	if c < 0 || c >= g.GridNLon {
 		return
 	}
 	cell := uint64(r*g.GridNLon + c)
-	if cell+1 >= uint64(len(g.GOff)) {
+	nodes := g.GridCell(cell, (*buf)[:0])
+	if nodes == nil {
 		return
 	}
-	for k := g.GOff[cell]; k < g.GOff[cell+1]; k++ {
-		n := g.GNodes[k]
+	*buf = nodes
+	for _, n := range nodes {
+		if keep != nil && !keep(n) {
+			continue
+		}
 		nlat, nlon := g.Coords(n)
 		d := Haversine(lat, lon, nlat, nlon)
 		if d < *bestD {
@@ -147,6 +171,13 @@ func (g *Graph) SnapEdge(lat, lon, maxMeters float64) (Snap, bool) {
 // closest segment turns out to be a dead end retry from the next road over
 // instead of answering "no route".
 func (g *Graph) SnapEdges(lat, lon, maxMeters float64, k int) []Snap {
+	return g.SnapEdgesFor(lat, lon, maxMeters, k, false)
+}
+
+// SnapEdgesFor is SnapEdges restricted to the segments one profile may use.
+// A union graph (v5) carries both classes; snapping to a motor-only footpath
+// would hand a car router a node with no way out.
+func (g *Graph) SnapEdgesFor(lat, lon, maxMeters float64, k int, motor bool) []Snap {
 	const snapSlackM = 500.0
 	if k < 1 {
 		k = 1
@@ -157,6 +188,7 @@ func (g *Graph) SnapEdges(lat, lon, maxMeters float64, k int) []Snap {
 	}
 
 	best := make([]Snap, 0, k)
+	buf := make([]uint32, 0, 128)
 	for ring := 0; ring <= maxRing; ring++ {
 		if ring > 0 && len(best) == k && float64(ring-1)*cellM > best[k-1].Dist+snapSlackM {
 			break
@@ -171,12 +203,12 @@ func (g *Graph) SnapEdges(lat, lon, maxMeters float64, k int) []Snap {
 				c0, c1 = ci-ring, ci+ring
 			default:
 				// only the two edge columns of the ring
-				g.snapCell(lat, lon, r, ci-ring, &best, k)
-				g.snapCell(lat, lon, r, ci+ring, &best, k)
+				g.snapCell(lat, lon, r, ci-ring, &best, k, &buf, motor)
+				g.snapCell(lat, lon, r, ci+ring, &best, k, &buf, motor)
 				continue
 			}
 			for c := c0; c <= c1; c++ {
-				g.snapCell(lat, lon, r, c, &best, k)
+				g.snapCell(lat, lon, r, c, &best, k, &buf, motor)
 			}
 		}
 	}
@@ -192,18 +224,22 @@ func (g *Graph) SnapEdges(lat, lon, maxMeters float64, k int) []Snap {
 
 // snapCell evaluates every segment leaving the nodes of one grid cell and keeps
 // the k nearest, ordered by distance.
-func (g *Graph) snapCell(lat, lon float64, r, c int, best *[]Snap, k int) {
+func (g *Graph) snapCell(lat, lon float64, r, c int, best *[]Snap, k int, buf *[]uint32, motor bool) {
 	if c < 0 || c >= g.GridNLon {
 		return
 	}
 	cell := uint64(r*g.GridNLon + c)
-	if cell+1 >= uint64(len(g.GOff)) {
+	nodes := g.GridCell(cell, (*buf)[:0])
+	if nodes == nil {
 		return
 	}
-	for i := g.GOff[cell]; i < g.GOff[cell+1]; i++ {
-		u := g.GNodes[i]
+	*buf = nodes
+	for _, u := range nodes {
 		ulat, ulon := g.Coords(u)
 		for e := g.Off[u]; e < g.Off[u+1]; e++ {
+			if !g.edgeUsable(e, motor) {
+				continue
+			}
 			v := g.To[e]
 			vlat, vlon := g.Coords(v)
 			d, t, plat, plon := projectOnSegment(lat, lon, ulat, ulon, vlat, vlon)

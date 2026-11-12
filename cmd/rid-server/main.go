@@ -56,6 +56,7 @@ type server struct {
 	fp         string
 	m          *metrics
 	rl         *limiter
+	motor      bool // this process serves the motorcycle profile
 }
 
 type strList []string
@@ -75,6 +76,7 @@ func main() {
 	var graphs strList
 	flag.Var(&graphs, "graph", "graph file(s); repeat or comma-separate for multi-region")
 	addr := flag.String("addr", ":8080", "listen address")
+	profile := flag.String("profile", "car", "vehicle profile: car|motor (needs a v5 union graph)")
 	conc := flag.Int("conc", 4, "concurrent routing workspaces (shared across all regions)")
 	workspaceMB := flag.Int("workspace-mb", 0, "total workspace memory budget in MB across all concurrency slots (0 = default 384 MB/slot)")
 	snap := flag.Float64("snap", 3000, "max snap distance in meters")
@@ -89,6 +91,14 @@ func main() {
 	trustProxy := flag.Bool("trust-proxy", false, "read the client IP from X-Forwarded-For (only behind a proxy)")
 	maxAge := flag.Int("maxage", 3600, "Cache-Control max-age for /route in seconds (0 disables caching headers)")
 	flag.Parse()
+	motor := false
+	switch strings.ToLower(*profile) {
+	case "car":
+	case "motor":
+		motor = true
+	default:
+		log.Fatalf("unknown -profile %q (want car|motor)", *profile)
+	}
 
 	if len(graphs) == 0 {
 		log.Fatal("need at least one -graph")
@@ -131,6 +141,7 @@ func main() {
 		budget:     softBudget,
 		maxAge:     *maxAge,
 		m:          m,
+		motor:      motor,
 	}
 	for _, p := range expand(graphs) {
 		g, err := graph.Open(p)
@@ -140,6 +151,7 @@ func main() {
 		mnLat, mnLon, mxLat, mxLon := g.Bounds()
 		const pad = 0.05
 		r := graph.NewRouterWithPool(g, wsPool)
+		r.SetMotor(motor)
 		r.SetEpsilon(float32(*eps))
 		r.SetTurnScale(float32(*turnPenalty))
 		r.SetMaxExpansions(uint32(*maxExp))
@@ -230,7 +242,7 @@ func (s *server) pickSnap(lat, lon float64) (*region, graph.Snap, bool) {
 		if !rg.contains(lat, lon) {
 			continue
 		}
-		sn, ok := rg.g.SnapEdge(lat, lon, bestD)
+		sn, ok := rg.r.SnapEdge(lat, lon, bestD)
 		if ok && sn.Dist <= bestD {
 			bestRg, best, bestD = rg, sn, sn.Dist
 		}
@@ -245,8 +257,8 @@ func (s *server) pickSnap(lat, lon float64) (*region, graph.Snap, bool) {
 // whose endpoints happen to sit nearest to two overlapping extracts still gets
 // served from a single file.
 func (s *server) snapBoth(rg *region, fLat, fLon, tLat, tLon float64) (graph.Snap, graph.Snap, bool) {
-	a, ok1 := rg.g.SnapEdge(fLat, fLon, s.maxSnapM)
-	b, ok2 := rg.g.SnapEdge(tLat, tLon, s.maxSnapM)
+	a, ok1 := rg.r.SnapEdge(fLat, fLon, s.maxSnapM)
+	b, ok2 := rg.r.SnapEdge(tLat, tLon, s.maxSnapM)
 	if !ok1 || !ok2 {
 		return graph.Snap{}, graph.Snap{}, false
 	}
@@ -280,12 +292,16 @@ func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Commit  string `json:"commit"`
 		Regions []info `json:"regions"`
 	}{OK: true, Version: versionString(), Commit: commit}
+	prof, profKey := "car", "profile_sha256"
+	if s.motor {
+		prof, profKey = "motor", "motor_sha256"
+	}
 	for _, rg := range s.regions {
-		rs := rg.g.Restrictions()
+		rs := rg.g.RestrictionsFor(s.motor)
 		prov := rg.g.Provenance()
 		out.Regions = append(out.Regions, info{rg.name, rg.g.NodeCount, rg.g.EdgeCount, rg.minLat, rg.minLon, rg.maxLat, rg.maxLon,
 			rs.Ban, rs.Only, rs.Skipped,
-			prov.Format, prov.PBFHash, prov.BuiltAt, rg.g.MetaValue("source"), rg.g.MetaValue("extractor"), rg.g.MetaValue("profile"), rg.g.MetaValue("profile_sha256")})
+			prov.Format, prov.PBFHash, prov.BuiltAt, rg.g.MetaValue("source"), rg.g.MetaValue("extractor"), prof, rg.g.MetaValue(profKey)})
 	}
 	writeJSON(w, out)
 }
@@ -382,16 +398,16 @@ func (s *server) retryNoRoute(ctx context.Context, rg *region, p routeParams, fL
 	// Only starts that actually reach somewhere are worth a search. A pocket
 	// is often dozens of nodes wide, so the first scan can consist entirely of
 	// dead starts; widen it once before falling back to plain distance order.
-	starts := rg.g.SnapEdges(fLat, fLon, s.maxSnapM, snapRetryCandidates)
+	starts := rg.r.SnapEdges(fLat, fLon, s.maxSnapM, snapRetryCandidates)
 	usable := usableStarts(rg.g, starts)
 	if len(usable) == 0 {
-		starts = rg.g.SnapEdges(fLat, fLon, s.maxSnapM, snapRetryDeep)
+		starts = rg.r.SnapEdges(fLat, fLon, s.maxSnapM, snapRetryDeep)
 		usable = usableStarts(rg.g, starts)
 	}
 	if len(usable) == 0 {
 		usable = starts
 	}
-	candsT := rg.g.SnapEdges(tLat, tLon, s.maxSnapM, snapRetryCandidates)
+	candsT := rg.r.SnapEdges(tLat, tLon, s.maxSnapM, snapRetryCandidates)
 	type pair struct {
 		a, b graph.Snap
 		d    float64

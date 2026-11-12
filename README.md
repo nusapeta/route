@@ -86,8 +86,10 @@ p50; keunggulan routeid ada di memori, artefak, dan preprocess.
 
 - Tanpa hierarki (CH/MLD): >60 km melambat superlinear. 148 km = 2,7 s (v4;
   4,2 s di v3), dan koridor >800 km masih menabrak batas ekspansi (`ErrTooFar`).
-- Satu graf = satu profil: mobil dan motor adalah dua artefak terpisah
-  (`data/java.graph` vs `data/java-motor.graph`), bukan parameter query.
+- Satu artefak untuk dua profil: format v5 menyimpan kelas kecepatan mobil
+  (`Cls`) dan motor (`MCls`, 0 = terlarang) plus dua set turn restriction.
+  Proses server memilih profil lewat `-profile car|motor`; tidak ada file
+  `-motor.graph` terpisah lagi.
 - Satu proses boleh memuat beberapa file region, tetapi rute lintas file hanya
   dilayani untuk pasangan ferry yang terdaftar: Merak-Bakauheni
   (`java` + `sumatra`) dan Ketapang-Gilimanuk (`java` + `nusa-tenggara`). Rute
@@ -134,21 +136,24 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
 ```
 
 - **Node = setiap node OSM** → geometri jalan persis, tanpa shape point terpisah.
-- **CSR** adjacency (Off/To/Len/Cls), koordinat fixed point 1e-7. Format v4:
-  `Off` uint32, `Len` uint16 satuan 4 m, waktu tidak disimpan, dihitung
-  dari `Len` + kelas kecepatan per edge (`Cls` = km/h x 2), dan ferry disimpan
-  sebagai daftar edge sparse (bukan array penuh). 12 B/node + 7 B/edge.
+- **CSR** adjacency (Off/To/Len/Cls/MCls), koordinat fixed point 1e-7.
+  Format v5: `Off` uint32, `Len` uint16 satuan 4 m, `Cls` (mobil) dan `MCls`
+  (motor) uint8 = km/h x 2 dengan 0 berarti profil itu tidak boleh lewat;
+  waktu tidak disimpan, dihitung dari `Len` + kelas. Ferry adalah daftar edge
+  sparse. 12 B/node + 8 B/edge.
 - **Hilbert curve ordering**: node diurutkan geografis → A* tetap page-local
   (RSS metropolitan 1.225 → 675 MB, p50 7-20% lebih cepat).
 - **Weighted A*** (ε=1.5 default): 28% lebih cepat dari ε=1.0, panjang rute identik.
-- **Snap ke ruas**, bukan ke node: titik diproyeksikan tegak lurus ke segmen,
-  lalu jarak/geometri dikoreksi (trim kalau rute keluar lewat ruas itu, spur kalau
-  tidak). Grid 0.02° (~2,2 km/cell) dengan pencarian per-ring.
+- **Snap ke ruas**, bukan ke node: titik diproyeksikan tegak lurus ke segmen
+  yang boleh dilalui profil aktif, lalu jarak/geometri dikoreksi (trim kalau
+  rute keluar lewat ruas itu, spur kalau tidak). Grid 0.02° (~2,2 km/cell)
+  menyimpan id node per sel sebagai delta varint dengan offset byte `GOff`.
 - Bobot = waktu tempuh (detik desimal) dari `maxspeed` atau default per kelas
   jalan yang disetel untuk Indonesia (residential 25 km/h, service 15 km/h, dll).
-- **Profil** dipilih saat build: `car` (default, tabel mobil) atau `motor`
-  (tabel motor: service/gang lebih permisif, tol dibuang kecuali
-  `motorcycle=yes`, `path`/`footway` dipakai kalau ditandai boleh motor).
+- **Profil** dipilih saat server start: satu artefak memuat kelas mobil dan
+  motor sekaligus, `-profile car|motor`. Tabel motor lebih permisif untuk
+  service/gang, membuang tol kecuali `motorcycle=yes`, dan memakai
+  `path`/`footway` kalau ditandai boleh motor.
   Untuk motor, `oneway:motorcycle=yes|no|-1` menimpa `oneway` dan
   `motorcycle=destination` adalah izin lemah; `surface`/`smoothness` hanya
   menggeser kecepatan kelas tambahan (`path`, `footway`, `cycleway`,
@@ -163,11 +168,9 @@ osm.pbf ──rid-extract──> map.graph (mmap) ──rid-server──> HTTP J
 ```bash
 make build          # semua binary ke bin/
 make fetch REGION=java
-make java           # unduh + build data/java.graph (profil mobil)
-make graph REGION=java PROFILE=motor   # -> data/java-motor.graph
-make islands        # ketujuh region Geofabrik, profil mobil
-make motor          # ketujuh region, profil motor
-make refresh REGION=java   # unduh ulang, build car+motor, tagstats, test, A/B
+make java           # unduh + build data/java.graph (mobil + motor)
+make islands        # ketujuh region Geofabrik, satu graph per region
+make refresh REGION=java   # unduh ulang, build, tagstats, test, A/B
 
 # cek rute
 bin/rid-route -graph data/java.graph -from -6.1754,106.8272 -to -6.5950,106.8166
@@ -782,17 +785,19 @@ graf). Bandingkan tabel CSR penuh: 8 B x 46,7 jt edge = 374 MB.
 ## Format file
 
 Lihat doc comment `internal/graph/format.go`. Header 320 B + 14 section: Lat,
-Lon (int32 1e-7), CSR `Off`/`To`, `Len` (uint16 satuan 4 m), `Cls` (uint8 = km/h
-x 2), daftar edge ferry (sparse), grid snap, lalu `Ban`/`Only` (pasangan edge
-terlarang/diizinkan). **Waktu tempuh tidak disimpan**: dihitung dari
-`Len x 288/Cls` desisecond, jadi satu edge = 4 + 2 + 1 = 7 B dan satu node =
-4 + 4 + 4 = 12 B.
+Lon (int32 1e-7), CSR `Off`/`To`, `Len` (uint16 satuan 4 m), `Cls` dan `MCls`
+(uint8 = km/h x 2, 0 = terlarang), daftar edge ferry (sparse), grid snap
+(`GOff` uint32 byte offset + `GNodes` varint delta), lalu `Ban`/`Only` untuk
+mobil dan `BanM`/`OnlyM` untuk motor. **Waktu tempuh tidak disimpan**: dihitung
+dari `Len x 288/Cls` desisecond, jadi satu edge = 4 + 2 + 1 + 1 = 8 B dan satu
+node = 4 + 4 + 4 = 12 B.
 
-Versi 4 menambah: `Off` uint32, `Len`/`Cls` di atas, dan daftar ferry. Header
-punya provenance sejak v3 (SHA-256 pbf, waktu build) plus blob `key=value` di
-akhir file (sumber, profil + hash, batas kecepatan, versi extractor, order,
-grid). File v1-v3 ditolak oleh reader v4 (lebarnya beda, salah baca lebih
-buruk daripada error jelas): jalankan ulang extractor, 1-8 menit per region.
+Versi 5 menyatukan profil: satu file per region untuk mobil dan motor, dua set
+turn restriction, dan grid delta varint. Header punya provenance sejak v3
+(SHA-256 pbf, waktu build) plus blob `key=value` di akhir file (sumber, profil +
+hash mobil/motor, batas kecepatan, versi extractor, order, grid). File v1-v4
+ditolak oleh reader v5 (layout `Cls`/grid beda, salah baca lebih buruk daripada
+error jelas): jalankan ulang extractor, 7-40 s per region.
 
 ## Lisensi
 

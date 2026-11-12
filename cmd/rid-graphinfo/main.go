@@ -79,8 +79,21 @@ func main() {
 	fmt.Printf("coords     : %d (interior shape points)\n", g.CoordCount)
 	minLat, minLon, maxLat, maxLon := g.Bounds()
 	fmt.Printf("bbox       : %.6f,%.6f .. %.6f,%.6f\n", minLat, minLon, maxLat, maxLon)
-	fmt.Printf("grid       : %dx%d cells, step %.4f, origin %.4f,%.4f, entries %d\n",
-		g.GridNLat, g.GridNLon, g.GridStep, g.GridLat0, g.GridLon0, g.GridCount)
+	fmt.Printf("grid       : %dx%d cells, step %.4f, origin %.4f,%.4f, nodes %d, blob %.1f MB\n",
+		g.GridNLat, g.GridNLon, g.GridStep, g.GridLat0, g.GridLon0, g.GridCount,
+		float64(len(g.GNodes))/1e6)
+	carOnly, motorOnly := 0, 0
+	for e := range g.Cls {
+		switch {
+		case g.Cls[e] == 0:
+			motorOnly++
+		case g.MCls[e] == 0:
+			carOnly++
+		}
+	}
+	fmt.Printf("classes    : car-only %d, motor-only %d, shared %d, bans %d+%d, only %d+%d\n",
+		carOnly, motorOnly, int(g.EdgeCount)-carOnly-motorOnly,
+		len(g.Ban), len(g.BanM), len(g.Only), len(g.OnlyM))
 	prov := g.Provenance()
 	fmt.Printf("format     : v%d\n", prov.Format)
 	if prov.PBFHash == "" {
@@ -88,7 +101,7 @@ func main() {
 	} else {
 		fmt.Printf("pbf sha256 : %s\n", prov.PBFHash)
 		fmt.Printf("built at   : %s\n", prov.BuiltAt)
-		for _, k := range []string{"source", "pbf_bytes", "extractor", "profile", "profile_sha256", "max_speed_kmh", "order", "grid_step", "restrictions"} {
+		for _, k := range []string{"source", "pbf_bytes", "extractor", "profile", "profile_sha256", "motor_sha256", "max_speed_kmh", "order", "grid_step", "restrictions"} {
 			if v := g.MetaValue(k); v != "" {
 				fmt.Printf("%-10s : %s\n", k, v)
 			}

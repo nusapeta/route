@@ -17,6 +17,7 @@ import (
 // of Skipped(), so Usable + Skipped() == Relations. ReachCap counts searches
 // that hit the edge-state cap; those bans are relaxed conservatively.
 type RestrictionStats struct {
+	Profile       string // "car" or "motor" for v5 union builds
 	Relations     uint32 // type=restriction relations seen
 	Usable        uint32 // from+to resolved and the rule stored in ban/only list
 	ViaNode       uint32 // resolved through a single via node
@@ -44,7 +45,11 @@ type RestrictionStats struct {
 
 func (s *RestrictionStats) String() string {
 	u := func(v uint32) string { return strconv.FormatUint(uint64(v), 10) }
-	return "restrictions: seen=" + u(s.Relations) +
+	name := "restrictions"
+	if s.Profile != "" {
+		name += "(" + s.Profile + ")"
+	}
+	return name + ": seen=" + u(s.Relations) +
 		" usable=" + u(s.Usable) +
 		" via_node=" + u(s.ViaNode) +
 		" via_way=" + u(s.ViaWay) +
@@ -79,6 +84,7 @@ type restView struct {
 	to       []uint32
 	ids      []int64  // osm node ids, sorted (pre-permutation order)
 	perm     []uint32 // pre-rank -> final rank, nil when order=osm
+	cls      []uint8  // per-edge speed class; 0 = unusable by this profile
 
 	// scratch for the build-time restriction reachability check
 	seen  []uint32
@@ -98,6 +104,7 @@ type restResult struct {
 // forbidden (fromEdge,toEdge) transitions over the already built CSR.
 func buildRestrictions(ctx context.Context, f *os.File, workers int, progress func(string, int64), v *restView, prof Profile) (restResult, error) {
 	res := restResult{prof: prof}
+	res.stats.Profile = string(prof)
 
 	if _, err := f.Seek(0, 0); err != nil {
 		return res, err
@@ -156,6 +163,9 @@ func (v *restView) edge(u, t int64) (uint32, bool) {
 		return 0, false
 	}
 	for e := v.off[u]; e < v.off[u+1]; e++ {
+		if v.cls != nil && v.cls[e] == 0 {
+			continue
+		}
 		if v.to[e] == uint32(t) {
 			return e, true
 		}
@@ -551,6 +561,9 @@ func (v *restView) hasDetour(src, in, out uint32, banned map[uint64]struct{}, on
 		return true
 	}
 	for e := v.off[src]; e < v.off[src+1]; e++ {
+		if v.cls != nil && v.cls[e] == 0 {
+			continue
+		}
 		if v.to[e] == dst {
 			return true, false
 		}
@@ -563,6 +576,9 @@ func (v *restView) hasDetour(src, in, out uint32, banned map[uint64]struct{}, on
 		u := v.to[e]
 		m := only[e]
 		for f := v.off[u]; f < v.off[u+1]; f++ {
+			if v.cls != nil && v.cls[f] == 0 {
+				continue
+			}
 			if e == in && f == out {
 				continue
 			}

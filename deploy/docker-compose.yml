@@ -1,16 +1,15 @@
-# Homelab deploy: Jawa + Sumatra + Bali/Nusra (mobil), plus ketiga region itu
-# untuk motor.
+# Homelab deploy: Jawa + Sumatra + Bali/Nusra, satu artefak per region untuk
+# profil mobil dan motor (format v5 menyimpan kedua kelas sekaligus).
 #   cd deploy && docker compose up -d --build
 # Graph dibangun sekali di host (butuh RAM lebih besar dari saat run):
-#   make java sumatra nusa-tenggara        (mobil)
-#   make graph REGION=java PROFILE=motor   (motor, ulangi sumatra/nusa-tenggara)
-#     -> data/java-motor.graph, data/sumatra-motor.graph, data/nusa-tenggara-motor.graph
+#   make java sumatra nusa-tenggara
+#     -> data/java.graph, data/sumatra.graph, data/nusa-tenggara.graph
 # Format v3 (java-v3.graph.bak) hanya terbaca oleh image pre-m5; untuk rollback
 # simpan image lama: docker tag routeid:local routeid:pre-m5
 #
 # Tiga layanan inti, satu image: pemilihan region memakai snap terdekat, jadi
-# profil mobil dan motor tidak boleh berada di proses yang sama (dua graph
-# dengan geometri hampir identik akan saling menutupi). Kedua proses itu hanya
+# profil mobil dan motor tidak boleh berada di proses yang sama (dua proses
+# membuka file yang sama; profil dipilih per proses). Kedua proses itu hanya
 # mendengarkan di loopback (18080/18081, untuk debug langsung), dan `gateway`
 # memegang port loopback 8080: profil dipilih lewat ?profile=motor, tanpa
 # parameter dilayani profil mobil. Akses publik lewat Cloudflare Tunnel
@@ -175,12 +174,14 @@ services:
       # port host beda; di dalam container tetap 8080
       - "127.0.0.1:18081:8080"
     command:
+      - -profile
+      - motor
       - -graph
-      - /data/java-motor.graph
+      - /data/java.graph
       - -graph
-      - /data/sumatra-motor.graph
+      - /data/sumatra.graph
       - -graph
-      - /data/nusa-tenggara-motor.graph
+      - /data/nusa-tenggara.graph
       - -addr
       - :8080
       # Sisa flag sengaja ditulis ulang, bukan dibiarkan default: nilai default

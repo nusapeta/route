@@ -131,7 +131,7 @@ func (s *server) routeStitched(ctx context.Context, rgF, rgT *region, snapF, sna
 }
 
 func (s *server) snapPort(rg *region, p ferryPort) (graph.Snap, bool) {
-	cands := rg.g.SnapEdges(p.lat, p.lon, s.maxSnapM, 8)
+	cands := rg.r.SnapEdges(p.lat, p.lon, s.maxSnapM, 8)
 	for _, sn := range cands {
 		if !rg.g.IsFerry(sn.Edge) {
 			return sn, true

@@ -44,6 +44,8 @@ func main() {
 	to := flag.String("to", "", "lat,lng")
 	eps := flag.Float64("eps", 1.25, "heuristic weight")
 	turnPenalty := flag.Float64("turn-penalty", 0.25, "turn cost multiplier; 0 = pure edge time")
+	profile := flag.String("profile", "car", "vehicle profile: car|motor")
+	strict := flag.Bool("strict", true, "honour turn restrictions")
 	flag.Parse()
 	if *from == "" || *to == "" {
 		usage()
@@ -56,20 +58,25 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	motor := *profile == "motor"
+	if !motor && *profile != "car" {
+		log.Fatalf("unknown -profile %q (want car|motor)", *profile)
+	}
 	r := graph.NewRouter(g, 1)
+	r.SetMotor(motor)
 	r.SetEpsilon(float32(*eps))
 	r.SetTurnScale(float32(*turnPenalty))
 
 	t0 := time.Now()
-	sa, ok1 := g.SnapEdge(fla, flo, 3000)
-	sb, ok2 := g.SnapEdge(tla, tlo, 3000)
+	sa, ok1 := r.SnapEdge(fla, flo, 3000)
+	sb, ok2 := r.SnapEdge(tla, tlo, 3000)
 	fmt.Printf("snap: from node %d edge %d->%d t=%.3f off=%.0fm | to node %d edge %d->%d t=%.3f off=%.0fm ok=%v/%v\n",
 		sa.Node, sa.From, sa.To, sa.T, sa.Dist, sb.Node, sb.From, sb.To, sb.T, sb.Dist, ok1, ok2)
 	if !ok1 || !ok2 {
 		return
 	}
 	fmt.Printf("snapped: from=%.6f,%.6f to=%.6f,%.6f\n", sa.Lat, sa.Lon, sb.Lat, sb.Lon)
-	res, err := r.RouteSnap(sa, sb, true)
+	res, err := r.RouteSnap(sa, sb, *strict)
 	if err == nil {
 		fmt.Printf("trim: from=%v to=%v head=%.6f,%.6f tail=%.6f,%.6f\n",
 			res.TrimStart, res.TrimEnd, res.Head[0], res.Head[1], res.Tail[0], res.Tail[1])

@@ -28,6 +28,7 @@ func main() {
 	pairsIn := flag.String("pairs", "", "route fixed pairs from CSV (bucket,from_lat,from_lon,to_lat,to_lon)")
 	pairsOut := flag.String("emit-pairs", "", "write the sampled coordinate pairs and exit")
 	noStrict := flag.Bool("no-restrictions", false, "ignore turn restrictions (baseline)")
+	profile := flag.String("profile", "car", "vehicle profile: car|motor")
 	cpuProf := flag.String("cpuprofile", "", "write CPU profile")
 	flag.Parse()
 
@@ -47,7 +48,12 @@ func main() {
 		die(err)
 	}
 	defer g.Close()
+	motor := *profile == "motor"
+	if !motor && *profile != "car" {
+		die(fmt.Errorf("unknown -profile %q (want car|motor)", *profile))
+	}
 	r := graph.NewRouter(g, 1)
+	r.SetMotor(motor)
 	if *noStrict {
 		r.SetStrict(false)
 	}
@@ -67,7 +73,7 @@ func main() {
 	rng := rand.New(rand.NewSource(*seed))
 
 	if *pairsIn != "" {
-		runPairs(g, r, *pairsIn, *csvOut)
+		runPairs(g, r, *pairsIn, *csvOut, motor)
 		return
 	}
 
@@ -112,7 +118,7 @@ func main() {
 			if !ok {
 				continue
 			}
-			dst, _, ok := g.Nearest(tLat, tLon, 5000)
+			dst, _, ok := g.NearestFor(tLat, tLon, 5000, *profile == "motor")
 			if !ok {
 				fails++
 				continue
@@ -200,7 +206,7 @@ func offset(lat, lon, dKM, bearing float64) (float64, float64) {
 
 // runPairs routes a fixed pair list so that two graph layouts can be compared
 // on an identical workload.
-func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
+func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string, motor bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		die(err)
@@ -256,8 +262,8 @@ func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string) {
 			byBucket[bucket] = a
 			order = append(order, bucket)
 		}
-		src, _, ok1 := g.Nearest(fla, flo, 5000)
-		dst, _, ok2 := g.Nearest(tla, tlo, 5000)
+		src, _, ok1 := g.NearestFor(fla, flo, 5000, motor)
+		dst, _, ok2 := g.NearestFor(tla, tlo, 5000, motor)
 		if !ok1 || !ok2 {
 			a.fail++
 			continue

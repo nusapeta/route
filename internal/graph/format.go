@@ -8,15 +8,18 @@
 //	section 2  Off      uint32[nodeCount+1]   CSR: edge indexes of node
 //	section 3  To       uint32[edgeCount]
 //	section 4  Len      uint16[edgeCount]      metres / 4 (LenUnit)
-//	section 5  Cls      uint8[edgeCount]       speed class (km/h * 2); time derives from it
-//	section 6  GO       uint32[]              reserved: geometry offset (unused)
+//	section 5  Cls      uint8[edgeCount]       car speed class (km/h * 2)
+//	section 6  MCls     uint8[edgeCount]       motor speed class; 0 = no access
 //	section 7  Ferry    uint32[ferryCount]    sorted edge indexes that are ferry crossings
 //	section 8  CLat     int32[coordCount]      interior shape points
 //	section 9  CLon     int32[coordCount]
-//	section 10 GOff     uint64[cellCount+1]    spatial grid over nodes
-//	section 11 GNodes   uint32[nodeCount]
-//	section 12 TurnOff  uint64[edgeCount+1]    banned transitions (CSR)
-//	section 13 TurnTo   uint32[turnCount]
+//	section 10 GOff     uint32[cellCount+1]    byte offsets into the encoded grid
+//	section 11 GNodes   varint delta of node ids, grouped per grid cell
+//	section 12 TurnOff  uint64[banCount]       sorted packed (from,to) bans
+//	section 13 TurnTo   uint64[onlyCount]      sorted packed only_* successors
+//
+// Motor-only turn restrictions live in two extra sections whose offsets and
+// counts sit in the reserved header tail (see hBanMOff and friends).
 package graph
 
 import (
@@ -50,10 +53,17 @@ const (
 	// section is gone: travel time is derived from Len and a per-edge
 	// speed class (Cls), which costs 1 byte instead of 4 while keeping
 	// both metrics. That is 4 B/node + 5 B/edge less (~280 MB on Java).
-	// v1-v3 files are rejected; re-run the extractor.
-	Version = 4
+	//
+	// v5 stores one car and one motor class per edge (MCls, section 6
+	// replaces the unused GO), so a single artefact serves both profiles
+	// and the duplicated motor graph is gone. Motor-only turn
+	// restrictions move to their own sections (hBanMOff/hOnlyMOff). The
+	// snap grid compacts too: GOff is uint32 byte offsets and GNodes is a
+	// varint delta blob (-68 MB on Java). v1-v4 files are rejected;
+	// re-run the extractor.
+	Version = 5
 	// VersionMin is the oldest readable format version.
-	VersionMin = 4
+	VersionMin = 5
 
 	magicLE     = 0x47444952 // "RIDG"
 	headerSize  = 320
@@ -67,6 +77,12 @@ const (
 	// hFerry (v4) is the number of entries in the sparse ferry edge list. The
 	// header grew to 320 bytes for it; sections start after the header.
 	hFerry = 256 // uint32   count of ferry edges
+	// v5 extra sections live in the reserved header tail.
+	hBanMOff   = 260 // uint64   file offset of the motor ban list
+	hOnlyMOff  = 268 // uint64   file offset of the motor only_* list
+	hBanMCount = 276 // uint32   motor ban entries
+	hOnlyM     = 280 // uint32   motor only_* entries
+	hGridBytes = 284 // uint32   bytes in the encoded GNodes blob
 )
 
 const (
@@ -76,7 +92,7 @@ const (
 	sTo
 	sLen
 	sCls
-	sGO
+	sMCls // v5: motor speed class; was the reserved GO geometry section
 	sFerry
 	sCLat
 	sCLon
@@ -129,8 +145,56 @@ func (g *Graph) MaxSpeedMps() float64 {
 // EdgeLenM is the length of edge e in metres.
 func (g *Graph) EdgeLenM(e uint32) uint32 { return uint32(g.Len[e]) * LenUnit }
 
-// EdgeTimeDs is the travel time of edge e in deciseconds.
+// EdgeTimeDs is the travel time of edge e in deciseconds for the car profile.
 func (g *Graph) EdgeTimeDs(e uint32) float32 { return float32(g.Len[e]) * classRate[g.Cls[e]] }
+
+// MotorTimeDs is the travel time of edge e in deciseconds for the motor
+// profile. Edges with MCls 0 are not usable by a motorcycle.
+func (g *Graph) MotorTimeDs(e uint32) float32 { return float32(g.Len[e]) * classRate[g.MCls[e]] }
+
+// edgeUsable reports whether one profile may drive edge e. Class 0 is the v5
+// "no access" marker.
+func (g *Graph) edgeUsable(e uint32, motor bool) bool {
+	if motor {
+		return g.MCls[e] != 0
+	}
+	return g.Cls[e] != 0
+}
+
+// GridCell decodes the node ids of one snap cell into buf (reused across
+// calls) and returns them appended to buf[:0]. It returns nil when the cell
+// does not exist.
+func (g *Graph) GridCell(cell uint64, buf []uint32) []uint32 {
+	buf = buf[:0]
+	if cell+1 >= uint64(len(g.GOff)) {
+		return nil
+	}
+	lo, hi := g.GOff[cell], g.GOff[cell+1]
+	prev := uint32(0)
+	for lo < hi {
+		v, n := uvarint(g.GNodes[lo:hi])
+		if n <= 0 {
+			break
+		}
+		lo += uint32(n)
+		prev += uint32(v)
+		buf = append(buf, prev)
+	}
+	return buf
+}
+
+// uvarint decodes one unsigned LEB128 value, returning the value and the
+// number of bytes read (0 on truncation).
+func uvarint(b []byte) (uint64, int) {
+	var v uint64
+	for i := 0; i < len(b) && i < 5; i++ {
+		v |= uint64(b[i]&0x7f) << (7 * uint(i))
+		if b[i] < 0x80 {
+			return v, i + 1
+		}
+	}
+	return 0, 0
+}
 
 // IsFerry reports whether edge e is a ferry crossing. The list is sparse (a
 // few thousand edges even nationwide) and binary searched, which is per-route
@@ -170,19 +234,26 @@ type Graph struct {
 	Off      []uint32
 	To       []uint32
 	Len      []uint16 // metres / LenUnit
-	Cls      []uint8  // speed class, see SpeedClassScale
-	GO       []uint32 // reserved (always empty in v4)
+	Cls      []uint8  // car speed class, see SpeedClassScale
+	MCls     []uint8  // motor speed class; 0 = no motorcycle access
 	Ferry    []uint32 // sorted edge indexes of ferry crossings
 	CLat     []int32
 	CLon     []int32
-	GOff     []uint64
-	GNodes   []uint32
+	GOff     []uint32 // byte offsets into GNodes, one per cell plus end
+	GNodes   []byte   // per-cell varint delta of node ids
 	// Ban holds sorted packed (fromEdge<<32|toEdge) transitions forbidden by
 	// an OSM turn restriction. Only holds the permitted successor of a
 	// fromEdge for only_* rules (every other successor is forbidden).
+	// The *M variants carry the motor rules, which differ when a relation
+	// says except=motorcycle or references motor-only ways.
 	Ban     []uint64
 	Only    []uint64
+	BanM    []uint64
+	OnlyM   []uint64
 	Skipped uint32 // restrictions dropped at build time
+
+	// lookup tables built by Open; see SpanFor
+	banIdx, onlyIdx, banMIdx, onlyMIdx restrictionIndex
 
 	// provenance (v3+)
 	pbfHash   [32]byte
@@ -220,24 +291,19 @@ func Open(path string) (*Graph, error) {
 		syscall.Munmap(data)
 		return nil, fmt.Errorf("graph: version %d, supported %d..%d", v, VersionMin, Version)
 	}
-	ver := be.Uint32(data[4:])
-	banCount := uint32(0)
-	onlyCount := uint32(0)
-	ferryCount := uint32(0)
-	if ver >= 2 {
-		banCount = be.Uint32(data[200:])
-		onlyCount = be.Uint32(data[204:])
-		g.Skipped = be.Uint32(data[208:])
-	}
-	if ver >= 4 {
-		ferryCount = be.Uint32(data[hFerry:])
-	}
-	if ver >= 3 {
-		copy(g.pbfHash[:], data[hPBFHash:hPBFHash+32])
-		g.buildUnix = be.Uint32(data[hBuildUnix:])
-		if off := be.Uint64(data[hMetaOff:]); off > 0 && off < uint64(len(data)) {
-			g.meta = parseMeta(data[off:])
-		}
+	banCount := be.Uint32(data[200:])
+	onlyCount := be.Uint32(data[204:])
+	g.Skipped = be.Uint32(data[208:])
+	ferryCount := be.Uint32(data[hFerry:])
+	banMCount := be.Uint32(data[hBanMCount:])
+	onlyMCount := be.Uint32(data[hOnlyM:])
+	banMOff := be.Uint64(data[hBanMOff:])
+	onlyMOff := be.Uint64(data[hOnlyMOff:])
+	gridBytes := be.Uint32(data[hGridBytes:])
+	copy(g.pbfHash[:], data[hPBFHash:hPBFHash+32])
+	g.buildUnix = be.Uint32(data[hBuildUnix:])
+	if off := be.Uint64(data[hMetaOff:]); off > 0 && off < uint64(len(data)) {
+		g.meta = parseMeta(data[off:])
 	}
 
 	g.NodeCount = be.Uint32(data[8:])
@@ -284,16 +350,19 @@ func Open(path string) (*Graph, error) {
 		{"To", off[sTo], uint64(g.EdgeCount), 4},
 		{"Len", off[sLen], uint64(g.EdgeCount), 2},
 		{"Cls", off[sCls], uint64(g.EdgeCount), 1},
+		{"MCls", off[sMCls], uint64(g.EdgeCount), 1},
 		{"Ferry", off[sFerry], uint64(ferryCount), 4},
 		{"CLat", off[sCLat], uint64(g.CoordCount), 4},
 		{"CLon", off[sCLon], uint64(g.CoordCount), 4},
 		{"TurnOff", off[sTurnOff], uint64(banCount), 8},
 		{"TurnTo", off[sTurnTo], uint64(onlyCount), 8},
+		{"BanM", banMOff, uint64(banMCount), 8},
+		{"OnlyM", onlyMOff, uint64(onlyMCount), 8},
 	}
 	if cells > 0 {
 		specs = append(specs,
-			sectionSpec{"GOff", off[sGOff], cells + 1, 8},
-			sectionSpec{"GNodes", off[sGNodes], uint64(g.GridCount), 4},
+			sectionSpec{"GOff", off[sGOff], cells + 1, 4},
+			sectionSpec{"GNodes", off[sGNodes], uint64(gridBytes), 1},
 		)
 	}
 	if err := validateSections(data, specs); err != nil {
@@ -313,15 +382,23 @@ func Open(path string) (*Graph, error) {
 	g.To = u32s(data, off[sTo], g.EdgeCount)
 	g.Len = u16s(data, off[sLen], g.EdgeCount)
 	g.Cls = u8s(data, off[sCls], g.EdgeCount)
+	g.MCls = u8s(data, off[sMCls], g.EdgeCount)
 	g.Ferry = u32s(data, off[sFerry], ferryCount)
 	g.CLat = i32s(data, off[sCLat], g.CoordCount)
 	g.CLon = i32s(data, off[sCLon], g.CoordCount)
 	if cells > 0 {
-		g.GOff = u64s(data, off[sGOff], uint32(cells+1))
-		g.GNodes = u32s(data, off[sGNodes], g.GridCount)
+		g.GOff = u32s(data, off[sGOff], uint32(cells+1))
+		g.GNodes = data[off[sGNodes] : off[sGNodes]+uint64(gridBytes)]
+		if g.GOff[cells] != gridBytes {
+			syscall.Munmap(data)
+			return nil, fmt.Errorf("graph: grid offsets end at %d, blob is %d bytes", g.GOff[cells], gridBytes)
+		}
 	}
 	g.Ban = u64s(data, off[sTurnOff], banCount)
 	g.Only = u64s(data, off[sTurnTo], onlyCount)
+	g.BanM = u64s(data, banMOff, banMCount)
+	g.OnlyM = u64s(data, onlyMOff, onlyMCount)
+	g.buildRestrictionIndex()
 	return g, nil
 }
 
@@ -404,8 +481,8 @@ type Builder struct {
 	Off        []uint32
 	To         []uint32
 	Len        []uint16
-	Cls        []uint8
-	GO         []uint32 // reserved
+	Cls        []uint8  // car speed class
+	MCls       []uint8  // motor speed class; nil means "same as Cls"
 	Ferry      []uint32 // sorted edge indexes
 	CLat, CLon []int32
 	TurnOff    []uint64
@@ -414,9 +491,10 @@ type Builder struct {
 	GridStep           float64
 	GridLat0, GridLon0 float64
 	GridNLat, GridNLon int
-	GOff               []uint64
-	GNodes             []uint32
+	GOff               []uint32
+	GNodes             []byte // varint delta per cell, see BuildGrid
 	Ban, Only          []uint64
+	BanM, OnlyM        []uint64
 	RestSkipped        uint32
 	MinLat, MinLon     float64
 	MaxLat, MaxLon     float64
@@ -472,18 +550,41 @@ func (b *Builder) BuildGrid(step float64) {
 	for i := 1; i <= cells; i++ {
 		counts[i] += counts[i-1]
 	}
-	b.GOff = make([]uint64, cells+1)
-	for i := range b.GOff {
-		b.GOff[i] = uint64(counts[i])
-	}
-	b.GNodes = make([]uint32, len(b.Lat))
+	nodes := make([]uint32, len(b.Lat))
 	cur := make([]uint32, cells)
 	copy(cur, counts[:cells])
 	for i := range b.Lat {
 		c := cell[i]
-		b.GNodes[cur[c]] = uint32(i)
+		nodes[cur[c]] = uint32(i)
 		cur[c]++
 	}
+
+	// Encode each cell as ascending deltas from the previous node id. Cells
+	// are small (a few dozen entries), so one byte per node is the norm.
+	b.GOff = make([]uint32, cells+1)
+	blob := make([]byte, 0, len(b.Lat)+len(b.Lat)>>3+64)
+	for c := 0; c < cells; c++ {
+		b.GOff[c] = uint32(len(blob))
+		prev := uint32(0)
+		for k := counts[c]; k < counts[c+1]; k++ {
+			v := nodes[k]
+			blob = appendUvarint(blob, v-prev)
+			prev = v
+		}
+	}
+	if uint64(len(blob)) > math.MaxUint32-1 {
+		panic("graph: grid blob exceeds uint32")
+	}
+	b.GOff[cells] = uint32(len(blob))
+	b.GNodes = blob
+}
+
+func appendUvarint(b []byte, v uint32) []byte {
+	for v >= 0x80 {
+		b = append(b, byte(v)|0x80)
+		v >>= 7
+	}
+	return append(b, byte(v))
 }
 
 // clampCell maps a computed cell index into [0, n-1]. An empty dimension maps
@@ -512,19 +613,25 @@ func (b *Builder) Write(path string) error {
 	if b.GridNLat > 0 && b.GridNLon > 0 {
 		cells = b.GridNLat * b.GridNLon
 	}
+	mcls := b.MCls
+	if len(mcls) == 0 {
+		// Synthetic builders and the car-only unit tests name just Cls; a
+		// motorcycle may use exactly the same edges at the same speed.
+		mcls = b.Cls
+	}
 	sizes := [numSections]uint64{
 		4 * uint64(len(b.Lat)),
 		4 * uint64(len(b.Lon)),
 		4 * uint64(len(b.Off)),
 		4 * uint64(len(b.To)),
 		2 * uint64(len(b.Len)),
-		1 * uint64(len(b.Cls)),
-		4 * uint64(len(b.GO)),
+		1 * uint64(len(mcls)),
+		1 * uint64(len(mcls)),
 		4 * uint64(len(b.Ferry)),
 		4 * uint64(len(b.CLat)),
 		4 * uint64(len(b.CLon)),
-		8 * uint64(len(b.GOff)),
-		4 * uint64(len(b.GNodes)),
+		4 * uint64(len(b.GOff)),
+		uint64(len(b.GNodes)),
 		8 * uint64(len(b.Ban)),
 		8 * uint64(len(b.Only)),
 	}
@@ -538,6 +645,12 @@ func (b *Builder) Write(path string) error {
 		secOff[i] = cur
 		cur = align8(cur + sizes[i])
 	}
+	// Motor restriction lists follow the main sections; their offsets and
+	// counts live in the reserved header tail.
+	banMOff := cur
+	cur = align8(cur + 8*uint64(len(b.BanM)))
+	onlyMOff := cur
+	cur = align8(cur + 8*uint64(len(b.OnlyM)))
 
 	// Build the metadata blob up front: sorted key=value lines, appended
 	// after the last section and pointed to by the header.
@@ -575,13 +688,18 @@ func (b *Builder) Write(path string) error {
 	be.PutUint32(hdr[8:], uint32(len(b.Lat)))
 	be.PutUint32(hdr[12:], uint32(len(b.To)))
 	be.PutUint32(hdr[16:], uint32(len(b.CLat)))
-	be.PutUint32(hdr[20:], uint32(len(b.GNodes)))
+	be.PutUint32(hdr[20:], uint32(len(b.Lat)))
 	be.PutUint32(hdr[24:], uint32(b.GridNLat))
 	be.PutUint32(hdr[28:], uint32(b.GridNLon))
 	be.PutUint32(hdr[200:], uint32(len(b.Ban)))
 	be.PutUint32(hdr[204:], uint32(len(b.Only)))
 	be.PutUint32(hdr[208:], b.RestSkipped)
 	be.PutUint32(hdr[hFerry:], uint32(len(b.Ferry)))
+	be.PutUint64(hdr[hBanMOff:], banMOff)
+	be.PutUint64(hdr[hOnlyMOff:], onlyMOff)
+	be.PutUint32(hdr[hBanMCount:], uint32(len(b.BanM)))
+	be.PutUint32(hdr[hOnlyM:], uint32(len(b.OnlyM)))
+	be.PutUint32(hdr[hGridBytes:], uint32(len(b.GNodes)))
 	copy(hdr[hPBFHash:], b.PBFHash)
 	be.PutUint32(hdr[hBuildUnix:], b.BuildUnix)
 	be.PutUint64(hdr[hMetaOff:], metaOff)
@@ -689,12 +807,12 @@ func (b *Builder) Write(path string) error {
 		func() error { return writeU32s(b.To) },
 		func() error { return writeU16s(b.Len) },
 		func() error { return writeU8s(b.Cls) },
-		func() error { return writeU32s(b.GO) },
+		func() error { return writeU8s(mcls) },
 		func() error { return writeU32s(b.Ferry) },
 		func() error { return writeI32s(b.CLat) },
 		func() error { return writeI32s(b.CLon) },
-		func() error { return writeU64s(b.GOff) },
-		func() error { return writeU32s(b.GNodes) },
+		func() error { return writeU32s(b.GOff) },
+		func() error { return writeU8s(b.GNodes) },
 		func() error { return writeU64s(b.Ban) },
 		func() error { return writeU64s(b.Only) },
 	}
@@ -703,6 +821,20 @@ func (b *Builder) Write(path string) error {
 			return err
 		}
 		if err := step(); err != nil {
+			return err
+		}
+	}
+	for _, extra := range []struct {
+		off  uint64
+		step func() error
+	}{
+		{banMOff, func() error { return writeU64s(b.BanM) }},
+		{onlyMOff, func() error { return writeU64s(b.OnlyM) }},
+	} {
+		if err := pad(extra.off); err != nil {
+			return err
+		}
+		if err := extra.step(); err != nil {
 			return err
 		}
 	}

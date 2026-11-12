@@ -9,15 +9,11 @@ region="${1:-java}"
 limit="${AB_LIMIT:-2}"
 mport="${AB_MOBIL_PORT:-18090}"
 kport="${AB_MOTOR_PORT:-18091}"
-car="data/${region}.graph"
-motor="data/${region}-motor.graph"
-
-for f in "$car" "$motor"; do
-	[ -f "$f" ] || {
-		echo "refresh-ab: missing $f (run make graph REGION=$region first)" >&2
-		exit 1
-	}
-done
+g="data/${region}.graph"
+[ -f "$g" ] || {
+	echo "refresh-ab: missing $g (run make graph REGION=$region first)" >&2
+	exit 1
+}
 
 pairs="paper/results/pairs-${region}.csv"
 key="$region"
@@ -57,10 +53,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-bin/rid-server -graph "$car" -addr "127.0.0.1:${mport}" -conc 1 -rate 0 -timeout 60s \
+bin/rid-server -graph "$g" -addr "127.0.0.1:${mport}" -conc 1 -rate 0 -timeout 60s \
 	>"$tmp/mobil.log" 2>&1 &
 pids+=("$!")
-bin/rid-server -graph "$motor" -addr "127.0.0.1:${kport}" -conc 1 -rate 0 -timeout 60s \
+bin/rid-server -profile motor -graph "$g" -addr "127.0.0.1:${kport}" -conc 1 -rate 0 -timeout 60s \
 	>"$tmp/motor.log" 2>&1 &
 pids+=("$!")
 

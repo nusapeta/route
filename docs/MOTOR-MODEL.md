@@ -126,7 +126,12 @@ Graph motor dibangun ulang 2026-11-10 dengan commit `920558c`.
 | Sumatra | 11.934.134 | 24.466.989 | 365.707.149 | 11 s |
 | Nusa Tenggara | 5.052.896 | 10.224.352 | 154.646.379 | 5 s |
 
-Ketiga artifact memakai `profile_sha256` yang sama:
+Sejak format v5 satu file per region memuat mobil dan motor sekaligus:
+Java 693.316.412 B, Sumatra 353.320.895 B, Nusa Tenggara 148.783.493 B
+(total 1.195 MB), dibanding 2.445 MB untuk pasangan artefak v4. Angka di atas
+tetap berlaku sebagai riwayat W1.
+
+Ketiga artifact v4 memakai `profile_sha256` yang sama:
 `1b7cabf164bfdf16d6df28e8c1d9b532365f8f4bf7923e511c938af40221a3a0`.
 Graph lama memakai `a0f80ef144b819fa10a36f0dad477bba64935d73063a273fe611cf1c3b1b983d`.
 
@@ -146,17 +151,17 @@ dibuktikan oleh `TestMotorGoldenRules` dan selisih graph, bukan oleh A/B itu.
 ## 6. Reproduksi
 
 ```bash
-make graph REGION=java PROFILE=motor
-make graph REGION=sumatra PROFILE=motor
-make graph REGION=nusa-tenggara PROFILE=motor
+make graph REGION=java          # satu artefak, profil mobil + motor
+make graph REGION=sumatra
+make graph REGION=nusa-tenggara
 
 go test ./internal/extract -run 'TestMotorGoldenRules|TestMotorOnlyRulesLeaveCarAlone'
 go test ./internal/graph -run 'TestMotorGoldenRoutes'
 
-bin/rid-server \
-  -graph data/java-motor.graph \
-  -graph data/sumatra-motor.graph \
-  -graph data/nusa-tenggara-motor.graph \
+bin/rid-server -profile motor \
+  -graph data/java.graph \
+  -graph data/sumatra.graph \
+  -graph data/nusa-tenggara.graph \
   -addr 127.0.0.1:18081 -conc 4 -rate 0 -max-route-km 100
 curl '127.0.0.1:18081/healthz'
 ```
