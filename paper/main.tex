@@ -5,37 +5,39 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{url}
+\setlength{\emergencystretch}{3em}
 
 \begin{document}
 
-\title{RouteID: Memory-Mapped, Locality-Ordered Routing for Short Urban Routes\\ on Indonesian OpenStreetMap Data}
+\title{RouteID: Memory-Mapped, Locality-Ordered Routing for Bounded-Radius Routes on Indonesian OpenStreetMap Data}
 
 \author{Anonymous}
 \affiliation{\institution{Preprint}\country{}}
 \renewcommand{\shortauthors}{Anonymous}
 
 \begin{abstract}
-Routing engines for OpenStreetMap (OSM) data are engineered for planet-scale,
-long-distance queries: they trade memory for hierarchy. Many production
-workloads are the opposite---single-origin single-destination queries shorter
-than 50\,km, issued from a mobile app that only needs a polyline to draw---and
-are billed per request by hosted APIs. We ask what such a workload actually
-requires, and present \emph{RouteID}, a 2.2\,kLOC Go engine that compiles OSM
-extracts into a memory-mapped binary road graph and answers queries with
-heuristic-inflated A*. On the Java extract (22.74\,M nodes, 46.73\,M edges) the
-pipeline builds a 1\,019\,MB graph in 58\,s with a 2.54\,GB peak, and serves
-queries at 13\,MB resident set after start-up and 103\,MB under a burst of
-repeated 50\,km routes. Two cheap techniques are evaluated in isolation: a
-Hilbert-curve renumbering of graph nodes, which improves page locality
-(7--20\,\% lower latency at p50, 1.8$\times$ lower resident set on a metropolitan
-workload), and inflation of the A* heuristic, which buys a 1.9$\times$ median
-speed-up while leaving 99.8\,\% of route lengths unchanged. We report the
-negative results too: beyond roughly 60\,km the absence of a hierarchy becomes
-the dominant cost (p95 latency above one second), and turn restrictions
-(time-dependent rules remain unapplied) are the main remaining accuracy gap.
-A controlled comparison against OSRM's MLD on the same machine agrees at the
-median route distance but deviates by 14.49\,\% at p95; we did not collect an
-independent reference and therefore make no accuracy claim.
+Routing engines for OpenStreetMap (OSM) are engineered for planet-scale,
+long-distance queries and trade memory for hierarchy. Many production workloads
+are the opposite: bounded-radius queries, typically below 100\,km, issued from a
+mobile app that needs a polyline and a distance estimate, and billed per request
+when a hosted API is used. We ask what such a workload actually requires and
+present \emph{RouteID}, a Go engine (6.2\,kLOC for the routing core and HTTP
+server) that compiles OSM extracts into one memory-mapped binary graph and
+answers queries with edge-based, heuristic-inflated A*. On the Java extract
+(22.71\,M nodes, 46.68\,M edges) the evaluation graph is 693\,MB and is built in
+28\,s; the process starts at 17.3\,MB resident and answers 332 filter-matched
+pairs at p50 38.7\,ms and p95 674\,ms, versus OSRM MLD at 1.5\,ms and 3.7\,ms.
+RouteID keeps a 7.3$\times$ smaller artefact and a 140$\times$ smaller idle
+resident set, but it is slower; we do not claim otherwise. Two inexpensive
+techniques are evaluated in isolation: Hilbert-curve node renumbering lowers p50
+by 7--20\,\%, and a 1.5 heuristic inflation is 28\,\% faster while reproducing the
+optimal route length on 526 of 526 queries. A single national graph (54.89\,M
+nodes, 112.34\,M edges, 1.621\,GB) is built in 11\,m40\,s including download.
+On the distance comparison, the median relative difference is 0.23\,\% but p95 is
+14.49\,\% and the maximum is 70.44\,\%. We did not collect an independent
+reference, so no accuracy claim is made. At a 100\,km cap, 481 of 600 pairs
+succeed and p95 wall-clock latency is 0.94--1.32\,s; the tail, and 8 budget
+failures, are the price of omitting a hierarchy.
 \end{abstract}
 
 \ccsdesc[500]{Information systems~Geographic information systems}
@@ -47,375 +49,375 @@ weighted A*, Indonesia}
 
 \section{Introduction}
 Indonesia is an archipelagic country whose road data in OpenStreetMap is uneven:
-dense and well-mapped in Java and Bali, sparse in Papua and Maluku. A large class
-of consumer applications---ride-hailing, delivery, field service---does not need
+dense and well mapped in Java and Bali, sparse in Papua and Maluku. A large class
+of consumer applications---ride hailing, delivery, field service---does not need
 continental routing. It needs, for two coordinates supplied by the user, a road
-polyline under 50\,km that can be drawn on a basemap, plus a distance estimate.
+polyline within a bounded radius that can be drawn on a basemap, plus a distance
+estimate and a coarse ETA.
 
-For that workload hosted directions APIs are the default choice, but they are
-priced per request; self-hosted engines such as OSRM, GraphHopper or Valhalla are
-free per request but are designed and tuned for long queries, and their memory
-footprint (roughly a gigabyte or more for a national extract) dominates the cost
-of cheap virtual machines.
+Hosted directions APIs are the default for that workload, but they are priced per
+request. Self-hosted engines such as OSRM, GraphHopper, and Valhalla are free per
+request, but are designed and tuned for long queries; their memory footprint
+(roughly a gigabyte or more for a national extract) dominates the cost of a cheap
+virtual machine. Our question is narrow: \emph{for bounded-radius workloads, what
+does a purpose-built engine have to do, and where does it lose to a
+general-purpose one?} We report an engineering case study, not a new shortest-path
+algorithm and not an accuracy result.
 
-This paper asks a narrow engineering question: \emph{for short-route workloads,
-is a general-purpose routing engine the right tool, and what does a purpose-built
-one have to do to stay accurate?} We report a case study rather than a new
-speed-up technique. Our contributions are:
-
+Our contributions are:
 \begin{itemize}
-  \item a minimal extraction and serving pipeline (Go, 2.2\,kLOC) whose graph is
-        memory-mapped and whose resident set scales with the pages a query
-        touches rather than with the data set;
-  \item an isolated evaluation of two inexpensive layout/algorithm choices:
-        Hilbert-curve node renumbering and A* heuristic inflation;
-  \item measurements on real Indonesian extracts (Java, Sumatra) covering build
-        cost, memory behaviour, latency percentiles and a distance-bucket
-        breakdown;
-  \item an edge-based search that enforces OSM turn restrictions with a
-        30\,KB sparse transition table, evaluated with a compliance harness on
-        all 3.5\,k stored restrictions of Java;
-  \item an explicit list of what is \emph{not} solved---edge snapping,
-        long-route latency, traffic---so that the result is not misread as an
-        OSRM replacement.
+  \item an extraction and serving pipeline whose graph is a single memory-mapped
+        file, with one artefact carrying car and motorcycle profiles, and whose
+        resident set scales with touched pages rather than with the data set;
+  \item an isolated evaluation of two inexpensive choices: Hilbert-curve node
+        renumbering and A* heuristic inflation;
+  \item an edge-based search that enforces OSM turn restrictions with a sparse
+        transition table, plus segment snapping that removes most attachment
+        error;
+  \item a controlled comparison against OSRM MLD on the same machine and data,
+        including the negative result at the distance tail;
+  \item a national build and a 100\,km-cap capacity measurement, with explicit
+        limits: no independent ground truth, no traffic, and no full-national
+        latency benchmark.
 \end{itemize}
-
-\section{Related work}
-\paragraph{Shortest-path speed-up techniques.}
-Dijkstra's algorithm~\cite{dijkstra1959} and A*~\cite{hart1968} are the
-foundation. Goal-directed search with landmark lower bounds (ALT) was introduced
-by Goldberg and Harrelson~\cite{goldberg2005}. Contraction
-hierarchies~\cite{geisberger2008,geisberger2012} and customisable route
-planning~\cite{delling2011,delling2017} (the MLD family used by OSRM) achieve
-microsecond queries by preprocessing; their cost is preprocessing time and
-auxiliary memory. Highway-dimension analyses~\cite{abraham2010,abraham2016}
-explain why road networks admit such hierarchies. All of these optimise the
-\emph{query time} of long routes; we instead optimise \emph{resident memory} for
-a bounded-radius workload, and show that at that radius the simpler search is
-competitive.
-
-\paragraph{Open-source engines.}
-OSRM~\cite{osrm}, GraphHopper~\cite{graphhopper}, Valhalla~\cite{valhalla},
-BRouter~\cite{brouter} and RoutingKit~\cite{dibbelt2014} are the practical
-baselines. They are general-purpose: multiple profiles, matrices, map matching,
-turn-by-turn instructions. Our claim is not that we beat them on query latency;
-it is that a constrained workload permits a much smaller artefact.
-
-\paragraph{Locality and out-of-core graph processing.}
-Storing graphs so that traversal is page-local has a long tradition in
-out-of-core graph systems (GraphChi~\cite{kyrola2012}, X-Stream~\cite{royle2013},
-FlashGraph~\cite{zheng2015}) and in shared-memory frameworks such as
-Ligra~\cite{shun2013}. Space-filling curves date back to Hilbert~\cite{hilbert1891}.
-We apply the same idea to a routing graph: numbering nodes along a Hilbert curve
-makes an A* frontier---which is spatially compact---contiguous in the file.
 
 \section{Workload and requirements}
 \begin{table}[t]
 \small
 \begin{tabular}{@{}ll@{}}
 \toprule
-R1 & routes $\le 50$\,km, urban and inter-urban, car profile \\
-R2 & output: encoded polyline + distance; ETA not authoritative \\
-R3 & no per-request fee; commodity VPS (4\,GB RAM) \\
-R4 & memory-mapped graph, restart without warm-up cost \\
+R1 & routes $\le 100$\,km; most queries $\le 50$\,km; car and motorcycle \\
+R2 & output: encoded polyline, distance, coarse ETA \\
+R3 & no per-request fee; commodity VPS with 4\,GB RAM \\
+R4 & memory-mapped graph; restart without a warm-up cost \\
 R5 & Indonesian data: ferries, one-way systems, dense turn restrictions \\
 R6 & offline-capable build; monthly OSM refresh \\
 \bottomrule
 \end{tabular}
-\caption{Requirements that shaped the design.}
+\caption{Requirements that shaped the design. They motivate a memory-first
+engine; they do not prove that a hierarchy is the wrong choice.}
 \label{tab:req}
 \end{table}
 
-\section{Design}
-\subsection{Extraction and profile}
-The builder reads an \texttt{.osm.pbf} twice (ways, then nodes) and keeps only
-car-routable ways: \texttt{highway} classes with per-class default speeds tuned
-for Indonesian conditions (residential 25\,km/h, service 15\,km/h, primary
-60\,km/h), \texttt{maxspeed} overrides, \texttt{access}/\texttt{motor\_vehicle}
-filtering, \texttt{oneway} and \texttt{junction=roundabout}, plus
-\texttt{route=ferry} ways at 20\,km/h. Every OSM way node becomes a graph node,
-so the stored geometry is exactly the OSM geometry; no separate shape-point table
-is needed.
+Table~\ref{tab:req} is deliberately modest. We do not require traffic, worldwide
+coverage, matrix queries, map matching, or turn-by-turn instructions. The output
+is a line to draw and a scalar distance; ETA is static-speed and explicitly not
+authoritative. The 100\,km cap is a product decision: beyond it the absence of a
+hierarchy dominates, as the tail measurements show.
 
-\subsection{Binary format}
-The graph is a single file: a 256-byte header (magic, version, counts, grid
-parameters, bounding box, section offsets) followed by aligned sections:
-coordinates as fixed point ($10^{-7}$\,deg), a compressed-sparse-row adjacency
-(\texttt{Off}, \texttt{To}) with per-edge length in metres and travel time in
-deciseconds, an optional interior-geometry section, and a uniform grid over nodes
-used for snapping. All sections are read through one \texttt{mmap}; the header
-carries the bounding box so that serving does not need to touch the whole file at
-start-up.
+\section{Design}
+\subsection{Extraction and profiles}
+The builder reads an \texttt{.osm.pbf} twice (ways, then nodes) and keeps
+car-routable and motorcycle-routable ways. It applies per-class default speeds
+tuned for Indonesian conditions (residential 25\,km/h, service 15\,km/h, primary
+60\,km/h), \texttt{maxspeed} overrides, \texttt{access} and
+\texttt{motor\_vehicle} filtering, \texttt{oneway}, and
+\texttt{junction=roundabout}. Every OSM way node becomes a graph node, so stored
+geometry is the OSM geometry and no separate shape-point table is needed.
+\texttt{route=ferry} ways are kept at 20\,km/h. Format v5 stores both profiles in
+one file: car classes and motorcycle classes share the topology, while
+motorcycle-specific access is a separate class byte.
+
+The fallback speed table was aligned with OSRM's \texttt{car.lua} because an
+earlier mismatch was the largest single source of route-distance deviation. The
+alignment does not make the engines equivalent: OSRM minimises its own
+\texttt{weight}, while RouteID minimises drive time plus a turn penalty.
+
+\subsection{Binary format v5}
+The graph is one file: a 320-byte header followed by 14 aligned sections. The
+header carries magic, version, counts, grid parameters, the bounding box, section
+offsets, profile metadata, PBF SHA-256, and build time. Nodes are 12\,bytes:
+fixed-point latitude and longitude at $10^{-7}$\,deg (8\,bytes) and the first
+outgoing-edge index (4\,bytes). Edges are 8\,bytes: destination node (4\,bytes),
+length in units of 4\,m stored as \texttt{uint16} (2\,bytes), car class
+(1\,byte), and motorcycle class (1\,byte). A class byte is speed in km/h
+multiplied by two; zero means no access. Travel time is \emph{computed}, not
+stored: one length unit at class $c$ costs $288/c$ deciseconds. There is no
+interior-geometry section and no time array; the CSR adjacency is
+compressed-sparse-row, and a uniform grid over nodes supports snapping.
+
+Two sparse tables in the header tail hold forbidden and permitted transition
+pairs, separately for car and motorcycle. A workspace key uses 28 bits for an
+edge identifier, so a graph with more than $2^{28}$ edges is rejected at build
+time; the national graph has 112.34\,M and is well below that limit.
 
 \subsection{Node ordering}
 Node order is the layout knob that matters. We sort nodes along a Hilbert curve
 over a $2^{16}\times2^{16}$ grid of the graph's bounding box. Because the A*
 frontier explores a spatially coherent region, a Hilbert numbering turns that
 region into a contiguous byte range, which the page cache can serve without
-thrashing. We keep the OSM-id order behind a flag
-(\texttt{-order osm}) for A/B measurement.
+thrashing. We keep OSM-id order behind a flag (\texttt{-order osm}) for A/B
+measurement. The ordering does not change the search or its expansion count; it
+changes which pages are touched.
 
 \subsection{Search}
 The search state is the \emph{edge} just traversed, not the node. This costs
-nothing in the data layout---successors of state $e$ are the CSR range of its
-head node---and it is what makes turn restrictions expressible: an OSM
-restriction constrains the pair (arrival edge, departure edge). Two sparse
-6\,B/8\,B tables are kept: a sorted array of packed forbidden pairs and a sorted
-array of permitted pairs for \texttt{only\_*} rules, so a lookup is one binary
-search over about 4\,k entries and a route through unrestricted territory pays a
-single key comparison per transition.
+nothing in the data layout---successors of state $e$ are the CSR range of its head
+node---and it is what makes turn restrictions expressible: an OSM restriction
+constrains the pair (arrival edge, departure edge). Forbidden pairs are a sorted
+array of packed keys; \texttt{only\_*} rules are a sorted array of permitted
+pairs. A lookup is one binary search over a few thousand entries, and a route
+through unrestricted territory pays a single key comparison per transition.
 
-We run A* with an admissible geometric bound: $h(e) = \varepsilon \cdot
-\|\mathrm{head}(e),t\| / v_{\max}$, with $v_{\max}=130$\,km/h and an inflation factor
-$\varepsilon \ge 1$. Costs are travel times plus a turn cost, so the returned
-route is the fastest path under static speeds, which matches how hosted APIs
-choose routes (important: minimising distance instead would produce visibly
-different polylines). The turn cost is read from the change of heading between
+We run A* with an admissible geometric bound
+\[
+  h(e) = \varepsilon \cdot \frac{\|\mathrm{head}(e),t\|}{v_{\max}},
+\]
+with a 1\,\% lower-bound margin, where $v_{\max}=130$\,km/h and
+$\varepsilon\ge1$. Costs are travel times plus a turn cost, so the returned route
+is the fastest path under static speeds. This matches
+how hosted APIs choose routes; minimising distance instead produces visibly
+different polylines. The turn cost is read from the change of heading between
 arrival and departure edge---two node coordinates per expansion, no new graph
-field---bucketed at 22.5$^\circ$/67.5$^\circ$/135$^\circ$ into 0/2/7.5/20\,s; it
-is shipped at a quarter of that weight, which leaves the E1 distance spread
-unchanged but removes the worst detours (\texttt{paper/RESULTS.md}\,\S15). The open
-set is a binary heap; distances and parents live in a generation-stamped
-open-addressing table that grows at 70\,\% load, so no per-query clearing is
-needed and a query allocates nothing. Routers hand out pre-allocated workspaces
-from a pool, bounding peak memory. A query is abandoned after $6\cdot10^6$
-expansions, which bounds tail latency at the cost of very long routes.
+field---bucketed at 22.5$^\circ$/67.5$^\circ$/135$^\circ$ into 0/2/7.5/20\,s, and
+shipped at a quarter of that weight. That setting leaves the E1 distance spread
+unchanged but removes the worst detours (\texttt{paper/RESULTS.md}\,\S15).
+
+The open set is a binary heap. Distances and parents live in a generation-stamped
+open-addressing table that grows at 70\,\% load, so no per-query clearing is needed
+and a query allocates nothing. Routers hand out pre-allocated workspaces from a
+shared pool, which bounds peak memory at the cost of reuse. A query is bounded at
+$4\cdot10^6$ expansions and by a budget (60\,\% of the HTTP timeout, 6\,s by
+default). If the corridor exceeds the bound, the search retries with a greedier
+heuristic before reporting \texttt{budget}; both bounds protect tail latency at
+the cost of some long routes.
 
 \subsection{Snapping and output}
 Queries are snapped to the nearest \emph{segment}: the grid (cell
 $0.02^{\circ}$, about 2.2\,km) is expanded ring by ring, and for every node found
 the outgoing segments are projected onto the local tangent plane
-(equirectangular, sub-metre at city scale). The projection splits the result into
-an anchor node (the closer end of the segment) and an along-distance. After
-routing between anchors the geometry is corrected without mutating the graph: if
-the path leaves the anchor \emph{along} the snapped segment the covered part is
-subtracted from distance and time and the anchor is dropped from the geometry
-(\emph{trim}); otherwise the offset is added as a spur. The ring expansion stops
-once no segment can beat the best projection, with 500\,m of slack for segments
-longer than their node-to-node distance.
+(equirectangular, sub-metre at city scale). The projection yields an anchor node
+(the closer end of the segment) and an along-distance. After routing between
+anchors, geometry is corrected without mutating the graph: if the path leaves the
+anchor \emph{along} the snapped segment, the covered part is subtracted from
+distance and time and the anchor is dropped from the geometry (\emph{trim});
+otherwise the offset is added as a spur. Ring expansion stops once no segment can
+beat the best projection, with 500\,m of slack for segments longer than their
+node-to-node distance. The server rejects an endpoint with no road within 3\,km
+with reason \texttt{snap}.
 
-This keeps the invariant that the drawn line follows the road. Output is a
-precision-5 encoded polyline (about 1.1\,m), optionally Douglas--Peucker
-simplified; the projected points are also returned as \texttt{snap\_from} and
-\texttt{snap\_to}, and \texttt{pin=1} restores the older behaviour that appended
-the raw tap coordinates so the line reached the pin directly.
+Output is a precision-5 encoded polyline (about 1.1\,m), optionally
+Douglas--Peucker simplified. The projected points are returned as
+\texttt{snap\_from} and \texttt{snap\_to}; \texttt{pin=1} restores the older
+behaviour that appended the raw tap coordinates so the line reaches the pin.
 
 \subsection{Deployment topologies}
-The same engine supports two topologies. \textbf{T1}: one national graph, built
-from the national extract. A national graph of 53.9\,M nodes and 110.2\,M edges
-was built with \texttt{GOMEMLIMIT=4GiB} on a 7\,GB box (1.65\,GB artifact,
-8\,min, three workers); an unbounded build is estimated at 7--8\,GB from the
-measured per-island peak. \textbf{T2}: one graph per island, served by a
-single process that selects the region by snapping, stitches registered
-cross-file ferry pairs (Merak--Bakauheni and Ketapang--Gilimanuk) from two graph
-legs, and rejects unlisted pairs; because the island extracts overlap, bounding
-boxes alone are insufficient and snapping decides. T2 keeps every build inside
-3\,GB and permits per-island refreshes. T3, a streaming builder with external
-sorting, is future work and would make T1 feasible on 8\,GB machines.
+The current deployment is \textbf{T1}: one national graph built from the national
+extract. Per-island graphs remain supported (\textbf{T2}): one process selects a
+region by snapping and, for pairs split across files, stitches registered ferry
+pairs (Merak--Bakauheni, Ketapang--Gilimanuk) from two legs; unlisted pairs are
+rejected with \texttt{cross\_region}. A single national graph contains ferry ways
+directly, so the static connector is not on its normal path.
 
-\section{Evaluation}
-\subsection{Setup}
-Numbers in this section come from two machines and are never mixed.
-\emph{Routeid-only} measurements (extraction, latency, footprint, restrictions)
-use an Intel Core i5-7360U (2 cores, 4 threads, 2.3\,GHz), 7\,GB RAM, Linux
-7.2.8, Go 1.27.3. The head-to-head comparison with OSRM
-(Table~\ref{tab:positioning}) was run on an AMD Ryzen 5 5600G (6 cores,
-12 threads), 16\,GB RAM, 30\,GiB swap, Linux 7.2.15, with OSRM v5.26.0
-(Docker image \texttt{osrm/osrm-backend}, MLD) and routeid at the same commit.
-Data: Geofabrik extracts of Java (857.6\,MB) and Sumatra (283.3\,MB) downloaded
-on 2026-11-06. Latency is measured with a fixed set of origin--destination pairs
-(601 pairs, 120 per straight-line distance bucket, sampled once and stored in
-\texttt{paper/results/pairs-java.csv}) so that every configuration routes an
-identical workload; percentiles are computed over successful queries. Failed
-queries are pairs whose endpoint has no road within 5\,km (coastline, forest) and
-are reported rather than hidden. The OSRM comparison uses the same pair file,
-but only pairs whose endpoints both engines snap within 250\,m, and whose snapped
-points lie within 50\,m of each other, enter the distance statistics
-(332 of 600); the rationale and the full breakdown are in
-\texttt{paper/RESULTS.md}\,\S13.
+The HTTP server exposes \texttt{GET}/\texttt{POST /route}, with
+\texttt{json}, \texttt{points}, \texttt{geojson}, and \texttt{polyline} output;
+\texttt{GET /healthz}, \texttt{/version}, and \texttt{/metrics}; ETag validation
+before rate limiting; and structured error reasons \texttt{snap},
+\texttt{too\_far}, \texttt{budget}, \texttt{cross\_region}, and
+\texttt{deadline}. The deployment is one static binary (6.7\,MB) in a 36.7\,MB
+container image, with the graph mounted read-only.
 
-\subsection{Extraction cost and footprint}
-\begin{table}[t]
-\small
-\begin{tabular}{@{}lrrrrr@{}}
-\toprule
-extract & nodes & edges & graph & build & peak RSS \\
-\midrule
-Java    & 22.74\,M & 46.73\,M & 1\,019\,MB & 58\,s & 2\,543\,MB \\
-Sumatra & 11.88\,M & 24.33\,M &   533\,MB & 18\,s & 1\,249\,MB \\
-\bottomrule
-\end{tabular}
-\caption{Extraction on a 4-thread laptop, format v3; peak RSS includes the PBF
-decoder. The v4 format of the same extracts is 32\,\% smaller (Java 693\,MB,
-Sumatra 364\,MB) and is built in 233\,s and 69\,s with four workers under
-\texttt{GOMEMLIMIT=4GiB}.}
-\label{tab:extract}
-\end{table}
+\section{Evaluation setup}
+Numbers come from four machines and are not mixed across claims.
+\begin{itemize}
+  \item \emph{E1} (OSRM comparison): AMD Ryzen 5 5600G (6 cores, 12 threads),
+        16\,GB RAM, Linux 7.2.15; OSRM v5.26.0 MLD in Docker; RouteID at the same
+        commit. Java extract (857.6\,MB PBF), 600 origin--destination pairs, 120
+        per straight-line bucket, sampled once. Requests alternate between
+        engines; percentiles use successful, filter-matched queries.
+  \item \emph{National build}: the same Ryzen, 12 workers, with
+        \texttt{GOMEMLIMIT} set to 5\,GiB; 11\,m40\,s includes the PBF download.
+  \item \emph{100\,km cap}: the same Ryzen, three Java region graphs, not the
+        single national graph. This distinction matters and is repeated wherever
+        the number appears.
+  \item \emph{Micro-optimisations} ($\varepsilon$, ordering): an Intel Core
+        i5-7360U (2 cores, 4 threads), 7\,GB RAM, on an earlier format-v3 graph.
+        These are trend measurements, not final v5 latency.
+  \item \emph{Throughput}: an Intel i3-6100T (2 cores, 4 threads), 7.8\,GB RAM,
+        container limited to 1.5\,GiB.
+\end{itemize}
 
-\subsection{Query latency}
-\begin{table}[t]
-\small
-\begin{tabular}{@{}lrrrrrr@{}}
-\toprule
-bucket & route & p50 & p95 & p99 & median & fails \\
-       & km    & ms  & ms  & ms  & exp.   &      \\
-\midrule
-0--5\,km   &  5.2 &   1.2 &   8.6 &   21.5 &   3\,085 & 0/120 \\
-5--15\,km  & 17.5 &  16.1 &  71.4 &  244.1 &  40\,391 & 4/120 \\
-15--30\,km & 38.5 &  62.3 & 283.3 & 1010.8 & 135\,230 & 9/120 \\
-30--50\,km & 62.6 & 145.7 & 472.1 &  671.9 & 314\,177 & 28/120 \\
-50--80\,km & 99.9 & 387.6 & 1000.1 & 1562.0 & 745\,682 & 33/120 \\
-\bottomrule
-\end{tabular}
-\caption{Latency on the Java graph, single thread, $\varepsilon=1.5$. ``route km''
-is the mean road distance actually returned; it exceeds the straight-line bucket
-because roads are not straight.}
-\label{tab:lat}
-\end{table}
+The E1 filter admits a pair only when both engines snap both endpoints within
+250\,m and the two snapped points lie within 50\,m of each other. Of 600 pairs,
+332 enter the distance and latency statistics, 79 fail in RouteID, and 189 are
+excluded by the filter. Failed queries are reported, not hidden. The filter is
+necessary because a pair whose endpoints are kilometres from a road is not a
+like-for-like routing comparison; it is also a limitation, discussed in
+\S\ref{sec:threats}.
 
-Table~\ref{tab:lat} is the central result. For the target regime---road distance
-up to about 50\,km---the median is two orders of magnitude below a second, but the
-tail is not: p95 reaches 283\,ms at 38\,km and 472\,ms at 63\,km. The tail is
-dominated by dense metropolitan corridors, where the explored region holds many
-short edges.
-
-\subsection{Heuristic inflation}
+\section{Results}
+\subsection{Artefacts and preprocessing}
 \begin{table}[t]
 \small
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-$\varepsilon$ & p50 (15--30) & p50 (50--80) & distance excess & latency ratio \\
+graph & nodes & edges & bytes & build \\
 \midrule
-1.0 &  87.8\,ms & 582.6\,ms & (optimal) & 1.00 \\
-1.5 &  62.3\,ms & 387.6\,ms & 0.000\,\% & 0.72 \\
-2.0 &  44.7\,ms & 222.9\,ms & 0.000\,\% / max 11.0\,\% & 0.52 \\
+RouteID Java v4 (E1) & 22.71\,M & 46.68\,M & 693.1\,MB & 28\,s \\
+OSRM MLD Java        & ---      & ---      & 5.08\,GB  & 250\,s \\
+RouteID Java v5      & 23.46\,M & 48.32\,M & 693.3\,MB & --- \\
+RouteID Sumatra v5   & 11.95\,M & 24.49\,M & 353.3\,MB & --- \\
+RouteID Nusa v5      &  5.06\,M & 10.23\,M & 148.8\,MB & --- \\
+RouteID Indonesia v5 & 54.89\,M & 112.34\,M & 1{,}621.2\,MB & 11\,m40\,s \\
 \bottomrule
 \end{tabular}
-\caption{Inflation versus optimality, paired over 526 successful queries. Distance
-excess is relative to $\varepsilon=1.0$ per query: $\varepsilon=1.5$ reproduced the
-optimal length on every pair; $\varepsilon=2.0$ differed on one pair ($+11\,\%$,
-p95 excess $0.000\,\%$).}
+\caption{Artefacts. E1 used format v4 with the car profile; deployed v5 carries
+car and motorcycle in one file, so E1 node/edge counts are not directly
+comparable. The national build time includes downloading the PBF; extraction
+alone is 1\,m12\,s. OSRM peak preprocessing RSS was 6.25\,GB; RouteID's national
+build was capped at 5\,GiB.}
+\label{tab:artefacts}
+\end{table}
+
+Table~\ref{tab:artefacts} is the first result: at the Java scale the RouteID
+artefact is 7.3$\times$ smaller than OSRM's MLD data, and preprocessing is
+9$\times$ faster. Part of that gap is expected---MLD buys query speed with
+auxiliary data---and part is the narrower feature set: no instructions, no
+alternative routes, no matrix, and no map matching.
+
+\subsection{Latency and the OSRM comparison}
+\begin{table}[t]
+\footnotesize
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+bucket & matched & failed & excluded & RouteID p50/p95 & OSRM p50/p95 \\
+       &         &        &          & (ms)            & (ms) \\
+\midrule
+0--5\,km   & 86 &  0 & 34 &   4.0/13.8 & 0.7/1.0 \\
+5--15\,km  & 73 &  6 & 41 &  21.7/72.3 & 1.2/1.7 \\
+15--30\,km & 67 & 10 & 43 &  64.8/271.1 & 1.6/2.3 \\
+30--50\,km & 56 & 27 & 37 & 164.6/548.9 & 2.2/3.2 \\
+50--80\,km & 50 & 36 & 34 & 525.9/1{,}675.3 & 3.2/5.1 \\
+\midrule
+all        & 332 & 79 & 189 & 38.7/674.0 & 1.5/3.7 \\
+\bottomrule
+\end{tabular}
+\caption{E1 latency on the same 600 pairs, Ryzen 5 5600G, single-threaded
+RouteID. Percentiles use the 332 filter-matched pairs; failures are counted per
+straight-line bucket. OSRM is faster at every bucket.}
+\label{tab:e1lat}
+\end{table}
+
+Table~\ref{tab:e1lat} is the central performance result. OSRM is about
+$26\times$ faster at the median and $180\times$ faster at p95. RouteID is not a
+low-latency replacement for MLD. Its advantage is the resource profile: 693\,MB
+versus 5.08\,GB on disk, 28\,s versus 250\,s to preprocess, and 17.3\,MB versus
+2.36\,GiB resident before the first query. For a workload that values a small
+artefact and a restart without a multi-gigabyte warm-up, that is the relevant
+trade; for a workload that values per-query latency, OSRM wins clearly.
+
+\subsection{Distance, duration, and failures}
+On the 332 matched pairs, the relative route-distance difference (RouteID minus
+OSRM, divided by OSRM) has median 0.23\,\%, p95 14.49\,\%, and maximum 70.44\,\%.
+Twenty-five pairs exceed 10\,\% and eight exceed 25\,\%. The pre-registered gate
+was median below 0.1\,\% and p95 below 12\,\%; both conditions fail. On duration,
+the signed difference has median $-1.11$\,\% and p95 $+2.39$\,\%; the p95 of the
+absolute difference is 10.22\,\%. D4 therefore made absolute duration p95 the
+primary metric, but this is still an engine-to-engine comparison, not accuracy.
+
+RouteID returns 422 for 79 of the 600 pairs: 72 because an endpoint has no road
+within the 3\,km snap radius, and 7 because the search budget is exhausted. There
+are no \texttt{no\_route} failures in the final run. OSRM succeeds on all 79, but
+its target snap is a median of 15.3\,km from the input (p90 32.7\,km, maximum
+44.6\,km); those pairs are not a like-for-like comparison and are not counted as
+RouteID wins. The remaining 189 pairs are excluded by the symmetric snap filter.
+
+The residual distance spread is not a restriction defect. An audit of all 593
+skipped restriction relations and the 20 largest deviations
+(\texttt{paper/RESULTS.md}\,\S18) attributes it to differing cost functions and
+route choice: RouteID minimises drive time and keeps \texttt{track} edges, while
+OSRM minimises its \texttt{weight}. Aligning the fallback speed table with
+\texttt{car.lua} reduced p95 from 21.05\,\% to 14.49\,\%, but the tail remains.
+
+\subsection{Heuristic inflation}
+\begin{table}[t]
+\footnotesize
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+$\varepsilon$ & p50 15--30\,km & p50 50--80\,km & route length & latency ratio \\
+\midrule
+1.0 &  87.8\,ms & 582.6\,ms & optimal & 1.00 \\
+1.5 &  62.3\,ms & 387.6\,ms & same, 526/526 & 0.72 \\
+2.0 &  44.7\,ms & 222.9\,ms & one pair $+11$\,\% & 0.52 \\
+\bottomrule
+\end{tabular}
+\caption{Inflation versus optimality, paired over 526 successful queries on the
+i5/format-v3 setup. Distance excess is relative to $\varepsilon=1.0$ per query.
+This is a trend measurement; it was not re-run on the final v5 graph.}
 \label{tab:eps}
 \end{table}
 
 Inflation is nearly free in accuracy at this radius (Table~\ref{tab:eps}). Because
 the geographic bound is weak in dense networks, the optimality-preserving search
-wastes most of its work; a factor of two in $\varepsilon$ buys a factor of two in
-median latency.
+wastes most of its work; a factor of two in $\varepsilon$ buys roughly a factor of
+two in median latency. We ship $\varepsilon=1.5$ because it reproduced the optimal
+length on every measured pair; $\varepsilon=2.0$ is faster but introduces a
+visible outlier.
 
-\subsection{Effect of node ordering}
+\subsection{Node ordering}
+Renumbering lowers p50 by 7--20\,\% and p95 by 7--16\,\% on the i5/format-v3
+setup, with identical expansion counts. Its larger effect is on memory: replaying
+29 metropolitan pairs raises resident set to 1{,}225\,MB with OSM-id order and
+675\,MB with Hilbert order, a factor of 1.8. The gain is real but modest; early
+single-corridor experiments overstated it because they touched few pages. The
+result is a layout effect, not an algorithmic speed-up, and we do not extrapolate
+it to server CPUs without measurement.
+
+\subsection{Memory and workspace}
 \begin{table}[t]
-\small
-\begin{tabular}{@{}lrrrr@{}}
+\footnotesize
+\begin{tabular}{@{}lrrl@{}}
 \toprule
-bucket & p50 id-order & p50 Hilbert & p95 id-order & p95 Hilbert \\
+state & RSS & anonymous & note \\
 \midrule
-0--5\,km   &  1.5\,ms &  1.2\,ms &    9.6\,ms &    8.6\,ms \\
-5--15\,km  & 17.5\,ms & 16.1\,ms &   76.7\,ms &   71.4\,ms \\
-15--30\,km & 67.4\,ms & 62.3\,ms &  332.5\,ms &  283.3\,ms \\
-30--50\,km & 163.3\,ms & 145.7\,ms & 562.4\,ms & 472.1\,ms \\
-50--80\,km & 445.7\,ms & 387.6\,ms & 1185.6\,ms & 1000.1\,ms \\
+RouteID E1, start        &  17.3\,MB & --- & one Java graph \\
+RouteID E1, 600 pairs    & 815.3\,MB & --- & matched workload \\
+OSRM MLD, before queries &  2.36\,GiB & --- & same machine \\
+OSRM MLD, after 600 pairs & 2.45\,GiB & --- & same machine \\
+National v5, idle        &  11.1\,MB & 4.5\,MB & header only \\
+National v5, 4$\times$96\,km & 225\,MiB & 90\,MiB & concurrent \\
+National v5, one 1{,}882\,km & 701\,MiB & 401\,MiB & largest tested \\
 \bottomrule
 \end{tabular}
-\caption{Identical workload, identical expansion counts (the search is unchanged),
-different node numbering.}
-\label{tab:order}
+\caption{Resident memory. E1 numbers are from the Ryzen comparison; national
+numbers are a separate build and workload. The national process maps 1.621\,GB
+but touches only the pages a query needs, which is why idle RSS is below the
+artefact size.}
+\label{tab:memory}
 \end{table}
 
-Renumbering lowers p50 by 7--20\,\% and p95 by 7--16\,\% (Table~\ref{tab:order}).
-Its larger effect is on memory: replaying 29 metropolitan pairs raises resident
-set to 1\,225\,MB with id order and 675\,MB with Hilbert order (1.8$\times$
-less). The gain is real but modest, and we caution against over-reading early
-single-corridor experiments, which suggested a much larger effect because they
-touched few pages.
+The workspace is a shared pool of 12-byte slots (a packed key and generation
+stamp, g-score, and came-from edge). At the 100\,km cap, a 256\,MB workspace cap produced 201\,MB of slots
+(16.8\,M) and the A* open set still exhausted before the workspace did; raising
+the cap to 512\,MB or 2\,GB did not move the pair that failed. The pool shrinks
+when idle: one run went from 10{,}485{,}760 slots to 262{,}144, with
+\texttt{RssAnon} falling from 143.5\,MB to 4.5\,MB. Memory is therefore budgeted
+by longest route times concurrency, and the pool is a ceiling rather than a
+per-query allocation.
 
-\subsection{Memory behaviour}
-\begin{table}[t]
-\small
-\begin{tabular}{@{}lrrr@{}}
-\toprule
-state & RSS & \texttt{RssAnon} & \texttt{RssFile} \\
-\midrule
-after start-up (two regions mapped) &  15\,MB &  7\,MB &  7\,MB \\
-after 20 routes of 15\,km         &  89\,MB &  73\,MB & 15\,MB \\
-after one 148\,km route           & 385\,MB & 281\,MB & 103\,MB \\
-after one 579\,km route           & 607\,MB & 442\,MB & 164\,MB \\
-after 29 routes of 148\,km        & 1{,}041\,MB & 876\,MB & 165\,MB \\
-\bottomrule
-\end{tabular}
-\caption{Resident set of the serving process (Java + Sumatra, \texttt{-conc 4}),
-split into anonymous heap and file-backed mappings. The growth is \emph{heap}:
-the A* open-set workspace (16\,B per slot: keys, generation, g-score, parent)
-grows with the longest route served and is pooled per concurrency slot, so it is
-not returned to the OS. Only \texttt{RssFile} (touched graph pages) is clean and
-reclaimable. Memory is therefore budgeted from \emph{longest route} $\times$
-\texttt{-conc}, and \texttt{GOMEMLIMIT} trades a little latency for a hard
-ceiling (424\,MB instead of 558\,MB with a 300\,MiB limit).}
-\label{tab:rss}
-\end{table}
+\subsection{Turn restrictions and snapping}
+The Java build used for compliance evaluation contains 4{,}654
+\texttt{type=restriction} relations; 3{,}962 remain after the profile and
+reachability filter, resolving to 3{,}808 forbidden transitions and 154
+permit-lists (30.1\,KB, 0.004\,\% of the 693\,MB graph; a dense CSR over edges
+would need 374\,MB). We route the tail of the incoming edge to the head of the
+outgoing edge for every stored restriction and check whether the returned path
+still contains the forbidden transition. Without enforcement, 96.7\,\% of the
+3{,}463 routable restrictions are violated, so the harness is not vacuous. With
+enforcement the violation count is \textbf{0} and the fallback count is
+\textbf{0}. A build-time edge-state search relaxes 116 bans whose endpoints have
+no alternative path once every other ban and permit-list is enforced; the 57
+searches that hit the one-million-state cap are relaxed too. The harness tests
+only stored bans, so those 116 rules are outside its sample. Median latency
+changes by less than a millisecond per bucket and expansion counts by 0.1\,\%.
 
-\subsection{Multi-region serving}
-With Java and Sumatra loaded in one process, region selection by snapping routes
-Medan (13\,km) in 53\,ms, Palembang (10.9\,km) in 56\,ms, Bandar Lampung (3.6\,km)
-in 9\,ms and Jakarta (56.5\,km) in 103\,ms. Cross-strait queries (Merak--Bakauheni,
-Bali--Lombok) are rejected: the topology trades them for build feasibility.
+The deployed v5 car graph stores 3{,}694 bans and 154 permit-lists; the motorcycle
+profile stores 3{,}589 and 136. The reduction from 3{,}808 reflects the final
+profile and reachability pass, not a relaxation of enforcement. Time-dependent
+rules and via-way restrictions that require edge splitting are counted but not
+applied; 593 relations are skipped for these reasons and for unresolved
+references. They are a known gap, not a hidden success.
 
-\subsection{Serving throughput and deployment cost}
-On a deliberately small box (Intel i3-6100T, 2 cores/4 threads, 7.8\,GB RAM,
-Ubuntu 24.04, container limited to 1.5\,GiB, \texttt{-conc 4}) the graph was
-built on the machine itself: Java peaked at 1{,}886\,MB with
-\texttt{GOMEMLIMIT=1800MiB} (57\,s), Sumatra at 1{,}683\,MB (23\,s), and the
-container image is 23\,MB. Measured throughput with keep-alive clients:
-
-\begin{table}[t]
-\small
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-route class & server p50 & clients & RPS & client p95 \\
-\midrule
-7\,km   &  46\,ms & 4 & 67.2 & 176\,ms \\
-15\,km  & 136\,ms & 4 & 17.1 & 272\,ms \\
-42\,km  & 191\,ms & 4 & 10.9 & 439\,ms \\
-42\,km  & 191\,ms & 8 & 11.8 & 744\,ms (queued) \\
-148\,km & 4.2\,s   & 4 &  0.59 & 6.9\,s \\
-\bottomrule
-\end{tabular}
-\caption{Throughput on the low-power deployment. Saturation is reached at four
-concurrent queries: at 42\,km, $10.9 \times 0.326\,\mathrm{s} \approx 3.6$ core
-equivalents, i.e. both physical cores including SMT. Adding a second container on
-the same host therefore adds queueing, not throughput. Error rate was zero in all
-runs (1{,}000+ requests).}
-\label{tab:throughput}
-\end{table}
-
-With a 40\,km cap in the client (the design assumption) the operating point
-depends on the route mix: a single 42\,km class supports 10--11\,RPS, whereas a
-distribution of real pairs capped at 40\,km (median 12.6\,km, 298 pairs) sustains
-23.5--24.9\,RPS on the same box at \texttt{-conc 4}, with p50 73.6\,ms and RSS
-805\,MB for three regions (\texttt{paper/RESULTS.md}\,\S16). Concurrency above two
-buys no throughput on two physical cores, and at \texttt{-conc 2} the client p50
-is a third of the \texttt{-conc 4} run at the same RPS. That is roughly 600 route
-requests per minute for the 42\,km worst case, or 1{,}400 per minute for the
-capped mix.
-
-\subsection{Turn-restriction compliance}
-The Java extract contains 4{,}654 \texttt{type=restriction} relations; 3{,}962
-remain after the car profile and reachability filter, resolving to 3{,}808
-forbidden transitions and 154 permit-lists (30.1\,KB, i.e. 0.004\,\% of the
-693\,MB graph; a dense CSR over edges would need 374\,MB). We route the tail of
-the incoming edge to the head of the outgoing edge for every stored restriction
-and check whether the returned path still contains the forbidden transition.
-Without enforcement 96.7\,\% of the 3{,}463 routable restrictions are violated,
-which shows the harness is not vacuous (the shortest path really wants that
-turn); with enforcement the violation count is \textbf{0} and the fallback
-count is \textbf{0}. A build-time edge-state search relaxes 116 bans whose
-endpoints have no alternative path once every other ban and permit-list is
-enforced; the 57 searches that hit the one-million-state cap are relaxed too.
-The harness tests only stored bans, so those 116 rules are outside its sample.
-Median latency changes by less than a millisecond per bucket and expansion
-counts by 0.1\,\%.
-
-\subsection{Snapping accuracy}
 \begin{table}[t]
 \small
 \begin{tabular}{@{}lrrrr@{}}
@@ -428,138 +430,207 @@ $\le$20\,m      & 3{,}382 & 17.2\,m & 36.8\,m & 15.8 / 36.1\,m \\
 $>$150\,m        &    47   & 67.3\,m & 114.0\,m & \textbf{16.1 / 34.9}\,m \\
 \bottomrule
 \end{tabular}
-\caption{Attachment error for 5\,000 synthetic taps pushed 0--40\,m perpendicular
-off a segment (western Sumatra, 1.02\,M segments in scope). Because the injected
-offset is itself 0--40\,m, the segment column measures how close the attachment is
-to the road, while the node column adds half a segment on top. The median segment
-in this extract is only 11\,m long (every OSM node is a graph node), so the gain
-concentrates where it matters: long inter-urban segments. Implementation check
-against a brute-force oracle: mean $-1.25$\,m, and no sample worse by more than
-1\,m.}
+\caption{Attachment error for 5{,}000 synthetic taps pushed 0--40\,m
+perpendicularly off a segment (western Sumatra, 1.02\,M segments in scope). The
+injected offset is itself 0--40\,m, so the segment column measures proximity to
+the road; the node column adds half a segment on top. The median segment in this
+extract is only 11\,m because every OSM node is a graph node, which is why the
+gain concentrates on long inter-urban segments.}
 \label{tab:snap}
 \end{table}
 
-For a real 22.7\,km Medan--Binjai route the tap offset drops from 45\,m to 4\,m,
-both ends are trimmed, the reported distance falls by 58\,m (the trimmed length)
-and the geometry now starts and ends on the carriageway.
+Segment snapping removes the first-order attachment error. On segments longer
+than 150\,m, the median error falls from 67.3\,m to 16.1\,m
+(Table~\ref{tab:snap}); on a real 22.7\,km Medan--Binjai route the tap offset drops
+from 45\,m to 4\,m, both ends are trimmed, and the reported distance falls by
+58\,m. The residual is the spur case: when the path leaves the anchor away from
+the snapped segment, the offset becomes a straight line. That is an explicit
+limitation, not an accuracy claim.
 
-\subsection{Reference points and honesty about baselines}
+\subsection{National build and the 100\,km cap}
 \begin{table}[t]
-\small
-\begin{tabular}{@{}lrr@{}}
+\footnotesize
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
- & routeid (Java) & OSRM MLD v5.26.0 (Java) \\
+setup & success & p99/max & failures \\
 \midrule
-graph on disk            & 693\,MB (measured) & 5.08\,GB (measured) \\
-RSS before any query     & 17\,MB (measured)  & 2.36\,GiB (measured) \\
-RSS after 600 pairs      & 815\,MB (measured) & 2.45\,GiB (measured) \\
-preprocessing, 22.7\,M nodes & 28\,s (measured) & 250\,s (measured; peak 6.25\,GB) \\
-p50, 0--5/5--15/15--30/30--50/50--80\,km & 3.6/19.7/54.7/139/397\,ms & 0.7/1.1/1.7/2.2/3.2\,ms \\
-p95, same buckets        & 14.0/68.7/226.7/478.4/1060.9\,ms & 1.1/1.7/2.3/3.0/4.5\,ms \\
-distance delta (332 pairs) & median $0.23\%$, p95 $14.49\%$ & reference \\
-turn restrictions        & 3{,}790 bans (593 skipped) & \texttt{car.lua} profile \\
+Ryzen, 3 regions, 100\,km & 481/600 & ---/9.5\,s & 72 snap, 39 too\_far, 8 budget \\
+i3, 6\,s budget & 472/600 & 2.94/4.74\,s & 40 too\_far, 16 budget \\
+i3, no budget, 30\,s & 475/600 & 4.52/9.06\,s & 45 too\_far, 8 exhausted \\
 \bottomrule
 \end{tabular}
-\caption{Controlled comparison on one machine (Ryzen 5 5600G, 16\,GB). Same
-PBF, same 600 origin--destination pairs, alternating request order; distance
-statistics use the 332 pairs where both engines snap within 250\,m and to points
-within 50\,m of each other. Routeid: HTTP server, \texttt{-conc 1}. OSRM: MLD,
-default threads. The planned accuracy gate (median ${<}5\%$, p95 ${<}12\%$) is
-met at the median but \emph{not} at p95, so this table does not support an
-accuracy claim.}
-\label{tab:positioning}
+\caption{100\,km-cap behaviour. The Ryzen row uses three Java region graphs,
+\emph{not} the single national graph; wall-clock p50 is 39--47\,ms because short
+pairs dominate, and p95 is 0.94--1.32\,s. The i3 rows use a 1.5\,GiB container.
+The 6\,s budget trades three successes for a shorter tail and no exhausted
+searches.}
+\label{tab:cap}
 \end{table}
 
-The controlled run changes the qualitative picture from context figures: OSRM is
-about $25\times$ faster at the median (1.4\,ms vs.\ 35.1\,ms over all matched
-pairs) and serves every request, while routeid keeps a $7.3\times$ smaller
-artifact, preprocesses $9\times$ faster, and uses two orders of magnitude less
-memory (17\,MB vs.\ 2.36\,GiB before queries). The routeid column here refers to
-the format-4 graph built for this run (693\,MB, 28\,s on the Ryzen); the
-extraction table reports the earlier format-3 build, hence the different
-artifact size and build time. Route distances agree at the median but not in the
-tail: 38 of 332 pairs differ by more than 10\%, and the worst case by 48\%, which
-is why no accuracy claim is made. Routeid also rejects 81 of 600 pairs with
-\texttt{422}: 72 because the endpoint has no road within its 3\,km snap radius,
-7 because the search budget is exhausted and 2 for lack of a route. On those 81
-pairs OSRM succeeds but snaps its target a median of 14.7\,km (up to 44.6\,km)
-away, so they are not a like-for-like comparison and are reported separately
-rather than counted as wins.
+A national graph is now a build result, not only an estimate: 54.89\,M nodes,
+112.34\,M edges, 1.621\,GB, built with 12 workers under a 5\,GiB
+\texttt{GOMEMLIMIT} in 11\,m40\,s including download (1\,m12\,s extraction). The
+process starts in 10\,ms and idles at 11.1\,MB. What is \emph{not} measured is
+query latency on that single national graph. The 100\,km-cap numbers in
+Table~\ref{tab:cap} come from three Java regions on the Ryzen, and we label them
+as such.
+
+At the cap, 481 of 600 pairs succeed. Failures are 72 snap, 39 \texttt{too\_far},
+and 8 budget/exhausted. The wall-clock p50 is 39--47\,ms and p95 is
+0.94--1.32\,s, with a maximum of 9.5\,s. The tail is the cost of omitting a
+hierarchy: a 50--80\,km pair has RouteID p95 1.68\,s in E1, and the cap run
+extends that tail. On the i3, a 6\,s budget returns 472 pairs, 16 of them marked
+budget; without a budget, 475 pairs succeed but 8 searches exhaust and the p99
+rises from 2.94\,s to 4.52\,s. The budget is a latency control, not a free win.
+
+\subsection{Throughput}
+\begin{table}[t]
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+route class & server p50 & clients & RPS & client p95 \\
+\midrule
+7\,km   &  47\,ms & 4 & 75   & --- \\
+15\,km  & 136\,ms & 4 & 17   & --- \\
+42\,km  &  93--102\,ms & 4 & 36--40 & 105--145\,ms \\
+148\,km & 4.2\,s  & 4 & 0.6  & 6.9\,s \\
+mix $\le$40\,km, 298 pairs & 73.6\,ms & 4 & 23.5--24.9 & 705.4\,ms \\
+\bottomrule
+\end{tabular}
+\caption{Throughput on the i3-6100T deployment (2 cores/4 threads, 1.5\,GiB
+container, \texttt{-conc 4}), keep-alive clients. The 42\,km row is the
+post-optimisation range; the mix row is a real distance distribution, not a
+single class. Error rate was zero in all runs (1{,}000+ requests).}
+\label{tab:throughput}
+\end{table}
+
+With four clients, a single 42\,km class sustains 36--40\,RPS at p50
+93--102\,ms, while a real mix capped at 40\,km sustains 23.5--24.9\,RPS at p50
+73.6\,ms and p95 705.4\,ms. The difference is queueing: the mix contains many
+short routes that finish quickly but also long ones that occupy a core. On two
+physical cores, concurrency above two buys no throughput. At 148\,km the server
+is at 0.6\,RPS, which is another symptom of the missing hierarchy.
 
 \section{Discussion}
-\paragraph{Where the design wins, concretely.}
-(i)~Footprint: 17\,MB resident (E1; Java graph) and a 10\,ms start-up mean the router can share a
-small box with other services and be restarted without a cold cache penalty of
-gigabytes. (ii)~Operational simplicity: one 6.6\,MB static binary, no Lua profile
-and no runtime dependency, so a monthly OSM rebuild is a one-minute job per island
-and the artefact is reproducible. (iii)~Auditability of compliance: turn
-restrictions are compiled into the graph and reported at \texttt{/healthz}
-(bans, permit-lists, skipped via-way), and the harness shows 0 violations after
-enforcement versus 96.7\,\% without it. (iv)~Predictable memory: growth is bounded
-by longest route $\times$ \texttt{-conc}, so deployment sizing is a division, not
-a guess.
+\paragraph{Where the design wins.}
+(i)~Footprint: 17.3\,MB resident for the E1 Java graph and 11.1\,MB idle for the
+national graph, with a 10\,ms start-up. The router can share a small box with
+other services and restart without a multi-gigabyte warm-up. (ii)~Operational
+simplicity: one 6.7\,MB static binary, one graph file, no Lua profile at runtime,
+and a monthly rebuild measured in minutes per island. (iii)~Auditability:
+restrictions are compiled into the graph, reported at \texttt{/healthz}, and
+checked by a harness that shows 0 violations after enforcement versus 96.7\,\%
+without it. (iv)~Predictable memory: growth is bounded by longest route times
+concurrency, and the workspace shrinks when idle.
 
-\paragraph{When is this the right tool?}
-If the product needs short routes, a car profile, no live traffic, and cannot pay
-per request, a purpose-built engine is a reasonable trade: 13\,MB of resident
-memory after start-up, sub-second worst case up to 50\,km, and a monthly rebuild
-measured in a minute per island. If the product needs accurate ETAs in congestion,
-or worldwide coverage, hosted APIs remain better value.
+\paragraph{Where it loses.}
+OSRM is faster by 26$\times$ at the median and 180$\times$ at p95 on the same
+data. RouteID's distance tail also fails the pre-registered gate. A product that
+needs per-query latency, accurate congestion ETAs, worldwide coverage, matrix
+queries, or turn-by-turn instructions should use an established engine or a
+hosted API. The case for RouteID is narrow: bounded-radius car/motorcycle routes,
+static speeds, a small VPS, and no per-request fee.
 
-\paragraph{What dominated accuracy, and what replaced it.}
-Node snapping was the first-order error: attaching to the nearest node can move the
-endpoint by half a segment. Segment snapping removes it in the common case --- on
-segments longer than 150\,m the median attachment error falls from 67.3\,m to
-16.1\,m, and the residual is the user's own off-road offset (Table~\ref{tab:snap}).
-What remains, in order: (i) the spur case, where the path leaves the anchor away
-from the snapped segment and the offset becomes a straight line; (ii) no
-time-dependent data --- \texttt{restriction:conditional} and vehicle-class
-restrictions are counted but not applied, and via-way restrictions are enforced
-conservatively with build-time relaxation when no alternative exists; (iii)
-static speeds, so durations ignore congestion.
+\paragraph{Why the tail exists.}
+Without a hierarchy, the search explores a disc whose area grows with the route
+radius; dense metropolitan corridors make it worse because many short edges lie
+inside the disc. At 50--80\,km the E1 p95 is 1.68\,s, and at the 100\,km cap the
+p95 is 0.94--1.32\,s with 8 budget failures. A contraction hierarchy or a
+two-level highway/core decomposition would fix the tail but adds preprocessing
+cost and auxiliary memory, which is the trade this design deliberately avoids.
 
-\paragraph{Long routes.}
-Without a hierarchy the search degrades super-linearly: at 100\,km road distance
-the median is 388\,ms and p95 one second. If long routes are ever required, the
-options are contraction hierarchies (larger artefact, expensive preprocessing) or
-a two-level highway/core decomposition, which is closer to the spirit of this
-design.
+\paragraph{Accuracy.}
+Segment snapping was the first-order fix, not turn restrictions. The remaining
+error sources are the spur case, static speeds, unapplied time-dependent and
+via-way restrictions, and the choice of cost function. The distance comparison
+against OSRM is useful as a regression signal but cannot establish accuracy: both
+engines consume the same OSM graph, and E2 was not run. We state this in the
+abstract and in \S\ref{sec:threats} rather than qualifying a claim we cannot
+support.
+
+\paragraph{Artifact and reproducibility.}
+The repository contains the raw CSVs, the measurement ledger, the harness
+scripts, the graph format version, PBF SHA-256 values, and the commands that
+produced each table. The repository is currently private, so we do not claim a
+public artefact or a reusable benchmark suite. The numbers in this draft are
+reproducible from the recorded inputs on the stated machines, not from a container
+image published with the paper.
 
 \section{Threats to validity}
-(i) One machine, one microarchitecture; the locality result should be re-measured
-on server CPUs with different cache and page sizes. (ii) No ground-truth accuracy evaluation: distances were sanity-checked against
-known itineraries, not compared statistically against a reference provider. A
-controlled head-to-head against OSRM MLD has now been run on one machine (600
-identical pairs; 332 enter the distance statistics after snapping both endpoints
-within 250\,m and requiring the engines' snapped points to agree within 50\,m):
-the median route-distance deviation is $0.23\%$ but p95 is $14.49\%$ and the
-maximum is $70.44\%$, so the planned accuracy gate (median ${<}0.1\%$, p95
-${<}12\%$) fails on both and this paper makes no accuracy claim. That spread is
-not a restriction defect: an audit of all 593 skipped restriction relations and
-of the 20 largest deviations (\texttt{paper/RESULTS.md}~\S18) shows it comes
-from differing cost functions and route choice: routeid minimises drive time and
-keeps \texttt{track} edges, OSRM minimises \texttt{weight}. After the fallback
-speed table was aligned with \texttt{car.lua}, p95 fell from $21.05\%$ to
-$14.49\%$, but the tail remains. The independent-reference harness (E2) was not
-run: the owner chose the limitation-only option on 2026-11-10, so no independent
-accuracy claim is possible. The protocol, failure breakdown and reproduction
-commands are in \texttt{paper/RESULTS.md}~\S13 and \S18.
-(iii) The latency benchmark has
-526 successful queries; p99 estimates are therefore weak. (iv) Snap failures
-(coastline, forest) are excluded from percentiles and reported separately, and the
-snapping study uses injected offsets rather than recorded user taps. (v) The
-national topology is sized but not evaluated: the graph was built (1.65\,GB
-artifact), while its latency and accuracy are untested and the throughput
-results come from per-island serving.
+\label{sec:threats}
+(i)~\emph{Hardware and runs.} Measurements come from a small number of commodity
+machines, not server CPUs; latency is single-run, and the $\varepsilon$ and
+ordering experiments use an older format-v3 graph. The E1 comparison alternates
+engines but does not repeat the full run five times. Locality results in
+particular should be re-measured on different cache and page sizes.
+
+(ii)~\emph{No independent ground truth.} E2 was not run. OSRM is not a reference:
+it consumes the same OSM data and has its own cost function. The E1 median
+difference is 0.23\,\%, but p95 is 14.49\,\% and the maximum is 70.44\,\%, so the
+pre-registered gate fails and no accuracy claim is possible. The owner chose the
+limitation-only option on 2026-11-10; this paper does not contain an accuracy
+result.
+
+(iii)~\emph{Filtering and sample size.} Of 600 pairs, 332 are matched, 79 fail,
+and 189 are excluded. Failed endpoints are excluded from percentiles, which
+flatters latency; we report the counts and the OSRM snap distance on failures
+(median 15.3\,km) so the exclusion is visible. The p99 estimates rest on 332
+queries and are weak.
+
+(iv)~\emph{Snapping study.} The attachment error uses synthetic taps with
+injected offsets, not recorded user taps. The 5{,}000 samples come from western
+Sumatra and may not represent dense Jakarta or rural Papua.
+
+(v)~\emph{National scope.} The national graph is built and its memory is measured,
+but its query latency is not. The 100\,km-cap numbers use three Java regions;
+they are not a full-national benchmark. Ferry behaviour is static and does not
+include schedules.
+
+(vi)~\emph{Feature scope.} There is no traffic, no time-dependent restriction, no
+via-way edge splitting, no alternative routes, no matrix, and no map matching.
+Durations are static-speed estimates, not ETAs.
+
+\section{Related work}
+\paragraph{Shortest-path speed-up techniques.}
+Dijkstra's algorithm~\cite{dijkstra1959} and A*~\cite{hart1968} are the
+foundation. Goal-directed search with landmark lower bounds (ALT) was introduced
+by Goldberg and Harrelson~\cite{goldberg2005}. Contraction
+hierarchies~\cite{geisberger2008,geisberger2012} and customisable route
+planning~\cite{delling2011,delling2017} (the MLD family used by OSRM) achieve
+microsecond queries by preprocessing; their cost is preprocessing time and
+auxiliary memory. Highway-dimension analyses~\cite{abraham2010,abraham2016}
+explain why road networks admit such hierarchies. These techniques optimise query
+time for long routes; we instead optimise resident memory for a bounded-radius
+workload, and show where the simpler search stops being competitive.
+
+\paragraph{Open-source engines.}
+OSRM~\cite{osrm}, GraphHopper~\cite{graphhopper}, Valhalla~\cite{valhalla},
+BRouter~\cite{brouter}, and RoutingKit~\cite{dibbelt2014} are the practical
+baselines. They are general-purpose: multiple profiles, matrices, map matching,
+turn-by-turn instructions. Our claim is not that we beat them on query latency;
+it is that a constrained workload permits a much smaller artefact. The E1 numbers
+make the trade explicit rather than hiding it behind a throughput claim.
+
+\paragraph{Locality and out-of-core graph processing.}
+Storing graphs so that traversal is page-local has a long tradition in
+out-of-core graph systems (GraphChi~\cite{kyrola2012}, X-Stream~\cite{royle2013},
+FlashGraph~\cite{zheng2015}) and in shared-memory frameworks such as
+Ligra~\cite{shun2013}. Space-filling curves date back to
+Hilbert~\cite{hilbert1891}. We apply the same idea to a routing graph: numbering
+nodes along a Hilbert curve makes an A* frontier---which is spatially
+compact---contiguous in the file. The measured gain is modest, and we report it
+as such.
 
 \section{Conclusion and future work}
 For bounded-radius routing, the interesting resource is not query time but
-resident memory, and memory-mapping plus a locality-aware node numbering delivers
-it with a small, auditable code base. The immediate work is accuracy: edge-based
-turn restrictions, edge snapping, and an independent-reference comparison
-(E1 against OSRM is done and deliberately not treated as ground truth); then a
-streaming builder so that the whole country fits in one file on an 8\,GB machine,
-and a hierarchy only if the product needs long routes.
+resident memory, and memory-mapping plus locality-aware node numbering delivers
+it with a small, auditable code base. The costs are equally clear: OSRM is much
+faster, the distance tail is wider than the gate we set, and long routes need a
+hierarchy we did not build. The immediate work is an independent-reference
+comparison (E2), time-dependent and via-way restrictions, a full-national latency
+benchmark, and a streaming builder that keeps the whole country in one file on an
+8\,GB machine. A hierarchy should be added only if the product needs routes beyond
+the current cap.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{refs}

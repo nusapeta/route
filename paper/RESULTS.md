@@ -1,10 +1,40 @@
 # Hasil pengukuran (mentah + provenance)
 
-Semua angka di `main.tex` berasal dari file ini. Kecuali §13, mesin: Intel Core
-i5-7360U (2C/4T, 2.3 GHz), RAM 7 GB, Linux 7.2.8, Go 1.27.3. §13 (E1 vs OSRM)
-diukur di AMD Ryzen 5 5600G; lihat provenance di sana.
-Data: Geofabrik `java-latest.osm.pbf` (857.6 MB) dan `sumatra-latest.osm.pbf`
-(283.3 MB), diunduh 2026-11-06.
+Semua angka di `main.tex` berasal dari file ini. Mesin berbeda per bagian:
+§1–§12 dan §14–§15 di Intel Core i5-7360U (2C/4T, 2.3 GHz, RAM 7 GB);
+§13, §18, dan §19 di AMD Ryzen 5 5600G; §16 di i3-6100T; §17 di Ryzen + i3.
+Jangan mencampur angka antar mesin. Data awal: Geofabrik
+`java-latest.osm.pbf` (857.6 MB) dan `sumatra-latest.osm.pbf` (283.3 MB),
+diunduh 2026-11-06.
+
+## Canonical snapshot 2026-11-12
+
+Angka yang boleh masuk abstrak/README. Sumber: `e1-osrm-aligned.csv`,
+`data/indonesia.graph`, dan `RESULTS.md` §18–§19.
+
+**E1 (Java, Ryzen, 600 pasangan):**
+
+| Metrik | RouteID | OSRM MLD |
+|---|---:|---:|
+| Cocok / gagal / dibuang | 332 / 79 / 189 | — |
+| Gagal: `snap` / `budget` | 72 / 7 | 0 |
+| p50 latency, 332 cocok | 38,7 ms | 1,5 ms |
+| p95 latency, 332 cocok | 674 ms | 3,7 ms |
+| p99 latency | 1.637 ms | 4,6 ms |
+| Jarak: median / p95 / max \|Δ\| | 0,23% / 14,49% / 70,44% | ref |
+| Jarak >10% / >25% | 25 / 8 | — |
+| Durasi: signed p50 / p95 | −1,11% / +2,39% | ref |
+| Durasi absolut p95 | 10,22% | — |
+
+**Graph nasional v5:** 54.891.393 node / 112.340.071 edge, 1.621.222.584 B;
+build 11m40s termasuk unduh, ekstraksi 1m12s; idle 11,1 MB (`anon` 4,5 MB).
+
+**Batas 100 km (Ryzen, 3 region):** 481/600 sukses; p50 39–47 ms, p95
+0,94–1,32 s, max 9,5 s. Di i3 `-budget 6s`: 472/600; 40 `too_far`,
+16 `budget`, 0 `exhausted`.
+
+**Jangan dikutip sebagai final:** §13 adalah run sebelum penalti belok
+(p50 35,1 ms / p95 522 ms, 81 gagal, p95 jarak 21,05%). Run final ada di §18.
 
 ## 1. Ekstraksi
 
@@ -21,7 +51,7 @@ Data: Geofabrik `java-latest.osm.pbf` (857.6 MB) dan `sumatra-latest.osm.pbf`
 ```
 Peak RSS diukur dengan polling `ps -o rss` tiap 200 ms selama proses.
 
-## 2. Latency per bucket jarak (Java, ε=1.5, 601 pasang tetap)
+## 2. Latency per bucket jarak (Java, ε=1.5, 600 pasang tetap)
 
 Workload: `paper/results/pairs-java.csv` (120 pasang per bucket jarak
 straight-line). Jarak rute nyata lebih besar dari bucket karena jalan tidak lurus.
@@ -368,7 +398,7 @@ heuristik sedikit lebih longgar). Artinya kemenangan 1,9–2,0x datang murni dar
 biaya per ekspansi, bukan dari pencarian yang lebih pintar, persis yang tidak
 bisa dicapai ALT tanpa tambahan memori (lihat ROADMAP M3).
 
-**Kualitas rute**: pada 601 pasang Java, waktu tempuh **537/537 sama** (hanya
+**Kualitas rute**: pada 600 pasang Java, waktu tempuh **537/537 sama** (hanya
 pasangan yang berhasil dibandingkan, 64 gagal di kedua versi); 1 pasang memilih
 geometri lain dengan waktu tempuh identik. Golden test kota sintetis di-rebaseline:
 10 entri berubah jarak/waktu <=8% pada rute 250 m–3,4 km, 8 di antaranya jadi
@@ -608,6 +638,9 @@ W5 tidak mengubah heuristik. Default `-max-route-km 40` tetap menolak kedua
 query sebelum snap. Ini bukti fungsional, bukan klaim akurasi.
 
 ## 13. E1: routeid vs OSRM MLD, mesin yang sama
+
+> **Historis pra-penalti belok.** Angka final ada di §18. Jangan memakai
+> 35,1 ms / 522 ms / 81 gagal / 21,05% sebagai hasil sekarang.
 
 Berbeda dari §1-§12 (Intel i5-7360U, 2C/4T, 7 GB), bagian ini diukur di
 **AMD Ryzen 5 5600G (6C/12T, 3,9-4,4 GHz), 16 GB RAM, 30 GiB swap**,
@@ -1041,6 +1074,13 @@ E1 pada 332 pasangan yang lolos filter snap: median |selisih| **0,23%**,
 p95 **14,49%**, maksimum **70,44%**, 25/332 >10%, 8/332 >25%. Gerbang p95
 <12% dan median <0,1% tetap gagal. Durasi signed p50 **-1,11%**, signed p95
 **+2,39%**, absolut p95 **10,22%**.
+
+Latency run final (`e1-osrm-aligned.csv`, pasangan cocok): p50 **38,7 ms**
+vs OSRM **1,5 ms**; p95 **674 ms** vs **3,7 ms**; p99 **1.637 ms** vs
+**4,6 ms**. Pada 79 kegagalan (72 `snap`, 7 `budget`) OSRM menempel target
+dengan median **15,3 km**, p90 **32,7 km**, max **44,6 km**. Tidak ada
+`no_route` di run ini. Latency final lebih tinggi dari §13 karena penalti
+belok dan tabel yang dikalibrasi; itu harga yang diterima.
 
 | varian tabel | p50 | p95 | max | >10% | >25% | durasi median |
 |---|---:|---:|---:|---:|---:|---:|

@@ -1,145 +1,114 @@
-# Yang masih kurang sebelum paper ini layak submit
+# Status eksperimen
 
-Urut berdasarkan dampak ke kredibilitas.
+Diperbarui **2026-11-12**. Dokumen ini hanya mencatat kesiapan bukti; angka
+mentah ada di [`RESULTS.md`](RESULTS.md), ledger klaim di
+[`COMPARISON.md`](COMPARISON.md).
 
-## E1. Baseline OSRM di mesin yang sama (WAJIB)
+| Eksperimen | Status | Bukti |
+|---|---|---|
+| E1 OSRM baseline | ✅ selesai | `RESULTS.md` §13 (historis), §18 (final) |
+| E2 ground truth | ⛔ tidak dijalankan | D1: limitation eksplisit |
+| E3 turn restriction | ✅ selesai | §7, §14; 0 pelanggaran / 0 fallback |
+| E4 snap ke ruas | ✅ selesai | §9; p50 67,3 → 16,1 m |
+| E5 build nasional | 🟡 build selesai, latency penuh belum | §19, `data/indonesia.graph` |
+| E6 provenance + golden | ✅ selesai | format v5, golden 48 pasangan |
+| E7 generalisasi | 🟡 sebagian | 7 pulau + graph nasional; belum ada uji kota independen |
 
-Paper sekarang tidak punya pembanding terkontrol. Tanpa ini, klaim
-"lebih ringan" hanya sebanding dengan angka yang dilaporkan orang lain.
+## E1. Baseline OSRM
 
-**Status (2026-11-07, dikalibrasi ulang 2026-11-10): sudah dijalankan** di
-Ryzen 5 5600G (6C/12T, 16 GB), OSRM v5.26.0 MLD vs routeid, PBF Java yang
-sama, 600 pasangan identik. Hasil lengkap: `RESULTS.md` §13 dan §18;
-worksheet: `COMPARISON.md` §3.
+Ryzen 5 5600G, OSRM v5.26.0 MLD, PBF Java yang sama, 600 pasangan.
 
-Ringkas: preprocess 28 s vs 250 s; artefak 693 MB vs 5,08 GB; RSS sebelum query
-17 MB vs 2,36 GiB; p50 35,1 ms vs 1,4 ms; p95 522 ms vs 3,4 ms. Jarak rute
-(332 pasang setelah filter snap): median **0,23%**, p95 **14,49%**, max
-70,44%; gerbang p95 <12% dan median <0,1% **gagal**. Audit §18 menunjukkan
-sisa selisih berasal dari fungsi biaya, akses/restriksi, dan pilihan rute,
-bukan restriction yang di-skip. D4 mengganti metrik primer ke p95 durasi
-absolut **10,22%** (signed p50 -1,11%, signed p95 +2,39%). 81/600 routeid `422`
-(72 snap >3 km); OSRM tidak gagal tetapi snap tujuannya p50 14,7 km pada pasangan
-itu. **E1 tidak boleh dipakai untuk klaim akurasi**; E2 tidak dijalankan
-(D1: limitation).
+| Metrik | RouteID | OSRM |
+|---|---:|---:|
+| Cocok / gagal / dibuang | 332 / 79 / 189 | — |
+| p50 latency, 332 cocok | 38,7 ms | **1,5 ms** |
+| p95 latency | 674 ms | **3,7 ms** |
+| Artefak | **693 MB** | 5,08 GB |
+| Preprocess | **28 s** | 250 s |
+| Jarak: median / p95 / max \|Δ\| | 0,23% / 14,49% / 70,44% | ref |
+| Jarak >10% / >25% | 25 / 8 | — |
+| Durasi: signed p50 / p95 | −1,11% / +2,39% | ref |
+| Durasi absolut p95 | 10,22% | — |
 
-Skrip: `scripts/m6-osrm.sh` (build + peak RSS + ukuran artefak) dan
-`scripts/m6-compare.py` (600 pasangan identik, bergantian, `--max-snap 250
---max-gap 50`). Kebutuhan RAM/disk, resep, dan definisi selesai: **`docs/M6.md`**.
-Perintah manual di bawah tetap sah sebagai acuan.
+79 kegagalan = 72 `snap` + 7 `budget`. OSRM tidak gagal, tetapi pada pasangan
+itu snap target OSRM median 15,3 km dari input; bukan pembanding setara.
 
-```bash
-# perlu user masuk grup docker (atau sudo)
-sudo usermod -aG docker $USER   # logout/login
+Gerbang jarak (median <0,1%, p95 <12%) **gagal**. D4 mengganti metrik primer
+ke p95 durasi absolut; klaim akurasi tetap dicabut. CSV final:
+`results/e1-osrm-aligned.csv`.
 
-mkdir -p baseline && cd baseline
-wget https://download.geofabrik.de/asia/indonesia/java-latest.osm.pbf
-docker run -t -v $PWD:/data osrm/osrm-backend osrm-extract -p /opt/car.lua /data/java-latest.osm.pbf
-docker run -t -v $PWD:/data osrm/osrm-backend osrm-partition /data/java-latest.osrm
-docker run -t -v $PWD:/data osrm/osrm-backend osrm-customize /data/java-latest.osrm
-/usr/bin/time -v docker run -d --name osrm -p 5001:5000 -v $PWD:/data \
-  osrm/osrm-backend osrm-routed --algorithm mld /data/java-latest.osrm
-```
+## E2. Ground truth
 
-Yang harus dicatat: durasi tiap tahap, peak RSS tiap tahap (`docker stats`),
-ukuran direktori `.osrm`, RSS `osrm-routed` setelah start dan setelah workload.
+Tidak dijalankan. OSRM bukan ground truth karena memakai graf OSM yang sama.
+Tidak ada API key dan tidak ada data referensi independen. Paper hanya boleh
+menulis perbandingan antar-engine dan limitation.
 
-Harness pembanding (pakai pasangan yang sama):
+Kalau nanti dijalankan: 200–500 pasangan, `distanceMeters` + polyline,
+metrik median/p95 selisih jarak dan daftar kasus terburuk. Jangan memakai
+Google Maps manual tanpa menyimpan screenshot + tanggal akses.
 
-```bash
-# pasangan sama, OSRM order lon,lat
-python3 - <<'EOF'
-import csv, urllib.request, json, time
-pairs = list(csv.DictReader(open('paper/results/pairs-java.csv')))
-lat = []
-for p in pairs:
-    u = f"http://127.0.0.1:5001/route/v1/driving/{p['from_lon']},{p['from_lat']};{p['to_lon']},{p['to_lat']}?overview=false"
-    t0 = time.perf_counter(); json.load(urllib.request.urlopen(u)); lat.append((time.perf_counter()-t0)*1000)
-lat.sort()
-print(f"n={len(lat)} p50={lat[len(lat)//2]:.1f}ms p95={lat[int(len(lat)*.95)]:.1f}ms")
-EOF
-```
+## E3. Turn restriction
 
-Kriteria lolos: tabel latency + memori untuk kedua engine, pada hardware & data
-identik, dengan jumlah query sukses yang sama.
+Selesai pada graph final:
 
-## E2. Validasi akurasi terhadap referensi (WAJIB untuk klaim "akurat")
+- 4.654 relasi dipindai, 3.962 usable, 3.808 ban + 154 `only_*`, 30,1 KB.
+- 116 aturan dilonggarkan saat build (57 mencapai cap reachability), 593
+  dibuang (via-way/conditional/unresolved).
+- `rid-restcheck`: 3.463 sampel, **0 pelanggaran, 0 fallback**.
+- Graph v5 menyimpan ban mobil 3.694 + 154 `only_*`; motor 3.589 + 136.
 
-Butuh Google Routes API key + billing (atau Mapbox/HERE sebagai pembanding kedua).
-Status: **tidak dijalankan**. D1 pada 2026-11-10 memilih opsi limitation,
-bukan API atau manual; E1 tidak bisa menggantikannya (OSRM memakai graf OSM yang
-sama). Limitation eksplisit tercatat di abstrak + §Threats~(ii); klaim "akurat"
-tidak boleh muncul.
-Kalau key tidak tersedia, opsi jujur: 60 pasang manual lewat Google Maps, atau
-nyatakan E2 di luar cakupan dan jaga abstrak tetap tanpa kata "akurat" (kondisi
-paper saat ini). Lihat `docs/M6.md` §E2.
+Sisa: `restriction:conditional` dan via-way yang masih konservatif. Keduanya
+batas model, bukan bug yang disembunyikan.
 
-Rencana:
-1. Ambil 300–500 pasangan dari `pairs-java.csv` (semua bucket ≤50 km).
-2. Ambil `distanceMeters` + polyline dari reference API.
-3. Hitung: selisih jarak relatif, dan geometri (mean distance between
-   corresponding points setelah resampling, atau symmetric Hausdorff).
-4. Laporkan median, p95, plus daftar kasus terburuk (biasanya: turn restriction,
-   jalan tol/gate, jalan baru).
+## E4. Snap ke ruas
 
-Target yang bisa dijanjikan di paper: **median selisih jarak <5 %, p95 <12 %**.
-Kalau tidak tercapai, perbaiki dulu (E3/E4) sebelum submit.
+Selesai. Proyeksi ke segmen + trim/spur, tanpa pseudo-node.
 
-## E3. Turn restriction (SELESAI: kode + pengukuran)
+| Metrik | Node | Ruas |
+|---|---:|---:|
+| Galat p50, segmen >150 m | 67,3 m | **16,1 m** |
+| Galat p95 | 114,0 m | **34,9 m** |
 
-Implementasi: state A* = edge (bukan node), tabel sparse pasangan terlarang di
-format v2 (`Ban`) dan pasangan yang diizinkan untuk `only_*` (`Only`).
-Ekstraksi: `internal/extract/restriction.go`. Uji kepatuhan: `cmd/rid-restcheck`.
+Medan–Binjai: offset 45 → 4 m, jarak rute −58 m. Sisa kasus: spur keluar arah
+lain masih garis lurus sepanjang `Along`; bukan klaim akurasi rute.
 
-Hasil Jawa (lihat `RESULTS.md` §7): 4.654 relasi → 3.962 aturan tersimpan,
-3.808 pasangan terlarang + 154 aturan `only_*` (30 KB). Kepatuhan: 0 pelanggaran
-dan 0 fallback dari 3.463 sampel (dengan restriction) vs 96,71% pelanggaran
-tanpa restriction. Sebanyak 116 ban tanpa jalur alternatif (57 di antaranya
-mencapai batas pencarian) dilonggarkan saat build.
+## E5. Build nasional
 
-Sisa pekerjaan untuk versi jurnal: `restriction:conditional` (berbasis waktu)
-dan via-way yang masih dilarang konservatif (butuh state machine / edge
-splitting).
+Selesai untuk build dan memori:
 
-## E4. Snap ke edge, bukan node
+- `data/indonesia.graph`: 54.891.393 node / 112.340.071 edge,
+  1.621.222.584 B, v5 `car+motor`.
+- Build 11m40s termasuk unduh; ekstraksi 1m12s, `GOMEMLIMIT=5GiB`.
+- Idle 11,1 MB (`anon` 4,5 MB); 4× rute 96 km 225 MiB; 1× 1.882 km 701 MiB.
 
-Rencana teknis + kriteria lulus: `docs/BACKLOG.md` item 4-5.
+**Belum:** latency satu graph nasional penuh. Angka 100 km (481/600, p95
+0,94–1,32 s) diukur dengan tiga region Java di Ryzen, bukan graph nasional
+tunggal. Jangan menulis "national latency" untuk angka itu.
 
-Proyeksi titik ke segmen terdekat (grid edge index), lalu split logis di query
-time. Mengurangi error endpoint sampai ratusan meter tempat node jarang.
+## E6. Provenance dan reproduksibilitas
 
-## E5. Build nasional (T1) terukur, bukan estimasi
+Selesai:
 
-Dua jalur:
-- mesin 16 GB / GitHub Actions runner: build `indonesia-latest.osm.pbf`, catat
-  waktu + peak RSS + ukuran graph;
-- atau implementasi T3 (streaming builder: sort id eksternal + CSR ditulis per
-  blok) supaya muat di 8 GB. Tambahkan flag `-maxmem`.
+- Format v5: header 320 B + 14 section, SHA-256 PBF, build time, profil,
+  restriction, `motor_sha256`.
+- Golden test 48 pasangan sintetis (node + snap), round-trip provenance,
+  kompatibilitas versi lama.
+- `/version`, `/healthz`, CSV mentah di `results/`.
+- Semua tabel punya perintah reproduksi di `RESULTS.md`.
 
-Yang dilaporkan: apakah graph nasional ≈ 2× Java (node/edge/disk) dan apakah
-p50/p95 latency tidak berubah (search terbatas radius, jadi seharusnya tidak).
-
-## E6. Statistik dan reproduksibilitas (SELESAI: format v3 + golden test)
-
-Metadata graph + golden test: `docs/BACKLOG.md` item 1-3 (milestone M1).
-
-- Ulangi benchmark 5×, laporkan median antar-run (bukan satu run).
-- Pin CPU (`taskset -c 0`) dan matikan turbo kalau memungkinkan.
-- Laporkan ukuran sampel per bucket; p99 dengan n<100 sebaiknya tidak diklaim.
-- Simpan CSV mentah (sudah ada di `paper/results/`), sertakan skrip harness.
-- Ukur juga `page faults` (`/usr/bin/time -v`) atau `smaps_rollup` untuk
-  memisahkan RSS file-backed vs anonim.
+Sisa opsional: ulangi benchmark 5× dan laporkan median antar-run; pin CPU.
+E1 sudah dijalankan bergantian, tetapi belum 5×.
 
 ## E7. Generalisasi
 
-Minimal satu pulau lagi (Sulawesi atau Kalimantan) untuk menunjukkan hasil tidak
-khas Jawa, plus satu kota padat (Bandung/Surabaya) untuk bucket 10–25 km.
+Sebagian: graph nasional mencakup tujuh pulau dan ferry; tujuh koordinat lokal
+diuji 200. Belum ada evaluasi kota independen (Bandung/Surabaya) dengan
+pasangan tetap, dan belum ada OSRM/Valhalla pada graph nasional.
 
-## Catatan venue
+## Sebelum submit
 
-- Preprint: arXiv (cs.DC / cs.PF), paling cepat.
-- Workshop: ACM SIGSPATIAL IWCTS (short paper, cocok untuk studi kasus).
-- Jurnal lokal: JUTI, SINERGI, atau IJECE (versi diperluas dengan E1–E6).
-
-Estimasi: E1 + E2 + E6 cukup untuk short paper (2–3 minggu, mayoritas waktu di
-mengumpulkan ground truth). E3 + E4 + E5 masuk versi jurnal.
+- [ ] Compile `main.tex` di mesin bersih; tidak ada overfull yang parah.
+- [ ] Semua klaim di abstrak ada di `RESULTS.md` dan `COMPARISON.md`.
+- [ ] Tidak ada kata "akurat"/"tercepat" tanpa kualifikasi.
+- [ ] E2 tetap limitation atau dijalankan dengan data yang bisa diaudit.
+- [ ] Full-national latency diukur atau tidak diklaim.
