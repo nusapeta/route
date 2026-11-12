@@ -268,9 +268,8 @@
       var body = reply.body;
 
       if (!response.ok) {
-        var serverMessage = body && typeof body.error === "string" ? body.error : "";
         var reason = body && typeof body.reason === "string" ? body.reason : "";
-        throw new Error(routeErrorMessage(response.status, reason, serverMessage));
+        throw new Error(routeErrorMessage(response.status, reason));
       }
       if (!body || typeof body !== "object") {
         throw new Error("Respons rute tidak valid.");
@@ -763,7 +762,7 @@
     deadline: "Perhitungan rute melewati batas waktu. Coba titik yang lebih dekat."
   };
 
-  function routeErrorMessage(status, reason, serverMessage) {
+  function routeErrorMessage(status, reason) {
     if (reason && typeof ROUTE_REASON_MESSAGES[reason] === "string") {
       return ROUTE_REASON_MESSAGES[reason];
     }
@@ -787,6 +786,6 @@
       default:
         message = "Permintaan rute gagal (HTTP " + status + ").";
     }
-    return serverMessage ? message + " " + serverMessage : message;
+    return message;
   }
 })();
