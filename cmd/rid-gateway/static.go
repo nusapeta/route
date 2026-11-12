@@ -39,7 +39,8 @@ func (g *gateway) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	setStaticHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(web.Index()))
+	body := bytes.ReplaceAll(web.Index(), []byte("{{ASSET_VERSION}}"), []byte(commit))
+	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(body))
 }
 
 func serveAsset(w http.ResponseWriter, r *http.Request) {

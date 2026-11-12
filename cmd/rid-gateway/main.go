@@ -28,6 +28,10 @@ const (
 	profileMotor = "motor"
 )
 
+// commit is stamped by make static through -ldflags. It also versions the
+// static asset URLs so a deploy cannot mix new HTML with cached old JS.
+var commit = "dev"
+
 type upstream struct {
 	name  string
 	base  *url.URL

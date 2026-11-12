@@ -33,6 +33,28 @@ func TestIndexServedLocally(t *testing.T) {
 	assertNoUpstream(t, hits)
 }
 
+func TestIndexAssetVersion(t *testing.T) {
+	old := commit
+	commit = "abc123"
+	t.Cleanup(func() { commit = old })
+
+	hits := make(chan hit, 1)
+	g := newTestGateway(t, hits)
+
+	res := get(t, g, "/", nil)
+	body, _ := io.ReadAll(res.Body)
+	text := string(body)
+	for _, asset := range []string{"/assets/app.css", "/assets/app.js", "/assets/vendor/leaflet/leaflet.css", "/assets/vendor/leaflet/leaflet.js"} {
+		if !strings.Contains(text, asset+"?v=abc123") {
+			t.Errorf("index does not version %s", asset)
+		}
+	}
+	if strings.Contains(text, "{{ASSET_VERSION}}") {
+		t.Errorf("index still contains the asset version placeholder")
+	}
+	assertNoUpstream(t, hits)
+}
+
 func TestStaticAssetsServedLocally(t *testing.T) {
 	hits := make(chan hit, 4)
 	g := newTestGateway(t, hits)
