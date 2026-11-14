@@ -25,11 +25,19 @@
       </div>
     </div>
 
+    <div class="search" role="search" aria-label="Cari tempat">
+      <label class="control-label" for="place-q">Cari tempat</label>
+      <input class="search-input" type="search" id="place-q" name="q" placeholder="Monas, Malioboro, Danau Toba" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="place-note">
+      <p class="search-note" id="place-note" hidden></p>
+      <ul class="place-results" id="place-results" aria-label="Hasil pencarian tempat" hidden></ul>
+    </div>
+
     <div class="points" aria-label="Titik rute">
       <div class="point">
         <span class="point-key point-key--from" aria-hidden="true">A</span>
         <span class="point-copy">
           <span class="point-role">Titik awal</span>
+          <span class="point-name" id="from-name" hidden></span>
           <span class="point-coord" id="from-coord">Belum dipilih</span>
         </span>
       </div>
@@ -37,6 +45,7 @@
         <span class="point-key point-key--to" aria-hidden="true">B</span>
         <span class="point-copy">
           <span class="point-role">Titik tujuan</span>
+          <span class="point-name" id="to-name" hidden></span>
           <span class="point-coord" id="to-coord">Belum dipilih</span>
         </span>
       </div>

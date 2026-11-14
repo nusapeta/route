@@ -157,6 +157,12 @@ gateway berjalan normal. Jangan hapus flag `-place` dari compose hanya karena
 upstream sedang mati: tanpa flag itu prefix menjawab `404` dan tidak ada
 petunjuk apa pun di log.
 
+Demo peta di `/` memakai endpoint itu: kolom "Cari tempat" mengisi titik A dan
+B tanpa perlu klik peta, dengan bias hasil ke tengah peta dan enam hasil per
+pencarian. Halaman memeriksa `/place/healthz` saat dimuat; kalau bundle mati,
+kolomnya dinonaktifkan dan petunjuk kembali ke "klik peta", jadi tidak ada
+kolom yang menjawab `404` di setiap ketikan.
+
 ```bash
 make static                                   # bin/static/rid-extract + rid-gateway
 GOMEMLIMIT=5GiB scripts/build-national.sh     # data/indonesia.graph: mobil + motor

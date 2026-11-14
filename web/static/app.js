@@ -5,6 +5,10 @@
   var PROFILE_LABELS = { mobil: "mobil", motor: "motor" };
   var AUTO_LOCATE_KEY = "routeid:auto-locate";
   var LOCATE_STATUS = "Mencari lokasi Anda...";
+  var PLACE_ROOT = "/place";
+  var PLACE_MIN_LENGTH = 2;
+  var PLACE_LIMIT = 6;
+  var PLACE_DELAY = 260;
 
   var els = {
     panel: document.querySelector(".panel"),
@@ -12,6 +16,11 @@
     status: document.getElementById("status"),
     fromCoord: document.getElementById("from-coord"),
     toCoord: document.getElementById("to-coord"),
+    fromName: document.getElementById("from-name"),
+    toName: document.getElementById("to-name"),
+    placeQuery: document.getElementById("place-q"),
+    placeNote: document.getElementById("place-note"),
+    placeResults: document.getElementById("place-results"),
     routeButton: document.getElementById("route-button"),
     resetButton: document.getElementById("reset-button"),
     shareButton: document.getElementById("share-button"),
@@ -48,6 +57,10 @@
   var locateLabel = null;
   var locatePending = false;
   var locateRequest = 0;
+  var placeTimer = 0;
+  var placeController = null;
+  var placeSequence = 0;
+  var placeUnavailable = false;
   var interaction = 0;
   var programmaticView = false;
 
@@ -117,8 +130,37 @@
     });
   });
 
+  els.placeQuery.addEventListener("input", scheduleSearch);
+  els.placeQuery.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      var term = els.placeQuery.value.trim();
+      if (term.length >= PLACE_MIN_LENGTH && !placeUnavailable) {
+        event.preventDefault();
+        window.clearTimeout(placeTimer);
+        searchPlaces(term);
+      }
+      return;
+    }
+    if (event.key !== "Escape") {
+      return;
+    }
+    els.placeQuery.value = "";
+    stopSearch();
+    closeResults();
+    setSearchNote("");
+  });
+  els.placeResults.addEventListener("click", choosePlace);
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (target && target.closest && target.closest(".search")) {
+      return;
+    }
+    closeResults();
+  });
+
   restoreFromURL();
   maybeAutoLocate();
+  probePlace();
 
   function restoreFromURL() {
     var params = new URLSearchParams(window.location.search);
@@ -332,6 +374,242 @@
     refresh();
     setStatus(nextStepText(), "neutral");
     revealInPanel(els.hint);
+  }
+
+  function probePlace() {
+    fetch(PLACE_ROOT + "/healthz", { headers: { Accept: "application/json" } })
+      .then(function (response) {
+        if (!response.ok) {
+          disableSearch("");
+        }
+      })
+      .catch(function () {
+        disableSearch("");
+      });
+  }
+
+  // The geocoder is a separate service behind the same gateway. The bundle can
+  // be switched off there, so the map treats a missing /place as "no search"
+  // instead of offering a field that answers 404 on every keystroke.
+  function scheduleSearch() {
+    if (placeUnavailable) {
+      return;
+    }
+    window.clearTimeout(placeTimer);
+    var term = els.placeQuery.value.trim();
+    if (term.length < PLACE_MIN_LENGTH) {
+      stopSearch();
+      closeResults();
+      setSearchNote("");
+      return;
+    }
+    placeTimer = window.setTimeout(function () {
+      searchPlaces(term);
+    }, PLACE_DELAY);
+  }
+
+  function searchPlaces(term) {
+    stopSearch();
+    var sequence = placeSequence;
+    var controller = new AbortController();
+    placeController = controller;
+    els.placeQuery.setAttribute("aria-busy", "true");
+    setSearchNote("Mencari tempat yang cocok dengan " + term + ".");
+
+    var center = map.getCenter();
+    var query = new URLSearchParams({
+      q: term,
+      limit: String(PLACE_LIMIT),
+      lat: center.lat.toFixed(5),
+      lon: center.lng.toFixed(5)
+    });
+
+    fetch(PLACE_ROOT + "/search?" + query.toString(), {
+      signal: controller.signal,
+      headers: { Accept: "application/json" }
+    }).then(function (response) {
+      return response.json().catch(function () {
+        return null;
+      }).then(function (body) {
+        return { response: response, body: body };
+      });
+    }).then(function (reply) {
+      if (sequence !== placeSequence) {
+        return;
+      }
+      placeController = null;
+      els.placeQuery.removeAttribute("aria-busy");
+
+      if (reply.response.status === 404) {
+        disableSearch("Pencarian tempat tidak aktif di server ini.");
+        return;
+      }
+      if (reply.response.status === 429) {
+        closeResults();
+        setSearchNote("Terlalu banyak pencarian. Tunggu sebentar lalu coba lagi.");
+        return;
+      }
+      if (!reply.response.ok) {
+        closeResults();
+        setSearchNote("Pencarian gagal. Coba lagi.");
+        return;
+      }
+      renderPlaces(reply.body, term);
+    }).catch(function (error) {
+      if (error && error.name === "AbortError") {
+        return;
+      }
+      if (sequence !== placeSequence) {
+        return;
+      }
+      placeController = null;
+      els.placeQuery.removeAttribute("aria-busy");
+      closeResults();
+      setSearchNote("Tidak bisa menghubungi pencarian tempat. Periksa koneksi.");
+    });
+  }
+
+  function renderPlaces(body, term) {
+    var hits = Array.isArray(body) ? body : [];
+    var items = [];
+
+    hits.forEach(function (hit) {
+      if (!hit || typeof hit !== "object") {
+        return;
+      }
+      var lat = Number(hit.lat);
+      var lng = Number(hit.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return;
+      }
+      var name = typeof hit.name === "string" && hit.name ? hit.name : firstSegment(hit.display_name);
+      if (!name) {
+        return;
+      }
+      items.push({
+        lat: lat,
+        lng: lng,
+        name: name,
+        context: typeof hit.display_name === "string" ? hit.display_name : ""
+      });
+    });
+
+    if (!items.length) {
+      closeResults();
+      setSearchNote("Tidak ada tempat yang cocok dengan " + term + ".");
+      return;
+    }
+
+    els.placeResults.replaceChildren();
+    items.forEach(function (item) {
+      var row = document.createElement("li");
+      row.className = "place-hit";
+
+      var text = document.createElement("span");
+      text.className = "place-hit__text";
+
+      var name = document.createElement("span");
+      name.className = "place-hit__name";
+      name.textContent = item.name;
+      text.appendChild(name);
+
+      if (item.context && item.context !== item.name) {
+        var context = document.createElement("span");
+        context.className = "place-hit__context";
+        context.textContent = item.context;
+        text.appendChild(context);
+      }
+
+      var actions = document.createElement("span");
+      actions.className = "place-hit__actions";
+      actions.appendChild(placeButton("from", "A", "Titik awal", item));
+      actions.appendChild(placeButton("to", "B", "Titik tujuan", item));
+
+      row.appendChild(text);
+      row.appendChild(actions);
+      els.placeResults.appendChild(row);
+    });
+    els.placeResults.hidden = false;
+    setSearchNote("");
+  }
+
+  function placeButton(kind, letter, role, item) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "place-set place-set--" + kind;
+    button.dataset.kind = kind;
+    button.dataset.lat = String(item.lat);
+    button.dataset.lng = String(item.lng);
+    button.dataset.label = item.name;
+    button.textContent = letter;
+    button.setAttribute("aria-label", "Jadikan " + role.toLowerCase() + ": " + item.name + ".");
+    return button;
+  }
+
+  function choosePlace(event) {
+    var button = event.target && event.target.closest ? event.target.closest("[data-kind]") : null;
+    if (!button) {
+      return;
+    }
+    var lat = Number(button.dataset.lat);
+    var lng = Number(button.dataset.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return;
+    }
+
+    var kind = button.dataset.kind === "to" ? "to" : "from";
+    var label = button.dataset.label || "";
+    // Click events with detail 0 come from the keyboard. The list is emptied
+    // after a pick, so without this the focus falls back to <body> and the
+    // next Tab starts from the top of the page.
+    var keyboard = typeof event.detail === "number" && event.detail === 0;
+    noteInteraction();
+    state[kind] = { lat: lat, lng: lng, label: label };
+    syncMarker(kind);
+    pointChanged();
+    closeResults();
+    if (keyboard) {
+      els.placeQuery.focus();
+    }
+    centerOnLocation(lat, lng);
+    setStatus(
+      (kind === "from" ? "Titik awal" : "Titik tujuan") + " diisi " + label + ". " + nextStepText(),
+      "success"
+    );
+  }
+
+  function stopSearch() {
+    placeSequence += 1;
+    window.clearTimeout(placeTimer);
+    if (placeController) {
+      placeController.abort();
+      placeController = null;
+    }
+    els.placeQuery.removeAttribute("aria-busy");
+  }
+
+  function closeResults() {
+    els.placeResults.hidden = true;
+    els.placeResults.replaceChildren();
+  }
+
+  function setSearchNote(message) {
+    els.placeNote.textContent = message || "";
+    els.placeNote.hidden = !message;
+  }
+
+  function disableSearch(message) {
+    placeUnavailable = true;
+    stopSearch();
+    els.placeQuery.disabled = true;
+    els.placeQuery.placeholder = "Pencarian tempat tidak tersedia";
+    closeResults();
+    setSearchNote(message);
+    refresh();
+  }
+
+  function firstSegment(value) {
+    return typeof value === "string" ? value.split(",")[0].trim() : "";
   }
 
   function syncMarker(kind) {
@@ -712,6 +990,10 @@
   function resetAll() {
     noteInteraction();
     cancelRequest();
+    stopSearch();
+    els.placeQuery.value = "";
+    closeResults();
+    setSearchNote("");
     state.from = null;
     state.to = null;
     state.error = false;
@@ -755,8 +1037,16 @@
   }
 
   function updatePointLabels() {
-    els.fromCoord.textContent = state.from ? formatPointLabel(state.from) : "Belum dipilih";
-    els.toCoord.textContent = state.to ? formatPointLabel(state.to) : "Belum dipilih";
+    updatePointLabel("from", els.fromCoord, els.fromName);
+    updatePointLabel("to", els.toCoord, els.toName);
+  }
+
+  function updatePointLabel(kind, coordNode, nameNode) {
+    var point = state[kind];
+    coordNode.textContent = point ? formatPointLabel(point) : "Belum dipilih";
+    var label = point && point.label ? point.label : "";
+    nameNode.textContent = label;
+    nameNode.hidden = !label;
   }
 
   function updateProfileButtons() {
@@ -781,10 +1071,14 @@
       return "Periksa titik atau coba lagi.";
     }
     if (!state.from) {
-      return "Klik peta untuk memilih titik awal.";
+      return placeUnavailable
+        ? "Klik peta untuk memilih titik awal."
+        : "Cari tempat atau klik peta untuk memilih titik awal.";
     }
     if (!state.to) {
-      return "Klik peta untuk memilih titik tujuan.";
+      return placeUnavailable
+        ? "Klik peta untuk memilih titik tujuan."
+        : "Cari tempat atau klik peta untuk memilih titik tujuan.";
     }
     if (state.result) {
       return "Klik peta untuk memulai rute baru.";
