@@ -239,13 +239,24 @@ Detail model motor dan batasnya: [`MOTOR-MODEL.md`](MOTOR-MODEL.md).
 - `?profile=mobil|motor`, default mobil;
 - `X-Route-Profile` ditambahkan;
 - `/healthz` agregat kedua profil; `/metrics` bisa diblokir;
-- menyajikan demo peta dari `web/`.
+- menyajikan demo peta dari `web/`;
+- opsional `-place`: upstream geocoder pihak lain dipasang di prefix `/place`
+  (lihat [`API.md`](API.md) dan [`OPERATIONS.md`](OPERATIONS.md)). Prefix itu
+  satu-satunya sinyal routing karena hostname publik hanya punya satu route
+  tunnel; tanpa flag ini prefix tersebut menjawab `404` seperti path asing
+  lainnya;
+- rate limit token bucket per IP khusus `/place` (default 240/menit, burst 40),
+  karena upstream geocoder memindai seluruh index dan plafon terukurnya
+  sekitar 20 RPS.
 
 ## Yang sengaja tidak ada
 
 - CH/MLD, customization, atau contraction;
 - turn-by-turn instruction, lane guidance, traffic;
-- geocoding, address parsing, POI;
+- geocoding, address parsing, POI di dalam `rid-server` dan `rid-gateway`:
+  index, builder, dan artefaknya tetap milik project lain. Gateway hanya
+  meneruskan prefix `/place` ke upstream terpisah, jadi graph routeid tidak
+  bertambah besar dan image-nya tidak berubah;
 - elevation, toll pricing, truck constraints;
 - persisted query cache (hanya ETag/HTTP cache);
 - database, message queue, sidecar.

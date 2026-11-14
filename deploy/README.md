@@ -130,6 +130,33 @@ Tanpa parameter, profil mobil yang dipakai (perilaku lama port 8080).
 `/metrics` sengaja tidak diteruskan gateway publik; scrape upstream langsung
 (bagian 3).
 
+### Bundle geocoder (opsional)
+
+Gateway bisa meneruskan satu prefix ke service lain di network yang sama. Di
+homelab, `placeid` adalah project Compose terpisah yang menyediakan geocoder
+index Indonesia:
+
+| Path publik | Upstream |
+|---|---|
+| `https://route.arifsani.xyz/route` | `routeid` / `routeid-motor` |
+| `https://route.arifsani.xyz/place/*` | `http://placeid:8090` |
+
+Prefix, bukan hostname kedua, karena hostname publik hanya punya satu route
+tunnel. Aturan yang dijaga gateway:
+
+- upstream menerima path yang didokumentasikan (`/place/search` menjadi
+  `/search`), jadi kontrak kedua service tidak berubah;
+- klien tidak punya jatah tambahan: kuota per IP terpisah untuk `/place`
+  (240/menit, burst 40) karena pencariannya memindai seluruh index;
+- `/place/metrics` ikut ditutup oleh `-block-metrics`;
+- `/healthz` tetap hanya melaporkan profil routing, jadi `placeid` yang mati
+  tidak membuat gateway dianggap gagal (gejalanya `502` di `/place/*`).
+
+Kalau container `placeid` tidak ada, `/place/*` menjawab `502` dan sisa
+gateway berjalan normal. Jangan hapus flag `-place` dari compose hanya karena
+upstream sedang mati: tanpa flag itu prefix menjawab `404` dan tidak ada
+petunjuk apa pun di log.
+
 ```bash
 make static                                   # bin/static/rid-extract + rid-gateway
 GOMEMLIMIT=5GiB scripts/build-national.sh     # data/indonesia.graph: mobil + motor

@@ -131,6 +131,19 @@ services:
       # Jangan pernah menerbitkan /metrics lewat domain publik. Monitoring
       # membaca http://127.0.0.1:18080/metrics dan :18081/metrics langsung.
       - -block-metrics
+      # Geocoder dari project Compose lain (`placeid`) di jaringan tunnel yang
+      # sama. Prefix /place adalah satu-satunya sinyal routing: hostname publik
+      # hanya punya satu route tunnel, jadi hostname kedua tidak bisa sampai ke
+      # proses ini. Kalau container placeid mati, /place menjawab 502 dan
+      # /healthz tetap 200, sehingga gateway tidak ikut dianggap gagal.
+      - -place
+      - http://placeid:8090
+      # Pencarian placeid memindai seluruh index: plafon terukurnya ~20 RPS,
+      # jadi satu klien tidak boleh menghabiskan jatah klien lain.
+      - -place-rate
+      - "240"
+      - -place-burst
+      - "40"
     # Cuma proxy: tanpa graf, tanpa tabel A*.
     mem_limit: 64m
     memswap_limit: 64m

@@ -14,7 +14,40 @@ base URL). Tidak ada autentikasi. Base URL contoh: `http://127.0.0.1:8080`.
 | `GET` | `/metrics` | Prometheus text format |
 | `GET` | `/` | demo peta (hanya gateway) |
 | `GET` | `/assets/*` | aset demo peta (hanya gateway) |
+| `GET` | `/place/*` | geocoder bundle (hanya gateway dengan `-place`) |
 | `OPTIONS` | `*` | preflight CORS |
+
+## `GET /place/*`
+
+Gateway dengan `-place` meneruskan prefix itu ke upstream geocoder terpisah
+dan membuang prefix-nya, sehingga path yang didokumentasikan upstream tetap
+berlaku apa adanya:
+
+```http
+GET /place/search?q=monas&limit=2
+GET /place/reverse?lat=-6.175392&lon=106.827153
+GET /place/lookup?osm_ids=N1308678148
+GET /place/healthz
+```
+
+| Path | Upstream melihat |
+|---|---|
+| `/place/search` | `/search` |
+| `/place/reverse` | `/reverse` |
+| `/place/lookup` | `/lookup` |
+| `/place/healthz` | `/healthz` |
+
+Aturan bundle:
+
+- `/place` saja menjawab `404`: upstream tidak punya halaman index.
+- `/place/metrics` menjawab `404` saat `-block-metrics` aktif, sama seperti
+  `/metrics`; endpoint itu memuat ukuran dan umur index.
+- Rate limit terpisah per IP (default 240/menit, burst 40) menjawab `429`
+  dengan `Retry-After`. Kuota routing tidak terpakai oleh lalu lintas geocoder.
+- `X-Forwarded-For` dan `X-Real-IP` ditimpa dari `CF-Connecting-IP`, jadi
+  klien tidak bisa memilih bucket sendiri.
+- `/healthz` hanya melaporkan profil routing. Upstream geocoder yang mati
+  membuat `/place/*` menjawab `502` tanpa membuat gateway dianggap gagal.
 
 ## `GET /route`
 

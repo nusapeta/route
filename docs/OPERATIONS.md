@@ -120,6 +120,13 @@ bin/rid-server -graph data/indonesia.graph -profile motor -addr 127.0.0.1:18081
 bin/rid-gateway -addr 127.0.0.1:8080
 ```
 
+Bundle geocoder (opsional, upstream milik project lain):
+
+```bash
+bin/rid-gateway -addr 127.0.0.1:8080 \
+  -place http://placeid:8090 -place-rate 240 -place-burst 40
+```
+
 Flag yang paling berpengaruh:
 
 | Flag | Default | Efek |
@@ -140,6 +147,17 @@ Flag yang paling berpengaruh:
 Untuk mesin kecil: `-conc 1` dan `GOMEMLIMIT=512MiB`. Untuk 2 core/4 thread,
 `-conc 4` memberi throughput lebih tinggi karena query didominasi I/O halaman
 dan GC, bukan CPU murni.
+
+Flag `rid-gateway`:
+
+| Flag | Default | Efek |
+|---|---|---|
+| `-mobil` / `-motor` | `127.0.0.1:18080` / `:18081` | upstream per profil |
+| `-default` | `mobil` | profil saat `?profile=` tidak ada |
+| `-trust-proxy` | false | ambil IP klien dari `CF-Connecting-IP` |
+| `-block-metrics` | false | `/metrics` dan `/place/metrics` menjawab `404` |
+| `-place` | kosong | upstream geocoder di prefix `/place`; kosong = bundle mati |
+| `-place-rate` / `-place-burst` | 240 / 40 | kuota per menit dan burst per IP untuk `/place` |
 
 ## Docker Compose
 
@@ -189,7 +207,11 @@ Tunnel memberi TLS di edge tanpa membuka port. Detail langkah ada di
 - gateway memegang port loopback 8080; upstream 18080/18081 tidak publik;
 - `-trust-proxy` hanya aktif di belakang proxy yang menimpa
   `X-Forwarded-For`/`CF-Connecting-IP`;
-- `/metrics` diblokir di gateway publik (`-block-metrics`);
+- `/metrics` diblokir di gateway publik (`-block-metrics`), begitu juga
+  `/place/metrics`;
+- `/place` diteruskan ke container `placeid` di jaringan tunnel yang sama;
+  kalau container itu mati, `/place/*` menjawab `502` dan `/healthz` tetap
+  `200`, jadi gateway tidak ikut dianggap gagal;
 - jangan menaruh token tunnel di repo.
 
 ## Monitoring

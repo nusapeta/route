@@ -322,3 +322,110 @@ func TestConcurrentProfilesIsolation(t *testing.T) {
 		t.Errorf("got %v, want %d each", counts, n/2)
 	}
 }
+
+func newBundleGateway(t *testing.T, hits chan hit, perMinute, burst float64) *gateway {
+	t.Helper()
+	mobil := stubUpstream(t, "mobil", hits)
+	motor := stubUpstream(t, "motor", hits)
+	place := stubUpstream(t, "place", hits)
+	g := newGateway(mobil.URL, motor.URL, profileMobil, true, true)
+	if err := g.attachPlace(place.URL, perMinute, burst); err != nil {
+		t.Fatalf("attachPlace: %v", err)
+	}
+	return g
+}
+
+// TestPlacePrefixForwarded checks the bundle exposes the geocoder under one
+// prefix without rewriting the paths it documents, and that the client address
+// still reaches it as X-Forwarded-For.
+func TestPlacePrefixForwarded(t *testing.T) {
+	hits := make(chan hit, 4)
+	g := newBundleGateway(t, hits, 600, 40)
+
+	res := get(t, g, "/place/search?q=monas&limit=2", map[string]string{"CF-Connecting-IP": "203.0.113.9"})
+	got := <-hits
+	if got.path != "/search" || got.query != "q=monas&limit=2" {
+		t.Fatalf("upstream saw %q?%q, want /search?q=monas&limit=2", got.path, got.query)
+	}
+	if got.xff != "203.0.113.9" {
+		t.Errorf("X-Forwarded-For %q, want the Cloudflare client IP", got.xff)
+	}
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("status %d, want the upstream 422", res.StatusCode)
+	}
+	if tag, want := res.Header.Get("ETag"), `"place-tag"`; tag != want {
+		t.Errorf("ETag %q, want %q", tag, want)
+	}
+}
+
+// TestPlaceMetricsBlocked keeps the index size and age off the public listener.
+func TestPlaceMetricsBlocked(t *testing.T) {
+	hits := make(chan hit, 1)
+	g := newBundleGateway(t, hits, 600, 40)
+
+	res := get(t, g, "/place/metrics", nil)
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", res.StatusCode)
+	}
+	if len(hits) != 0 {
+		t.Fatal("blocked metrics reached the geocoder")
+	}
+}
+
+// TestPlaceDisabledIs404 checks the bundle is opt-in: without -place the prefix
+// does not exist, so an operator who does not want a geocoder gets no route.
+func TestPlaceDisabledIs404(t *testing.T) {
+	hits := make(chan hit, 1)
+	g := newTestGateway(t, hits)
+
+	res := get(t, g, "/place/search?q=monas", nil)
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", res.StatusCode)
+	}
+	if len(hits) != 0 {
+		t.Fatal("a request without the bundle reached an upstream")
+	}
+}
+
+// TestPlacePrefixBoundary checks /placement is a routing path, not a geocoder
+// path: only the exact prefix and its subpaths may leave the profile chain.
+func TestPlacePrefixBoundary(t *testing.T) {
+	hits := make(chan hit, 1)
+	g := newBundleGateway(t, hits, 600, 40)
+
+	get(t, g, "/placement?q=1", nil)
+	got := <-hits
+	if got.path != "/placement" {
+		t.Fatalf("upstream path %q, want /placement", got.path)
+	}
+}
+
+// TestPlaceRateLimited protects the linear scan: one client cannot spend the
+// budget of the others, and the refusal must not reach the geocoder.
+func TestPlaceRateLimited(t *testing.T) {
+	hits := make(chan hit, 4)
+	g := newBundleGateway(t, hits, 6, 1)
+	hdr := map[string]string{"CF-Connecting-IP": "198.51.100.7"}
+
+	if res := get(t, g, "/place/search?q=monas", hdr); res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("first request status %d, want the upstream 422", res.StatusCode)
+	}
+	<-hits
+
+	res := get(t, g, "/place/search?q=monas", hdr)
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status %d, want 429", res.StatusCode)
+	}
+	if res.Header.Get("Retry-After") == "" {
+		t.Error("429 without Retry-After")
+	}
+	if len(hits) != 0 {
+		t.Fatal("rate-limited request reached the geocoder")
+	}
+
+	// Another client keeps its own bucket.
+	other := map[string]string{"CF-Connecting-IP": "198.51.100.8"}
+	if res := get(t, g, "/place/search?q=monas", other); res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("second client status %d, want the upstream 422", res.StatusCode)
+	}
+}

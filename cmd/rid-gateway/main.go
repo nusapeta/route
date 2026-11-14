@@ -26,6 +26,10 @@ import (
 const (
 	profileMobil = "mobil"
 	profileMotor = "motor"
+	// placePrefix is the path the bundled geocoder answers under. The prefix is
+	// the only routing signal available: the public hostname is a single tunnel
+	// route, so a second hostname cannot reach this process.
+	placePrefix = "/place"
 )
 
 // commit is stamped by make static through -ldflags. It also versions the
@@ -40,8 +44,13 @@ type upstream struct {
 
 type gateway struct {
 	mobil, motor *upstream
+	// place is nil unless -place is set: the bundle is opt-in, so a gateway
+	// started without it behaves exactly as before.
+	place        *upstream
+	placeLimit   *limiter
 	def          string
 	client       *http.Client
+	tr           *http.Transport
 	trustProxy   bool
 	blockMetrics bool
 }
@@ -53,12 +62,20 @@ func main() {
 	def := flag.String("default", profileMobil, "profile served when the request has no profile parameter")
 	trustProxy := flag.Bool("trust-proxy", false, "take the client IP from CF-Connecting-IP or X-Forwarded-For (only behind a trusted proxy)")
 	blockMetrics := flag.Bool("block-metrics", false, "answer /metrics with 404 instead of proxying it")
+	place := flag.String("place", "", "geocoder upstream mounted at /place; empty disables the bundle")
+	placeRate := flag.Float64("place-rate", 240, "requests per minute per IP for /place (0 disables the limiter)")
+	placeBurst := flag.Float64("place-burst", 40, "burst allowance per IP for /place")
 	flag.Parse()
 
 	if *def != profileMobil && *def != profileMotor {
 		log.Fatalf("-default must be %q or %q", profileMobil, profileMotor)
 	}
 	g := newGateway(*mobil, *motor, *def, *trustProxy, *blockMetrics)
+	if *place != "" {
+		if err := g.attachPlace(*place, *placeRate, *placeBurst); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -70,6 +87,9 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 	log.Printf("gateway on %s: default %s, mobil %s, motor %s", *addr, *def, g.mobil.base, g.motor.base)
+	if g.place != nil {
+		log.Printf("bundle: %s -> place %s", placePrefix, g.place.base)
+	}
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -84,6 +104,7 @@ func newGateway(mobil, motor, def string, trustProxy, blockMetrics bool) *gatewa
 	g := &gateway{
 		def:          def,
 		client:       &http.Client{Timeout: 15 * time.Second},
+		tr:           tr,
 		trustProxy:   trustProxy,
 		blockMetrics: blockMetrics,
 	}
@@ -135,6 +156,42 @@ func newGateway(mobil, motor, def string, trustProxy, blockMetrics bool) *gatewa
 	return g
 }
 
+// attachPlace mounts the geocoder upstream at /place. It is separate from the
+// profile upstreams because the geocoder has no profiles: the path prefix is
+// the only routing signal, and it leaves the documented paths of both services
+// unchanged under one public base URL.
+func (g *gateway) attachPlace(raw string, perMinute, burst float64) error {
+	base, err := url.Parse(raw)
+	if err != nil || base.Host == "" {
+		return fmt.Errorf("place upstream %q is not a URL", raw)
+	}
+	up := &upstream{name: "place", base: base}
+	up.proxy = &httputil.ReverseProxy{
+		Transport: g.tr,
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(base)
+			// Same rule as the profile upstreams: a client-supplied forwarding
+			// header must not survive the hop, or it could pick its own bucket.
+			pr.Out.Header.Del("X-Forwarded-For")
+			pr.Out.Header.Del("X-Real-IP")
+			pr.SetXForwarded()
+			if g.trustProxy {
+				if ip := forwardedClientIP(pr.In.Header); ip != "" {
+					pr.Out.Header.Set("X-Forwarded-For", ip)
+					pr.Out.Header.Set("X-Real-IP", ip)
+				}
+			}
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("place upstream: %v", err)
+			writeError(w, http.StatusBadGateway, "upstream unavailable")
+		},
+	}
+	g.place = up
+	g.placeLimit = newLimiter(perMinute, burst)
+	return nil
+}
+
 // forwardedClientIP reads the address a trusted proxy put in front of the
 // request. Cloudflare Tunnel sets CF-Connecting-IP; other proxies only set
 // X-Forwarded-For. Invalid values fall back to the transport address, because
@@ -164,6 +221,10 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if g.serveStatic(w, r) {
 		return
 	}
+	if r.URL.Path == placePrefix || strings.HasPrefix(r.URL.Path, placePrefix+"/") {
+		g.servePlace(w, r)
+		return
+	}
 	if g.blockMetrics && r.URL.Path == "/metrics" {
 		http.NotFound(w, r)
 		return
@@ -183,6 +244,44 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	stripProfile(r)
 	up.proxy.ServeHTTP(w, r)
+}
+
+// servePlace strips the bundle prefix and forwards the path the geocoder
+// documents. /place/metrics is closed here for the same reason the routing
+// metrics are: it publishes index size and age, and this is the public
+// listener. The bare prefix answers 404 because the geocoder has no index page.
+func (g *gateway) servePlace(w http.ResponseWriter, r *http.Request) {
+	if g.place == nil || r.URL.Path == placePrefix {
+		http.NotFound(w, r)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, placePrefix)
+	if g.blockMetrics && rest == "/metrics" {
+		http.NotFound(w, r)
+		return
+	}
+	if !g.placeLimit.allowRequest(w, r, g.clientKey(r)) {
+		return
+	}
+	r.URL.Path = rest
+	r.URL.RawPath = ""
+	g.place.proxy.ServeHTTP(w, r)
+}
+
+// clientKey identifies the caller for the /place bucket. Behind the tunnel the
+// real address is in CF-Connecting-IP; trusting it is opt-in, because on a
+// public listener anyone can forge it.
+func (g *gateway) clientKey(r *http.Request) string {
+	if g.trustProxy {
+		if ip := forwardedClientIP(r.Header); ip != "" {
+			return ip
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (g *gateway) pick(name string) *upstream {
