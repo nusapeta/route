@@ -1,6 +1,6 @@
 module github.com/nusapeta/route
 
-go 1.27.3
+go 1.27.4
 
 require github.com/paulmach/osm v0.9.0
 
