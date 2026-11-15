@@ -795,7 +795,7 @@
     var group = L.layerGroup();
     var casing = L.geoJSON(body.geojson, {
       style: {
-        color: "#fffdf8",
+        color: "#ffffff",
         weight: 8,
         opacity: 0.9,
         lineCap: "round",
@@ -804,7 +804,7 @@
     });
     var line = L.geoJSON(body.geojson, {
       style: {
-        color: "#0b5d45",
+        color: "#0f5b7a",
         weight: 4,
         opacity: 1,
         lineCap: "round",
@@ -837,7 +837,7 @@
       [point.lat, point.lng],
       [lat, lng]
     ], {
-      color: "#556057",
+      color: "#5a6b7b",
       weight: 2,
       opacity: 0.85,
       dashArray: "3 6"
