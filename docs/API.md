@@ -235,8 +235,8 @@ kosong untuk graph lama. Gateway mengubah bentuknya:
 {
   "ok": true,
   "profiles": {
-    "mobil": {"ok": true, "status": 200, "body": { ... }},
-    "motor": {"ok": true, "status": 200, "body": { ... }}
+    "mobil": {"ok": true, "status": 200, "upstream": { ... }},
+    "motor": {"ok": true, "status": 200, "upstream": { ... }}
   }
 }
 ```

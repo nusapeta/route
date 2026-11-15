@@ -1,105 +1,123 @@
 # Nusapeta Route
 
-**Router jalan Indonesia yang muat di sidecar.** Satu binary Go, graph OSM
-`mmap`, weighted A*, tanpa dependency runtime.
+**An OpenStreetMap road router for Indonesia that fits in a sidecar.** One Go
+binary, a memory-mapped graph, weighted A*, no runtime dependencies.
 
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Data](https://img.shields.io/badge/data-ODbL-green)](https://www.openstreetmap.org/copyright)
-[![Status](https://img.shields.io/badge/status-research%20preview-orange)](#batasan)
+[![Status](https://img.shields.io/badge/status-research%20preview-orange)](#limitations)
 
-> **English:** Nusapeta Route is a memory-mapped OpenStreetMap router for Indonesia.
-> It compiles an `.osm.pbf` into one binary graph and serves short-to-medium
-> routes over HTTP. The design target is cost per route — RAM, artifact size,
-> and rebuild time — not raw query latency.
+[Bahasa Indonesia](README.id.md) | English
 
-## Kenapa
+## Why
 
-Aplikasi ride-hailing, logistik, dan field service biasanya hanya butuh dua
-koordinat, satu polyline yang mengikuti jalan, jarak, dan ETA kasar untuk rute
-≤100 km. Hosted Directions API membebankan biaya per request. OSRM, GraphHopper,
-dan Valhalla gratis per request, tetapi dirancang untuk query panjang dan
-memakai RAM ratusan MB sampai beberapa GB.
+Ride-hailing, logistics, and field-service apps usually need two coordinates, a
+polyline that follows roads, distance, and a rough ETA for routes up to 100 km.
+Hosted Directions APIs charge per request. OSRM, GraphHopper, and Valhalla are
+free per request, but target long queries and hold hundreds of MB to several GB
+of RAM.
 
-Nusapeta Route mengambil trade-off sebaliknya:
+Nusapeta Route takes the opposite trade-off:
 
-- **Graph dipetakan, bukan disalin ke heap.** Halaman yang tidak disentuh tidak
-  masuk RSS; graph nasional 1,6 GB tetap bisa idle di 11 MB.
-- **Satu artefak untuk mobil dan motor.** Format v5 menyimpan dua tabel kelas
-  kecepatan dan dua set turn restriction dalam satu file.
-- **Rebuild murah.** Ekstraksi Java 28 detik di mesin uji; graph nasional 1
-  menit 12 detik setelah PBF tersedia.
-- **Hasil bisa diaudit.** `/healthz` membawa provenance PBF, versi format,
-  jumlah node/edge, dan statistik restriction.
+- **The graph is mapped, not copied to the heap.** Untouched pages stay out of
+  RSS. The 1.6 GB national graph idles at 11 MB; the Java graph used in E1 idles
+  at 17 MB.
+- **One artifact serves cars and motorcycles.** Format v5 stores two speed-class
+  tables and two turn-restriction sets in one file.
+- **Rebuilds are cheap.** The Java extract takes 28 s on the test machine; the
+  national graph takes 1 min 12 s once the PBF is available.
+- **Results are auditable.** `/healthz` reports the PBF provenance, format
+  version, node/edge counts, and restriction statistics.
 
-Trade-off-nya nyata: tanpa hierarki CH/MLD, Nusapeta Route **bukan** engine tercepat.
-Pada E1, OSRM MLD sekitar 26× lebih cepat di p50. Keunggulan Nusapeta Route ada di
-memori, ukuran artefak, dan preprocessing.
+The trade-off is real: without CH/MLD hierarchy, Nusapeta Route is **not** the
+fastest engine. On E1, OSRM MLD is about 26× faster at p50. Nusapeta Route wins
+on memory, artifact size, and preprocessing.
 
-## Snapshot terukur
+## Measured snapshot
 
-E1: Java, mesin yang sama (Ryzen 5 5600G), PBF yang sama, 600 pasangan identik.
-Angka lengkap dan perintah reproduksi ada di
-[`paper/RESULTS.md`](paper/RESULTS.md) §13 dan §18.
+E1: Java, same machine (Ryzen 5 5600G), same PBF, 600 identical pairs. Full
+numbers and reproduction commands are in [`paper/RESULTS.md`](paper/RESULTS.md)
+§13 and §18.
 
-| | Nusapeta Route (Java, E1) | OSRM MLD v5.26.0 |
-|---|---:|---:|
-| Graph di disk | **693 MB** (1 file) | 5,08 GB (banyak file) |
-| RSS sebelum query | **17 MB** | 2,36 GiB |
-| Preprocess | **28 s** | 250 s (peak 6,25 GB) |
-| p50, 332 pasangan cocok | 38,7 ms | **1,5 ms** |
-| p95, 332 pasangan cocok | 674 ms | **3,7 ms** |
-| Selisih jarak, 332 pasang | median 0,23%, p95 14,49%, max 70,44% | referensi |
-| Gagal / dibuang | 79 gagal (72 `snap`, 7 `budget`); 189 dibuang filter snap | — |
+| Metric | Nusapeta Route (Java, E1) | OSRM MLD v5.26.0 | Winner |
+|---|---:|---:|---|
+| Graph on disk | **693 MB** (1 file) | 5.08 GB (many files) | Nusapeta |
+| RSS before queries | **17 MB** | 2.36 GiB | Nusapeta |
+| Preprocess | **28 s** | 250 s (peak 6.25 GB) | Nusapeta |
+| p50, 332 matched pairs | 38.7 ms | **1.5 ms** | OSRM |
+| p95, 332 matched pairs | 674 ms | **3.7 ms** | OSRM |
+| Distance delta, 332 pairs | median 0.23%, p95 14.49%, max 70.44% | reference | not an accuracy claim |
+| Failed / discarded | 79 failed (72 `snap`, 7 `budget`); 189 discarded by snap filter | n/a | n/a |
 
-E1 adalah perbandingan antar-engine, **bukan validasi akurasi**: keduanya
-memakai graph OSM. Ground truth independen (E2) tidak dijalankan. Karena itu
-README ini tidak mengklaim "paling akurat".
+E1 compares two engines on the same OSM graph. It is **not** an accuracy
+validation: no independent ground truth (E2) was run, and the accuracy gate
+failed (median 0.23%, p95 14.49%). This README does not claim "most accurate".
 
-Graph nasional saat ini:
+Current national graph:
 
-| metrik | nilai |
+| Metric | Value |
 |---|---:|
-| Node / edge | 54.891.393 / 112.340.071 |
+| Nodes / edges | 54,891,393 / 112,340,071 |
 | Format | v5 `car+motor`, Hilbert order |
-| Artefak | 1.621 MB |
-| Idle RSS | 11,1 MB (`RssAnon` 4,5 MB) |
-| 4× rute 96 km paralel | 225 MiB RSS (`anon` 90 MiB) |
-| Build | 11m40s termasuk unduh; ekstraksi 1m12s |
+| Artifact | 1,621 MB |
+| Idle RSS | 11.1 MB (`RssAnon` 4.5 MB) |
+| 4× 96 km routes in parallel | 225 MiB RSS (`anon` 90 MiB) |
+| Build | 11m40s including download; extraction 1m12s |
 
-Beban 600 pasangan Jawa dengan batas 100 km di Ryzen: 481 sukses, p50 39–47 ms,
-p95 0,94–1,32 s. Di i3-6100T: 472 sukses; 72 gagal snap, 40 `too_far`, 16
-`budget`. Detail dan batas klaim ada di
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+Java workload, 600 pairs, 100 km cap on the Ryzen: 481 successful, p50 39–47 ms,
+p95 0.94–1.32 s. On an i3-6100T: 472 successful; 72 snap failures, 40 `too_far`,
+16 `budget`. Details and claim limits: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
-## Quick start
+## Quick start from the release artifact
 
-Butuh Go 1.27+ dan `make`.
+Requires Docker, curl, zstd, and sha256sum.
 
 ```bash
-git clone https://github.com/nusapeta/route.git
-cd route
+mkdir -p route-data && cd route-data
+base=https://github.com/nusapeta/route/releases/download/data-2026.11
+curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst"
+curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst.sha256"
+sha256sum -c indonesia-v5-2026.11.graph.zst.sha256
+zstd -d indonesia-v5-2026.11.graph.zst
 
-make build                 # semua binary ke bin/
-make java                  # unduh PBF Jawa + build data/java.graph
-bin/nusa-serve -graph data/java.graph -addr 127.0.0.1:8080
+docker run --rm -p 127.0.0.1:8080:8080 -v "$PWD:/data:ro" \
+  ghcr.io/nusapeta/route:0.1.0 \
+  -graph /data/indonesia-v5-2026.11.graph -addr :8080
 ```
 
-Di terminal lain:
+In another terminal:
 
 ```bash
 curl -s 'http://127.0.0.1:8080/route?from=-6.1754,106.8272&to=-6.5950,106.8166&format=polyline' \
   | jq '{distance_m, duration_s, points_n, snap_from, snap_to}'
 ```
 
-Graph nasional (butuh ±1,7 GB PBF dan ±5 GB RAM saat build):
+The national download is 552 MB compressed, 1.6 GB decompressed. The Java-only
+asset is 228 MB compressed, 693 MB decompressed. The combined routing and
+geocoding stack lives in [`nusapeta/stack`](https://github.com/nusapeta/stack).
+
+## Build from source
+
+Requires Go 1.27.4+ and `make`.
+
+```bash
+git clone https://github.com/nusapeta/route.git
+cd route
+
+make build                 # all binaries into bin/
+make java                  # download the Java PBF + build data/java.graph
+bin/nusa-serve -graph data/java.graph -addr 127.0.0.1:8080
+```
+
+National graph (about 1.7 GB PBF and 5 GB RAM during the build):
 
 ```bash
 GOMEMLIMIT=5GiB scripts/build-national.sh
 bin/nusa-serve -graph data/indonesia.graph -addr 127.0.0.1:8080
 ```
 
-Dua profil di satu base URL memakai `nusa-gateway`:
+Two profiles on one base URL:
 
 ```bash
 bin/nusa-serve -graph data/indonesia.graph -profile car   -addr 127.0.0.1:18080
@@ -108,7 +126,7 @@ bin/nusa-gateway -addr 127.0.0.1:8080
 curl '127.0.0.1:8080/route?...&profile=motor'
 ```
 
-## Arsitektur
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -120,41 +138,43 @@ flowchart LR
   GW --> SRV
 ```
 
-- **Ekstraksi sekali, query berkali-kali.** `nusa-extract` membaca PBF, menulis
-  header + section ter-align, lalu server membuka file dengan `mmap`.
-- **Node adalah node OSM.** Geometri jalan tidak disederhanakan; tidak ada tabel
-  shape point terpisah.
-- **CSR + fixed point.** `Off`/`To` 32-bit, `Len` 16-bit satuan 4 m, `Cls`/`MCls`
-  8-bit (km/h × 2), koordinat 1e-7. Satu edge 8 B; satu node 12 B.
-- **Hilbert ordering.** Node diurutkan secara geografis agar frontier A* tetap
-  page-local.
-- **Edge-based A*.** State adalah edge yang baru dilewati, sehingga turn
-  restriction `(edge masuk, edge keluar)` bisa ditegakkan tanpa tabel dense.
-- **Snap ke ruas.** Titik diproyeksikan ke segmen, lalu hasil dir trimming atau
-  diberi spur; polyline mulai dan berakhir di jalan.
-- **Dua profil, satu graph.** Mobil dan motor punya tabel kelas dan restriction
-  sendiri; proses server memilih salah satu lewat `-profile`.
+- **Extract once, query many times.** `nusa-extract` reads the PBF, writes an
+  aligned header plus sections, and the server maps the file read-only.
+- **OSM nodes stay OSM nodes.** Road geometry is not simplified; there is no
+  separate shape-point table.
+- **CSR plus fixed point.** `Off`/`To` are 32-bit, `Len` is 16-bit in 4 m units,
+  `Cls`/`MCls` are 8-bit (km/h × 2), coordinates are 1e-7. One edge is 8 B; one
+  node is 12 B.
+- **Hilbert ordering.** Nodes are ordered geographically so the A* frontier
+  stays page-local.
+- **Edge-based A*.** The state is the edge just traversed, so
+  `(incoming edge, outgoing edge)` turn restrictions can be enforced without a
+  dense table.
+- **Snap to segments.** Points are projected onto segments; the result is
+  trimmed or given a spur, and the polyline starts and ends on a road.
+- **Two profiles, one graph.** Cars and motorcycles have separate class tables
+  and restrictions; each server process selects one with `-profile`.
 
-Detail format, invarian, dan alasan desain:
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Format invariants and design rationale: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+and the English copy at [`docs/en/ARCHITECTURE.md`](docs/en/ARCHITECTURE.md).
 
-## API singkat
+## API at a glance
 
-| Endpoint | Guna |
+| Endpoint | Purpose |
 |---|---|
-| `GET /route?from=lat,lng&to=lat,lng` | rute; `format=json\|points\|geojson\|polyline` |
-| `POST /route` | body JSON `{from,to,format,simplify,restrictions,pin}` |
-| `GET /healthz` | kesiapan + provenance graph |
+| `GET /route?from=lat,lng&to=lat,lng` | route; `format=json\|points\|geojson\|polyline` |
+| `POST /route` | JSON body `{from,to,format,simplify,restrictions,pin}` |
+| `GET /healthz` | readiness + graph provenance |
 | `GET /version` | commit, build time, Go/OS/arch |
-| `GET /metrics` | Prometheus (biasanya hanya upstream internal) |
-| `GET /` | demo peta di `nusa-gateway` |
+| `GET /metrics` | Prometheus (normally internal) |
+| `GET /` | map demo on `nusa-gateway` |
 
-Parameter penting: `simplify=<meter>`, `pin=1` (garis menyambung pin mentah),
-`restrictions=0` (matikan enforcement untuk debug), `profile=mobil|motor`
-(hanya di gateway). Error `422`/`504` membawa `reason`:
-`snap`, `too_far`, `budget`, `no_route`, `cross_region`, `deadline`.
+Important parameters: `simplify=<meters>`, `pin=1` (connect raw pins),
+`restrictions=0` (disable enforcement for debugging), `profile=mobil|motor`
+(gateway only). `422`/`504` responses carry a `reason`: `snap`, `too_far`,
+`budget`, `no_route`, `cross_region`, `deadline`.
 
-Contoh respons:
+Example response:
 
 ```json
 {
@@ -171,114 +191,75 @@ Contoh respons:
 }
 ```
 
-Kontrak lengkap, cache/ETag, rate limit, dan integrasi Flutter:
+Full contract, caching/ETag, rate limits, and Flutter integration:
+[`docs/en/API.md`](docs/en/API.md). The canonical contract remains
 [`docs/API.md`](docs/API.md).
 
-## Build dan operasi
+## Build and operations
 
-| Perintah | Guna |
+| Command | Purpose |
 |---|---|
-| `make build` | semua binary ke `bin/` |
-| `make static` | binary statis untuk image Alpine |
-| `make test` | `go vet` + seluruh test |
-| `make java` / `make sumatra` | unduh + build satu region |
-| `make islands` | tujuh region Geofabrik |
-| `make refresh REGION=java` | unduh ulang, build, tagstats, test, A/B |
-| `scripts/build-national.sh` | satu graph Indonesia (v5) |
-| `scripts/smoke.sh <base-url>` | smoke test HTTP |
+| `make build` | all binaries into `bin/` |
+| `make static` | static binaries for the Alpine image |
+| `make test` | `go vet` + all tests |
+| `make java` / `make sumatra` | download + build one region |
+| `make islands` | seven Geofabrik regions |
+| `make refresh REGION=java` | re-download, build, tagstats, test, A/B |
+| `scripts/build-national.sh` | one Indonesia graph (v5) |
+| `scripts/smoke.sh <base-url>` | HTTP smoke test |
 
-Deploy Docker Compose, systemd, Cloudflare Tunnel, refresh graph, dan batas
-memori: [`docs/OPERATIONS.md`](docs/OPERATIONS.md) dan
-[`deploy/README.md`](deploy/README.md).
+Docker Compose, systemd, Cloudflare Tunnel, graph refresh, and memory limits:
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md) and [`deploy/README.md`](deploy/README.md).
 
-**Keamanan:** server tidak punya autentikasi. Bind ke loopback dan taruh di
-belakang reverse proxy/TLS; rate limit per IP aktif secara default
-(`-rate 15 -burst 5`). Jangan expose `/metrics` ke publik.
+**Security:** the server has no authentication. Bind it to loopback and put it
+behind a reverse proxy/TLS; per-IP rate limiting is on by default
+(`-rate 15 -burst 5`). Never expose `/metrics` publicly.
 
-## Struktur repo
+## Limitations
 
-```text
-cmd/nusa-extract      PBF -> .graph (offline, bulanan)
-cmd/nusa-serve       HTTP /route, /healthz, /version, /metrics
-cmd/nusa-gateway      satu base URL, ?profile=mobil|motor
-cmd/nusa-route        CLI satu rute untuk debug
-cmd/nusa-graphinfo    inspeksi header, snap, scan lubang data
-cmd/nusa-restats      census restriction per profil langsung dari PBF
-cmd/nusa-bench        benchmark latency/akurasi
-cmd/nusa-restcheck    harness kepatuhan turn restriction
-cmd/nusa-tagstats     census tag way untuk profil motor
-cmd/nusa-snapcheck    ukur galat snapping
+- **No accuracy claim.** E2 (independent ground truth) was not run. E1 compares
+  Nusapeta Route with OSRM on the same OSM graph; the p95 distance delta is
+  14.49% and the maximum is 70.44%.
+- **No real-time traffic.** Speeds are static per road class; ETA is not
+  congestion prediction. `restriction:conditional` is parsed but not evaluated.
+- **No hierarchy.** Routes over 100 km are rejected with `422 too_far` by
+  default. With `-max-route-km 0`, very long corridors use staged epsilon and
+  may be slow or return `relaxed=true`.
+- **Large national graph.** The artifact is 1.6 GB; a build needs about 5 GB
+  RAM. Touched mmap pages still count toward RSS, although the cgroup can
+  reclaim them.
+- **OSM data is imperfect.** New roads, access rules, and ferries can differ
+  from the field. Always display "© OpenStreetMap contributors".
 
-internal/extract     parsing OSM, profil, restriction, Hilbert ordering
-internal/graph       format biner, mmap, snapping, A*, workspace
-internal/stats       helper statistik
+## Documentation
 
-docs/                arsitektur, API, operasi, benchmark, roadmap, backlog
-paper/               draf ACM, RESULTS.md, ledger klaim, data mentah
-scripts/             fetch, build nasional, smoke, load test, harness OSRM
-web/                 demo peta yang di-embed ke gateway
-```
-
-## Test dan benchmark
-
-```bash
-make test
-go test ./internal/graph -run TestGoldenRoutes
-scripts/smoke.sh http://127.0.0.1:8080
-
-bin/nusa-bench -graph data/java.graph -pairs paper/results/pairs-java.csv
-scripts/loadtest.py http://127.0.0.1:8080 \
-  -from -7.8435,110.3929 -to -7.7393,110.3760 -c 4 -n 32
-```
-
-Golden test memakai kota sintetis 30×30 dan 48 pasangan node + 48 pasangan snap,
-jadi perubahan profil, snapping, atau A* yang tidak disengaja langsung terlihat.
-Metodologi dan angka kanonik: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
-
-## Batasan
-
-- **Tidak ada klaim akurasi.** E2 (ground truth independen) tidak dijalankan.
-  E1 hanya membandingkan Nusapeta Route dengan OSRM pada graph OSM yang sama; p95
-  selisih jarak 14,49% dan maksimum 70,44%.
-- **Tanpa traffic real-time.** Kecepatan statis per kelas jalan; ETA bukan
-  prediksi kemacetan. `restriction:conditional` dihitung tetapi tidak
-  dievaluasi.
-- **Tanpa hierarki.** Rute >100 km ditolak `422 too_far` secara default. Dengan
-  `-max-route-km 0`, koridor sangat panjang memakai epsilon bertingkat dan bisa
-  lambat atau `relaxed=true`.
-- **Graph nasional besar.** Artefak 1,6 GB; build butuh ±5 GB RAM. Halaman
-  `mmap` yang tersentuh tetap masuk RSS, walaupun bisa direklaim cgroup.
-- **Data OSM tidak sempurna.** Jalan baru, akses, dan ferry bisa berbeda dari
-  kondisi lapangan. Selalu tampilkan atribusi "© OpenStreetMap contributors".
-
-## Dokumentasi
-
-| Dokumen | Isi |
+| Document | Content |
 |---|---|
-| [`docs/README.md`](docs/README.md) | indeks dokumen dan status |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | format graph, A*, snap, restriction, profil |
-| [`docs/API.md`](docs/API.md) | HTTP API, error, cache, Flutter |
-| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | build, refresh, deploy, kapasitas, keamanan |
-| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | metodologi dan angka kanonik |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | north star, budget, milestone, non-goals |
-| [`docs/BACKLOG.md`](docs/BACKLOG.md) | pekerjaan aktif dan alasan item ditunda |
-| [`docs/MOTOR-MODEL.md`](docs/MOTOR-MODEL.md) | batas model motor |
-| [`paper/README.md`](paper/README.md) | status draf paper dan cara compile |
-| [`paper/RESULTS.md`](paper/RESULTS.md) | semua pengukuran + reproduksi |
+| [`docs/README.md`](docs/README.md) | document index and status |
+| [`docs/en/QUICKSTART.md`](docs/en/QUICKSTART.md) | release artifact to first route |
+| [`docs/en/API.md`](docs/en/API.md) | English HTTP API contract |
+| [`docs/en/ARCHITECTURE.md`](docs/en/ARCHITECTURE.md) | English architecture copy |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | graph format, A*, snap, restrictions, profiles |
+| [`docs/API.md`](docs/API.md) | canonical HTTP API, errors, cache, Flutter |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | build, refresh, deploy, capacity, security |
+| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | methodology and canonical numbers |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | north star, budget, milestones, non-goals |
+| [`paper/RESULTS.md`](paper/RESULTS.md) | every measurement + reproduction |
 
 ## Paper
 
-Draf short paper ACM (`acmart`, `sigconf`, `nonacm`) ada di
-[`paper/main.tex`](paper/main.tex). Status: **draf lengkap, E1 selesai, E2
-dilewati dengan limitation eksplisit.** Paper belum submitted.
+The ACM short-paper draft (`acmart`, `sigconf`, `nonacm`) is in
+[`paper/main.tex`](paper/main.tex). Status: **complete draft, E1 done, E2
+skipped with an explicit limitation.** Not submitted.
 
 ```bash
 cd paper
 pdflatex main && bibtex main && pdflatex main && pdflatex main
 ```
 
-## Lisensi dan atribusi
+## License and attribution
 
-Kode: [MIT](LICENSE). Data: © OpenStreetMap contributors, ODbL. File `.graph`
-adalah turunan database OSM dan tetap ODbL. Aplikasi yang memakai Nusapeta Route wajib
-menampilkan atribusi OpenStreetMap.
+Code: [MIT](LICENSE). Data: © OpenStreetMap contributors, ODbL. `.graph` files
+are derived from the OSM database and remain ODbL; see
+[`LICENSE-DATA`](LICENSE-DATA). Applications using Nusapeta Route must display
+OpenStreetMap attribution.
