@@ -47,12 +47,26 @@ archives:
 checksum:
   name_template: SHA256SUMS
 changelog:
-  use: github
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^chore:"
+  # The repository history is not a changelog: the first tag would list every
+  # commit ever made, including merge commits that name internal branches.
+  # CHANGELOG.md is written for readers and is the release body.
+  disable: true
 release:
   draft: false
   prerelease: auto
+  header: |
+    First public release of Nusapeta Route 0.1.0.
+
+    Release notes: [`CHANGELOG.md`](https://github.com/nusapeta/route/blob/v0.1.0/CHANGELOG.md).
+    Data artifacts are published separately under the `data-2026.11` tag.
+
+    Verification:
+
+    ```bash
+    sha256sum -c SHA256SUMS
+    tar xzf nusapeta-route_0.1.0_linux_amd64.tar.gz
+    ./nusa-serve -graph <graph-file> -addr 127.0.0.1:8080
+    ```
+
+    OSM-derived data is ODbL 1.0, © OpenStreetMap contributors; see
+    `LICENSE-DATA`. The code is MIT.
