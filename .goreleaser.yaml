@@ -1,0 +1,58 @@
+version: 2
+project_name: nusapeta-route
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - id: nusa-serve
+    main: ./cmd/nusa-serve
+    binary: nusa-serve
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.commit={{ .Commit }} -X main.buildTime={{ .Date }}
+  - id: nusa-gateway
+    main: ./cmd/nusa-gateway
+    binary: nusa-gateway
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.commit={{ .Commit }}
+  - id: nusa-extract
+    main: ./cmd/nusa-extract
+    binary: nusa-extract
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/nusapeta/route/internal/extract.Version={{ .Version }}
+  - id: nusa-route
+    main: ./cmd/nusa-route
+    binary: nusa-route
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+  - id: nusa-graphinfo
+    main: ./cmd/nusa-graphinfo
+    binary: nusa-graphinfo
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+checksum:
+  name_template: SHA256SUMS
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+release:
+  draft: false
+  prerelease: auto

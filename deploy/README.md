@@ -275,8 +275,8 @@ METRICS_BASE=http://127.0.0.1:18080 scripts/smoke.sh https://${PUBLIC_HOST}
 `metrics: 404` dan `LAN` gagal/connection refused adalah hasil yang benar.
 Kalau `cloudflared` restart terus: token salah/kedaluwarsa, atau host tidak bisa
 keluar ke Cloudflare port `7844`. Kalau domain 502: untuk tunnel compose cek
-`docker compose --profile cloudflare ps`; untuk tunnel 1Panel cek
-`docker logs --tail 50 cloudflared-tunnel`. Log
+`docker compose --profile cloudflare ps`; untuk tunnel yang berjalan di luar
+Compose cek `docker logs --tail 50 <container-tunnel>`. Log
 `lookup gateway ... no such host` berarti cloudflared dan gateway tidak berada
 di network Docker yang sama; pakai `examples/homelab/docker-compose.override.yml` di atas.
 
@@ -393,7 +393,7 @@ publik.
 
 Server ini **tanpa autentikasi**, `Access-Control-Allow-Origin: *`, dan rate
 limit per IP aktif secara default (`-rate 15 -burst 5`, lihat M4 di bawah).
-Untuk homelab:
+Untuk host satu mesin:
 
 - bind ke loopback (`127.0.0.1:8080`) dan pakai Cloudflare Tunnel; jangan
   publish port 8080 ke `0.0.0.0` atau router.
@@ -434,7 +434,7 @@ Arti praktisnya:
 
 ### Menaruh Caddy di depan gateway
 
-Deployment homelab tidak memakai Caddy: TLS dan nama domain datang dari
+Deployment satu host tidak memakai Caddy: TLS dan nama domain datang dari
 Cloudflare Tunnel (`https://${PUBLIC_HOST}`). Bagian ini hanya untuk host
 yang belum punya tunnel dan butuh TLS lokal. Gateway sudah menjadi pintu depan,
 jadi Caddy hanya perlu meneruskan ke sana:
