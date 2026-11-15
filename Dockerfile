@@ -15,7 +15,7 @@ RUN go build -trimpath \
       -o /out/nusa-serve ./cmd/nusa-serve \
  && go build -trimpath -ldflags="-s -w" -o /out/nusa-gateway ./cmd/nusa-gateway
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN adduser -D -H -u 65532 nusapeta && apk add --no-cache ca-certificates
 COPY --from=build /out/nusa-serve /usr/local/bin/nusa-serve
 COPY --from=build /out/nusa-gateway /usr/local/bin/nusa-gateway
