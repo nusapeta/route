@@ -11,12 +11,12 @@ binary, a memory-mapped graph, weighted A*, no runtime dependencies.
 [Bahasa Indonesia](README.id.md) | English
 
 **A self-hosted geo stack for Indonesia: routing + geocoding, one file per
-engine, under 20 MB idle, rebuilt in minutes, no database.** This repository is
+engine, about 48 MB idle, rebuilt in minutes, no database.** This repository is
 the routing half; the geocoder is
 [`nusapeta/place`](https://github.com/nusapeta/place) and the compose bundle is
 [`nusapeta/stack`](https://github.com/nusapeta/stack).
 
-`11 MB` idle RSS · `552 MB` download · `1.6 GB` graph on disk · `28 s` to
+`17 MB` idle RSS · `552 MB` download · `1.6 GB` graph on disk · `28 s` to
 preprocess the Java extract. ODbL data, no runtime dependencies.
 
 ## Quick start from the release artifact
@@ -59,8 +59,8 @@ of RAM.
 Nusapeta Route takes the opposite trade-off:
 
 - **The graph is mapped, not copied to the heap.** Untouched pages stay out of
-  RSS. The 1.6 GB national graph idles at 11 MB; the Java graph used in E1 idles
-  at 17 MB.
+  RSS. The 1.6 GB national graph idles at 17 MB; the Java graph used in E1 idles
+  at 15 MB.
 - **One artifact serves cars and motorcycles.** Format v5 stores two speed-class
   tables and two turn-restriction sets in one file.
 - **Rebuilds are cheap.** The Java extract takes 28 s on the test machine; the
@@ -103,7 +103,7 @@ Current national graph:
 | Nodes / edges | 54,891,393 / 112,340,071 |
 | Format | v5 `car+motor`, Hilbert order |
 | Artifact | 1,621 MB |
-| Idle RSS | 11.1 MB (`RssAnon` 4.5 MB) |
+| Idle RSS | 17.8 MB (`RssAnon` 11.6 MB), measured 2026-11-15 on the 0.1.0 image |
 | 4× 96 km routes in parallel | 225 MiB RSS (`anon` 90 MiB) |
 | Build | 11m40s including download; extraction 1m12s |
 

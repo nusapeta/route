@@ -157,7 +157,8 @@ Graph nasional v5, Ryzen:
 
 | Keadaan | RSS | `RssAnon` |
 |---|---:|---:|
-| Idle | **11,1 MB** | 4,5 MB |
+| Idle (0.1.0 image, `-conc 2 -workspace-mb 384`) | **17,8 MB** | 11,6 MB |
+| Idle (bare binary, default flags) | 15,6 MB | 7,0 MB |
 | 4× rute 96 km paralel | 225 MiB | 90 MiB |
 | 4× rute 80 km paralel | 190 MiB | 90 MiB |
 | 1× Jakarta–Medan 1.882 km (`-max-route-km 0`) | 701 MiB | 401 MiB |

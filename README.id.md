@@ -26,7 +26,7 @@ memakai RAM ratusan MB sampai beberapa GB.
 Nusapeta Route mengambil trade-off sebaliknya:
 
 - **Graph dipetakan, bukan disalin ke heap.** Halaman yang tidak disentuh tidak
-  masuk RSS; graph nasional 1,6 GB tetap bisa idle di 11 MB.
+  masuk RSS; graph nasional 1,6 GB idle di 17 MB, graph Jawa di 15 MB.
 - **Satu artefak untuk mobil dan motor.** Format v5 menyimpan dua tabel kelas
   kecepatan dan dua set turn restriction dalam satu file.
 - **Rebuild murah.** Ekstraksi Java 28 detik di mesin uji; graph nasional 1
@@ -65,7 +65,7 @@ Graph nasional saat ini:
 | Node / edge | 54.891.393 / 112.340.071 |
 | Format | v5 `car+motor`, Hilbert order |
 | Artefak | 1.621 MB |
-| Idle RSS | 11,1 MB (`RssAnon` 4,5 MB) |
+| Idle RSS | 17,8 MB (`RssAnon` 11,6 MB), diukur 2026-11-15 pada image 0.1.0 |
 | 4× rute 96 km paralel | 225 MiB RSS (`anon` 90 MiB) |
 | Build | 11m40s termasuk unduh; ekstraksi 1m12s |
 
