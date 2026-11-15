@@ -1,0 +1,38 @@
+# systemd unit (tanpa Docker). Sesuaikan path & user.
+#   sudo install -m 0644 deploy/nusapeta-route.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nusapeta-route
+[Unit]
+Description=nusapeta-route router (OSM Indonesia: graph nasional)
+Documentation=https://github.com/nusapeta/route
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nusapeta
+Group=nusapeta
+WorkingDirectory=/srv/nusapeta-route
+ExecStart=/srv/nusapeta-route/bin/nusa-serve -graph /srv/nusapeta-route/data/indonesia.graph -addr :8080 -conc 2 -workspace-mb 256 -max-route-km 100
+Environment=GOMEMLIMIT=768MiB
+Restart=always
+RestartSec=2s
+TimeoutStopSec=25s
+# anggaran memori: graph 1,6 GB di-mmap; beban kontrak terukur 225 MiB
+# (4x96 km paralel). Halaman bersih bisa direklaim cgroup.
+MemoryMax=1536M
+MemoryHigh=1200M
+# hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+ReadOnlyPaths=/srv/nusapeta-route/data
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

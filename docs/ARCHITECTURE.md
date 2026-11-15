@@ -8,8 +8,8 @@ rencana. Angka kapasitas ada di [`BENCHMARKS.md`](BENCHMARKS.md); kontrak HTTP d
 
 ```mermaid
 flowchart LR
-  PBF[".osm.pbf"] -->|"rid-extract"| G[".graph v5<br/>320 B header<br/>14 section"]
-  G -->|"mmap read-only"| S["rid-server"]
+  PBF[".osm.pbf"] -->|"nusa-extract"| G[".graph v5<br/>320 B header<br/>14 section"]
+  G -->|"mmap read-only"| S["nusa-serve"]
   S -->|"snap + weighted A*"| R["JSON / points<br/>GeoJSON / polyline"]
   S -->|"/healthz"| H["provenance graph"]
   S -->|"/metrics"| M["Prometheus"]
@@ -59,7 +59,7 @@ File little-endian, semua section ter-align, bisa di-`mmap` tanpa parsing:
 +-----------------------------+
 ```
 
-Header menyimpan magic `RIDG`, versi, jumlah node/edge, bounding box, offset
+Header menyimpan magic `RIDG` (identifier format, dipertahankan saat rename), versi, jumlah node/edge, bounding box, offset
 section, hash PBF, waktu build, versi extractor, dan profil. `VersionMin = 5`:
 file v1–v4 ditolak dan harus diekstrak ulang.
 
@@ -94,7 +94,7 @@ koordinat node, bukan shape point terpisah.
 
 ## Ekstraksi
 
-`rid-extract` membaca PBF secara streaming, membangun node/way/relation, lalu
+`nusa-extract` membaca PBF secara streaming, membangun node/way/relation, lalu
 menulis graph. Tiga hal yang mahal:
 
 1. **Way filtering.** Hanya way dengan tag jalan yang masuk profil. Motor
@@ -115,9 +115,9 @@ hash profil, dan ringkasan restriction. `/healthz` membacanya kembali.
 Contoh:
 
 ```bash
-bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.graph \
+bin/nusa-extract -pbf data/java-latest.osm.pbf -out data/java.graph \
   -workers 12 -grid 0.02
-bin/rid-graphinfo -graph data/java.graph
+bin/nusa-graphinfo -graph data/java.graph
 ```
 
 `-order osm` menghasilkan urutan id OSM untuk A/B; `-no-restrictions` untuk
@@ -212,19 +212,19 @@ Satu artefak v5 menyimpan:
 
 Server memilih profil saat start (`-profile car|motor`). Dua profil tidak boleh
 berada di proses yang sama karena pemilihan region berbasis snap akan saling
-menutupi; deployment memakai dua proses dan `rid-gateway` memilih upstream dari
+menutupi; deployment memakai dua proses dan `nusa-gateway` memilih upstream dari
 `?profile=`.
 
 Restriction yang tidak bisa direpresentasikan (via-way bercabang, relasi rusak,
 `restriction:conditional`) dicatat di statistik dan dibuang. Jumlahnya kecil,
-tetapi ini berarti routeid bisa melanggar larangan belok yang tidak terbaca;
-`rid-restcheck` mengukur kepatuhan pada graph uji.
+tetapi ini berarti Nusapeta Route bisa melanggar larangan belok yang tidak terbaca;
+`nusa-restcheck` mengukur kepatuhan pada graph uji.
 
 Detail model motor dan batasnya: [`MOTOR-MODEL.md`](MOTOR-MODEL.md).
 
 ## Server dan gateway
 
-`rid-server`:
+`nusa-serve`:
 
 - `net/http` + `ServeMux`, tanpa framework;
 - `mmap` graph, `Router` per region, workspace pool dibagi semua region;
@@ -233,7 +233,7 @@ Detail model motor dan batasnya: [`MOTOR-MODEL.md`](MOTOR-MODEL.md).
 - graceful shutdown 20 detik;
 - `/metrics` Prometheus.
 
-`rid-gateway`:
+`nusa-gateway`:
 
 - reverse proxy dua upstream (mobil/motor);
 - `?profile=mobil|motor`, default mobil;
@@ -255,9 +255,9 @@ Detail model motor dan batasnya: [`MOTOR-MODEL.md`](MOTOR-MODEL.md).
 
 - CH/MLD, customization, atau contraction;
 - turn-by-turn instruction, lane guidance, traffic;
-- geocoding, address parsing, POI di dalam `rid-server` dan `rid-gateway`:
+- geocoding, address parsing, POI di dalam `nusa-serve` dan `nusa-gateway`:
   index, builder, dan artefaknya tetap milik project lain. Gateway hanya
-  meneruskan prefix `/place` ke upstream terpisah, jadi graph routeid tidak
+  meneruskan prefix `/place` ke upstream terpisah, jadi graph Nusapeta Route tidak
   bertambah besar dan image-nya tidak berubah;
 - elevation, toll pricing, truck constraints;
 - persisted query cache (hanya ETag/HTTP cache);

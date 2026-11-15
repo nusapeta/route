@@ -1,4 +1,4 @@
-// Package extract turns an OpenStreetMap .osm.pbf into a routeid graph.
+// Package extract turns an OpenStreetMap .osm.pbf into a nusapeta-route graph.
 //
 // Usage notes:
 //   - Feed it a pre-filtered extract (osmium tags-filter w/highway ...) to cut
@@ -24,11 +24,11 @@ import (
 	"github.com/paulmach/osm"
 	"github.com/paulmach/osm/osmpbf"
 
-	"routeid/internal/graph"
+	"github.com/nusapeta/route/internal/graph"
 )
 
 // Version is the extractor version stamped into every graph's provenance. It is
-// overridable at link time: -X routeid/internal/extract.Version=<git describe>.
+// overridable at link time: -X github.com/nusapeta/route/internal/extract.Version=<git describe>.
 var Version = "0.1.0"
 
 // ProfileHash is a stable digest of one routing profile (name, per-class
@@ -507,7 +507,7 @@ func Build(ctx context.Context, pbfPath, outPath string, opt Options) error {
 		"order":          orderName(opt.Order),
 		"grid_step":      strconv.FormatFloat(opt.GridStep, 'f', 4, 64),
 		"restrictions":   boolName(!opt.NoRestrictions),
-		"tool":           "rid-extract",
+		"tool":           "nusa-extract",
 		"len_unit_m":     strconv.Itoa(graph.LenUnit),
 		"len_clamped":    strconv.Itoa(lenClamped),
 	}

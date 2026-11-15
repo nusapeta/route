@@ -14,7 +14,7 @@ Angka yang boleh masuk abstrak/README. Sumber: `e1-osrm-aligned.csv`,
 
 **E1 (Java, Ryzen, 600 pasangan):**
 
-| Metrik | RouteID | OSRM MLD |
+| Metrik | Nusapeta Route | OSRM MLD |
 |---|---:|---:|
 | Cocok / gagal / dibuang | 332 / 79 / 189 | — |
 | Gagal: `snap` / `budget` | 72 / 7 | 0 |

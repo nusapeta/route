@@ -16,7 +16,7 @@ services:
       tunnel:
         aliases:
           - gateway
-          - routeid-gateway
+          - nusapeta-gateway
 
 networks:
   tunnel:

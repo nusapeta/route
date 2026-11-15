@@ -1,0 +1,68 @@
+meta {
+  name: healthz
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/healthz
+  body: none
+  auth: none
+}
+
+docs {
+  Lewat gateway (env Homelab, atau Local yang dijalankan dengan bin/nusa-gateway)
+  jawaban menggabungkan kedua profil: {"ok":..,"profiles":{"mobil":..,
+  "motor":..}}, dan 503 kalau salah satu upstream mati. Langsung ke satu server
+  jawabannya tetap bentuk lama {"ok":..,"regions":[..]}; test menerima dua
+  bentuk itu.
+}
+
+tests {
+  test("200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  const j = res.getBody();
+
+  if (j.profiles) {
+    test("kedua profil dilaporkan", function () {
+      expect(j.ok).to.equal(true);
+      expect(Object.keys(j.profiles).sort()).to.deep.equal(["mobil", "motor"]);
+    });
+    Object.keys(j.profiles).forEach(function (name) {
+      test(name + ": upstream sehat dan punya region", function () {
+        const up = j.profiles[name].upstream || {};
+        expect(j.profiles[name].ok).to.equal(true);
+        expect(up.ok).to.equal(true);
+        expect(up.regions).to.be.an("array").that.is.not.empty;
+      });
+    });
+    console.log("gateway:", Object.keys(j.profiles).map(function (name) {
+      const up = j.profiles[name].upstream || {};
+      return name + ":" + (up.regions || []).map(function (r) { return r.name; }).join("+");
+    }).join(", "));
+    return;
+  }
+
+  test("minimal satu region", function () {
+    expect(j.regions).to.be.an("array").that.is.not.empty;
+  });
+  j.regions.forEach(function (r) {
+    test(r.name + ": node/edge/ban masuk akal", function () {
+      expect(r.nodes).to.be.above(0);
+      expect(r.edges).to.be.above(0);
+      expect(r.bans).to.be.at.least(0);
+      expect(r.only_rules).to.be.at.least(0);
+      expect(r.format).to.be.at.least(3);
+    });
+  });
+  test("provenance lengkap (format 4)", function () {
+    const r = j.regions[0];
+    expect(r.pbf_sha256).to.match(/^[0-9a-f]{64}$/);
+    expect(r.profile).to.be.a("string").and.not.empty;
+    expect(r.profile_sha256).to.match(/^[0-9a-f]{64}$/);
+    expect(r.built_at).to.be.a("string").and.not.empty;
+    expect(r.extractor).to.be.a("string").and.not.empty;
+  });
+  console.log(j.version, "-", j.regions.map(function (r) { return r.name + ":" + r.nodes; }).join(", "));
+}

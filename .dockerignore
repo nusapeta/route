@@ -1,6 +1,6 @@
 bin/**
-!bin/rid-server
-!bin/rid-gateway
+!bin/nusa-serve
+!bin/nusa-gateway
 data/
 .git/
 paper/results/

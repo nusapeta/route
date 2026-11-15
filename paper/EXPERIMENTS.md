@@ -18,7 +18,7 @@ mentah ada di [`RESULTS.md`](RESULTS.md), ledger klaim di
 
 Ryzen 5 5600G, OSRM v5.26.0 MLD, PBF Java yang sama, 600 pasangan.
 
-| Metrik | RouteID | OSRM |
+| Metrik | Nusapeta Route | OSRM |
 |---|---:|---:|
 | Cocok / gagal / dibuang | 332 / 79 / 189 | — |
 | p50 latency, 332 cocok | 38,7 ms | **1,5 ms** |

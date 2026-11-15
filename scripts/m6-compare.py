@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""M6 / E1: routeid vs OSRM pada pasangan yang identik, dijalankan bergantian.
+"""M6 / E1: nusapeta-route vs OSRM pada pasangan yang identik, dijalankan bergantian.
 
 Untuk tiap pasangan di `--pairs` (kolom from_lat,from_lon,to_lat,to_lon):
-  1. tanya routeid  (/route)   -> distance_m, duration_s, wall
+  1. tanya nusapeta-route  (/route)   -> distance_m, duration_s, wall
   2. tanya OSRM     (/route/v1/driving) -> distance, duration, wall
 Keduanya diukur di mesin yang sama, satu per satu (bukan paralel), supaya angka
 latency bisa dibandingkan. OSRM memakai urutan lon,lat.
 
 Contoh:
     scripts/m6-osrm.sh serve data/java-latest.osrm &
-    bin/rid-server -graph data/java.graph -addr 127.0.0.1:8080 -rate 0 -conc 1 &
+    bin/nusa-serve -graph data/java.graph -addr 127.0.0.1:8080 -rate 0 -conc 1 &
     scripts/m6-compare.py --pairs paper/results/pairs-java.csv \
-        --routeid http://127.0.0.1:8080 --osrm http://127.0.0.1:5000 \
+        --route http://127.0.0.1:8080 --osrm http://127.0.0.1:5000 \
         --csv paper/results/m6-osrm-vs-routeid.csv
 
 Keluaran: tabel per bucket (p50/p95 latency masing-masing, median selisih jarak,
@@ -72,7 +72,7 @@ def safe_get(hp, path, timeout):
         return 0, float("nan"), str(e).encode()
 
 
-def ask_routeid(hp, f, t, timeout):
+def ask_route(hp, f, t, timeout):
     path = f"/route?from={f[0]},{f[1]}&to={t[0]},{t[1]}"
     st, ms, body = safe_get(hp, path, timeout)
     if st != 200:
@@ -108,7 +108,10 @@ def ask_osrm(hp, f, t, timeout):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pairs", required=True)
-    ap.add_argument("--routeid", default="http://127.0.0.1:8080")
+    # --routeid is the pre-rename name; paper/RESULTS.md and paper/COMPARISON.md
+    # record commands with it, so it stays accepted for reproduction.
+    ap.add_argument("--route", "--routeid", dest="route",
+                    default="http://127.0.0.1:8080")
     ap.add_argument("--osrm", default="http://127.0.0.1:5000")
     ap.add_argument("--csv", default="")
     ap.add_argument("--limit", type=int, default=0, help="0 = semua pasangan")
@@ -117,11 +120,11 @@ def main():
                     help="hanya hitung pasangan yang keempat titik snap <= N meter "
                          "(0 = tanpa filter; error tetap dihitung terpisah)")
     ap.add_argument("--max-gap", type=float, default=0.0,
-                    help="hanya hitung pasangan yang titik snap routeid dan OSRM "
+                    help="hanya hitung pasangan yang titik snap nusapeta-route dan OSRM "
                          "berjarak <= N meter di kedua ujung (0 = tanpa filter)")
     a = ap.parse_args()
 
-    rid, osm = conn(a.routeid), conn(a.osrm)
+    rid, osm = conn(a.route), conn(a.osrm)
 
     rows = list(csv.DictReader(open(a.pairs)))
     if a.limit:
@@ -146,13 +149,13 @@ def main():
         bucket = r["bucket"]
         f = (float(r["from_lat"]), float(r["from_lon"]))
         t = (float(r["to_lat"]), float(r["to_lon"]))
-        # bergantian: osrm dulu di pasangan genap, routeid dulu di ganjil
+        # bergantian: osrm dulu di pasangan genap, nusapeta-route dulu di ganjil
         if i % 2:
-            R = ask_routeid(rid, f, t, a.timeout)
+            R = ask_route(rid, f, t, a.timeout)
             O = ask_osrm(osm, f, t, a.timeout)
         else:
             O = ask_osrm(osm, f, t, a.timeout)
-            R = ask_routeid(rid, f, t, a.timeout)
+            R = ask_route(rid, f, t, a.timeout)
 
         err = R.get("err") or O.get("err")
         gap_f = gap_t = None
@@ -224,8 +227,8 @@ def main():
               f"{statistics.median(b['dd']) if b['dd'] else float('nan'):>13.2f}"
               f"{gt:>7.1f}"
               f"{statistics.median(b['dr']) if b['dr'] else float('nan'):>15.3f}")
-    print("\nride = routeid, osrm = OSRM MLD. dist_delta% = (ride-osrm)/osrm.")
-    print("Durasi tidak sebanding: routeid memakai tabel kecepatan kelas jalan,")
+    print("\nride = nusapeta-route, osrm = OSRM MLD. dist_delta% = (ride-osrm)/osrm.")
+    print("Durasi tidak sebanding: nusapeta-route memakai tabel kecepatan kelas jalan,")
     print("OSRM car.lua memakai maxspeed. Yang bermakna: jarak (akurasi relatif)")
     print("dan latency/RSS (biaya).")
 

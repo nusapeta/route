@@ -7,7 +7,7 @@ lengkap: `docs/PLAN-2026-11-10.md` W1 dan W1b.
 
 ## 1. Yang dimodelkan
 
-Profil dipilih saat query (`rid-server -profile car|motor`), bukan saat build.
+Profil dipilih saat query (`nusa-serve -profile car|motor`), bukan saat build.
 Sejak format v5 satu artefak menyimpan kelas mobil (`Cls`) dan motor (`MCls`)
 serta daftar turn restriction terpisah. Dua container hanya memilih profil
 berbeda dari graph yang sama; tidak ada artefak motor terpisah lagi.
@@ -115,7 +115,7 @@ Batas model hanya boleh dibuka bila semua syarat berikut terpenuhi:
 Tag conditional yang sudah dihitung tetapi belum dievaluasi di Java:
 `access:conditional` 940 way, `motorcycle:conditional` 47 way,
 `oneway:motorcycle:conditional` 1 way. Angka ini berasal dari
-`cmd/rid-tagstats` dan dicatat di `docs/PLAN-2026-11-10.md` W1.
+`cmd/nusa-tagstats` dan dicatat di `docs/PLAN-2026-11-10.md` W1.
 
 ## 5. Bukti terukur
 
@@ -174,7 +174,7 @@ make graph REGION=nusa-tenggara
 go test ./internal/extract -run 'TestMotorGoldenRules|TestMotorOnlyRulesLeaveCarAlone'
 go test ./internal/graph -run 'TestMotorGoldenRoutes'
 
-bin/rid-server -profile motor \
+bin/nusa-serve -profile motor \
   -graph data/java.graph \
   -graph data/sumatra.graph \
   -graph data/nusa-tenggara.graph \

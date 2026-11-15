@@ -1,4 +1,4 @@
-# Dokumentasi RouteID
+# Dokumentasi Nusapeta Route
 
 Status snapshot: **2026-11-12**. Graph produksi: `data/indonesia.graph`, format
 v5, 54.891.393 node / 112.340.071 edge, 1.621 MB.
@@ -7,7 +7,7 @@ v5, 54.891.393 node / 112.340.071 edge, 1.621 MB.
 
 | Kebutuhan | Dokumen |
 |---|---|
-| Mencoba RouteID | [`../README.md`](../README.md) |
+| Mencoba Nusapeta Route | [`../README.md`](../README.md) |
 | Memahami format dan algoritma | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Mengintegrasikan app | [`API.md`](API.md) |
 | Build, refresh graph, deploy | [`OPERATIONS.md`](OPERATIONS.md) |
@@ -21,7 +21,7 @@ v5, 54.891.393 node / 112.340.071 edge, 1.621 MB.
 Urutan prioritas saat dokumen bertentangan:
 
 1. **Kode dan test** di `internal/`, `cmd/`, dan `web/`.
-2. **Metadata graph** dari `bin/rid-graphinfo -graph data/indonesia.graph` dan
+2. **Metadata graph** dari `bin/nusa-graphinfo -graph data/indonesia.graph` dan
    respons `/healthz`.
 3. **Angka mentah** di [`../paper/RESULTS.md`](../paper/RESULTS.md), lengkap
    dengan mesin, data, tanggal, dan perintah reproduksi.

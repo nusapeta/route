@@ -1,4 +1,4 @@
-# RouteID
+# Nusapeta Route
 
 **Router jalan Indonesia yang muat di sidecar.** Satu binary Go, graph OSM
 `mmap`, weighted A*, tanpa dependency runtime.
@@ -8,7 +8,7 @@
 [![Data](https://img.shields.io/badge/data-ODbL-green)](https://www.openstreetmap.org/copyright)
 [![Status](https://img.shields.io/badge/status-research%20preview-orange)](#batasan)
 
-> **English:** RouteID is a memory-mapped OpenStreetMap router for Indonesia.
+> **English:** Nusapeta Route is a memory-mapped OpenStreetMap router for Indonesia.
 > It compiles an `.osm.pbf` into one binary graph and serves short-to-medium
 > routes over HTTP. The design target is cost per route — RAM, artifact size,
 > and rebuild time — not raw query latency.
@@ -21,7 +21,7 @@ koordinat, satu polyline yang mengikuti jalan, jarak, dan ETA kasar untuk rute
 dan Valhalla gratis per request, tetapi dirancang untuk query panjang dan
 memakai RAM ratusan MB sampai beberapa GB.
 
-RouteID mengambil trade-off sebaliknya:
+Nusapeta Route mengambil trade-off sebaliknya:
 
 - **Graph dipetakan, bukan disalin ke heap.** Halaman yang tidak disentuh tidak
   masuk RSS; graph nasional 1,6 GB tetap bisa idle di 11 MB.
@@ -32,8 +32,8 @@ RouteID mengambil trade-off sebaliknya:
 - **Hasil bisa diaudit.** `/healthz` membawa provenance PBF, versi format,
   jumlah node/edge, dan statistik restriction.
 
-Trade-off-nya nyata: tanpa hierarki CH/MLD, routeid **bukan** engine tercepat.
-Pada E1, OSRM MLD sekitar 26× lebih cepat di p50. Keunggulan routeid ada di
+Trade-off-nya nyata: tanpa hierarki CH/MLD, Nusapeta Route **bukan** engine tercepat.
+Pada E1, OSRM MLD sekitar 26× lebih cepat di p50. Keunggulan Nusapeta Route ada di
 memori, ukuran artefak, dan preprocessing.
 
 ## Snapshot terukur
@@ -42,7 +42,7 @@ E1: Java, mesin yang sama (Ryzen 5 5600G), PBF yang sama, 600 pasangan identik.
 Angka lengkap dan perintah reproduksi ada di
 [`paper/RESULTS.md`](paper/RESULTS.md) §13 dan §18.
 
-| | RouteID (Java, E1) | OSRM MLD v5.26.0 |
+| | Nusapeta Route (Java, E1) | OSRM MLD v5.26.0 |
 |---|---:|---:|
 | Graph di disk | **693 MB** (1 file) | 5,08 GB (banyak file) |
 | RSS sebelum query | **17 MB** | 2,36 GiB |
@@ -77,12 +77,12 @@ p95 0,94–1,32 s. Di i3-6100T: 472 sukses; 72 gagal snap, 40 `too_far`, 16
 Butuh Go 1.27+ dan `make`.
 
 ```bash
-git clone git@github.com:arifsans/routeid.git
-cd routeid
+git clone git@github.com:arifsans/nusapeta-route.git
+cd nusapeta-route
 
 make build                 # semua binary ke bin/
 make java                  # unduh PBF Jawa + build data/java.graph
-bin/rid-server -graph data/java.graph -addr 127.0.0.1:8080
+bin/nusa-serve -graph data/java.graph -addr 127.0.0.1:8080
 ```
 
 Di terminal lain:
@@ -96,15 +96,15 @@ Graph nasional (butuh ±1,7 GB PBF dan ±5 GB RAM saat build):
 
 ```bash
 GOMEMLIMIT=5GiB scripts/build-national.sh
-bin/rid-server -graph data/indonesia.graph -addr 127.0.0.1:8080
+bin/nusa-serve -graph data/indonesia.graph -addr 127.0.0.1:8080
 ```
 
-Dua profil di satu base URL memakai `rid-gateway`:
+Dua profil di satu base URL memakai `nusa-gateway`:
 
 ```bash
-bin/rid-server -graph data/indonesia.graph -profile car   -addr 127.0.0.1:18080
-bin/rid-server -graph data/indonesia.graph -profile motor -addr 127.0.0.1:18081
-bin/rid-gateway -addr 127.0.0.1:8080
+bin/nusa-serve -graph data/indonesia.graph -profile car   -addr 127.0.0.1:18080
+bin/nusa-serve -graph data/indonesia.graph -profile motor -addr 127.0.0.1:18081
+bin/nusa-gateway -addr 127.0.0.1:8080
 curl '127.0.0.1:8080/route?...&profile=motor'
 ```
 
@@ -112,15 +112,15 @@ curl '127.0.0.1:8080/route?...&profile=motor'
 
 ```mermaid
 flowchart LR
-  PBF[".osm.pbf"] --> EX["rid-extract"]
+  PBF[".osm.pbf"] --> EX["nusa-extract"]
   EX --> G[".graph v5<br/>mmap"]
-  G --> SRV["rid-server<br/>A* / snap"]
+  G --> SRV["nusa-serve<br/>A* / snap"]
   SRV --> HTTP["HTTP JSON / polyline"]
-  CLIENT["Flutter / web / curl"] --> GW["rid-gateway<br/>?profile=mobil|motor"]
+  CLIENT["Flutter / web / curl"] --> GW["nusa-gateway<br/>?profile=mobil|motor"]
   GW --> SRV
 ```
 
-- **Ekstraksi sekali, query berkali-kali.** `rid-extract` membaca PBF, menulis
+- **Ekstraksi sekali, query berkali-kali.** `nusa-extract` membaca PBF, menulis
   header + section ter-align, lalu server membuka file dengan `mmap`.
 - **Node adalah node OSM.** Geometri jalan tidak disederhanakan; tidak ada tabel
   shape point terpisah.
@@ -147,7 +147,7 @@ Detail format, invarian, dan alasan desain:
 | `GET /healthz` | kesiapan + provenance graph |
 | `GET /version` | commit, build time, Go/OS/arch |
 | `GET /metrics` | Prometheus (biasanya hanya upstream internal) |
-| `GET /` | demo peta di `rid-gateway` |
+| `GET /` | demo peta di `nusa-gateway` |
 
 Parameter penting: `simplify=<meter>`, `pin=1` (garis menyambung pin mentah),
 `restrictions=0` (matikan enforcement untuk debug), `profile=mobil|motor`
@@ -198,15 +198,15 @@ belakang reverse proxy/TLS; rate limit per IP aktif secara default
 ## Struktur repo
 
 ```text
-cmd/rid-extract      PBF -> .graph (offline, bulanan)
-cmd/rid-server       HTTP /route, /healthz, /version, /metrics
-cmd/rid-gateway      satu base URL, ?profile=mobil|motor
-cmd/rid-route        CLI satu rute untuk debug
-cmd/rid-graphinfo    inspeksi header, snap, scan lubang data
-cmd/rid-bench        benchmark latency/akurasi
-cmd/rid-restcheck    harness kepatuhan turn restriction
-cmd/rid-tagstats     census tag way untuk profil motor
-cmd/rid-snapcheck    ukur galat snapping
+cmd/nusa-extract      PBF -> .graph (offline, bulanan)
+cmd/nusa-serve       HTTP /route, /healthz, /version, /metrics
+cmd/nusa-gateway      satu base URL, ?profile=mobil|motor
+cmd/nusa-route        CLI satu rute untuk debug
+cmd/nusa-graphinfo    inspeksi header, snap, scan lubang data
+cmd/nusa-bench        benchmark latency/akurasi
+cmd/nusa-restcheck    harness kepatuhan turn restriction
+cmd/nusa-tagstats     census tag way untuk profil motor
+cmd/nusa-snapcheck    ukur galat snapping
 
 internal/extract     parsing OSM, profil, restriction, Hilbert ordering
 internal/graph       format biner, mmap, snapping, A*, workspace
@@ -225,7 +225,7 @@ make test
 go test ./internal/graph -run TestGoldenRoutes
 scripts/smoke.sh http://127.0.0.1:8080
 
-bin/rid-bench -graph data/java.graph -pairs paper/results/pairs-java.csv
+bin/nusa-bench -graph data/java.graph -pairs paper/results/pairs-java.csv
 scripts/loadtest.py http://127.0.0.1:8080 \
   -from -7.8435,110.3929 -to -7.7393,110.3760 -c 4 -n 32
 ```
@@ -237,7 +237,7 @@ Metodologi dan angka kanonik: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 ## Batasan
 
 - **Tidak ada klaim akurasi.** E2 (ground truth independen) tidak dijalankan.
-  E1 hanya membandingkan routeid dengan OSRM pada graph OSM yang sama; p95
+  E1 hanya membandingkan Nusapeta Route dengan OSRM pada graph OSM yang sama; p95
   selisih jarak 14,49% dan maksimum 70,44%.
 - **Tanpa traffic real-time.** Kecepatan statis per kelas jalan; ETA bukan
   prediksi kemacetan. `restriction:conditional` dihitung tetapi tidak
@@ -279,5 +279,5 @@ pdflatex main && bibtex main && pdflatex main && pdflatex main
 ## Lisensi dan atribusi
 
 Kode: [MIT](LICENSE). Data: © OpenStreetMap contributors, ODbL. File `.graph`
-adalah turunan database OSM dan tetap ODbL. Aplikasi yang memakai RouteID wajib
+adalah turunan database OSM dan tetap ODbL. Aplikasi yang memakai Nusapeta Route wajib
 menampilkan atribusi OpenStreetMap.

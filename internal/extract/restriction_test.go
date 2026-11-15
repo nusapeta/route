@@ -5,7 +5,7 @@ import (
 
 	"github.com/paulmach/osm"
 
-	"routeid/internal/graph"
+	"github.com/nusapeta/route/internal/graph"
 )
 
 func TestChainViaOrdering(t *testing.T) {

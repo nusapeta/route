@@ -3,7 +3,7 @@
 
   var JAKARTA = { lat: -6.2, lng: 106.816666 };
   var PROFILE_LABELS = { mobil: "mobil", motor: "motor" };
-  var AUTO_LOCATE_KEY = "routeid:auto-locate";
+  var AUTO_LOCATE_KEY = "nusapeta-route:auto-locate";
   var LOCATE_STATUS = "Mencari lokasi Anda...";
   var PLACE_ROOT = "/place";
   var PLACE_MIN_LENGTH = 2;

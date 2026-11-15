@@ -9,7 +9,7 @@
 
 \begin{document}
 
-\title{RouteID: Memory-Mapped, Locality-Ordered Routing for Bounded-Radius Routes on Indonesian OpenStreetMap Data}
+\title{Nusapeta Route: Memory-Mapped, Locality-Ordered Routing for Bounded-Radius Routes on Indonesian OpenStreetMap Data}
 
 \author{Anonymous}
 \affiliation{\institution{Preprint}\country{}}
@@ -21,13 +21,13 @@ long-distance queries and trade memory for hierarchy. Many production workloads
 are the opposite: bounded-radius queries, typically below 100\,km, issued from a
 mobile app that needs a polyline and a distance estimate, and billed per request
 when a hosted API is used. We ask what such a workload actually requires and
-present \emph{RouteID}, a Go engine (6.2\,kLOC for the routing core and HTTP
+present \emph{Nusapeta Route}, a Go engine (6.2\,kLOC for the routing core and HTTP
 server) that compiles OSM extracts into one memory-mapped binary graph and
 answers queries with edge-based, heuristic-inflated A*. On the Java extract
 (22.71\,M nodes, 46.68\,M edges) the evaluation graph is 693\,MB and is built in
 28\,s; the process starts at 17.3\,MB resident and answers 332 filter-matched
 pairs at p50 38.7\,ms and p95 674\,ms, versus OSRM MLD at 1.5\,ms and 3.7\,ms.
-RouteID keeps a 7.3$\times$ smaller artefact and a 140$\times$ smaller idle
+Nusapeta Route keeps a 7.3$\times$ smaller artefact and a 140$\times$ smaller idle
 resident set, but it is slower; we do not claim otherwise. Two inexpensive
 techniques are evaluated in isolation: Hilbert-curve node renumbering lowers p50
 by 7--20\,\%, and a 1.5 heuristic inflation is 28\,\% faster while reproducing the
@@ -121,7 +121,7 @@ motorcycle-specific access is a separate class byte.
 The fallback speed table was aligned with OSRM's \texttt{car.lua} because an
 earlier mismatch was the largest single source of route-distance deviation. The
 alignment does not make the engines equivalent: OSRM minimises its own
-\texttt{weight}, while RouteID minimises drive time plus a turn penalty.
+\texttt{weight}, while Nusapeta Route minimises drive time plus a turn penalty.
 
 \subsection{Binary format v5}
 The graph is one file: a 320-byte header followed by 14 aligned sections. The
@@ -221,7 +221,7 @@ container image, with the graph mounted read-only.
 Numbers come from four machines and are not mixed across claims.
 \begin{itemize}
   \item \emph{E1} (OSRM comparison): AMD Ryzen 5 5600G (6 cores, 12 threads),
-        16\,GB RAM, Linux 7.2.15; OSRM v5.26.0 MLD in Docker; RouteID at the same
+        16\,GB RAM, Linux 7.2.15; OSRM v5.26.0 MLD in Docker; Nusapeta Route at the same
         commit. Java extract (857.6\,MB PBF), 600 origin--destination pairs, 120
         per straight-line bucket, sampled once. Requests alternate between
         engines; percentiles use successful, filter-matched queries.
@@ -239,7 +239,7 @@ Numbers come from four machines and are not mixed across claims.
 
 The E1 filter admits a pair only when both engines snap both endpoints within
 250\,m and the two snapped points lie within 50\,m of each other. Of 600 pairs,
-332 enter the distance and latency statistics, 79 fail in RouteID, and 189 are
+332 enter the distance and latency statistics, 79 fail in Nusapeta Route, and 189 are
 excluded by the filter. Failed queries are reported, not hidden. The filter is
 necessary because a pair whose endpoints are kilometres from a road is not a
 like-for-like routing comparison; it is also a limitation, discussed in
@@ -253,23 +253,23 @@ like-for-like routing comparison; it is also a limitation, discussed in
 \toprule
 graph & nodes & edges & bytes & build \\
 \midrule
-RouteID Java v4 (E1) & 22.71\,M & 46.68\,M & 693.1\,MB & 28\,s \\
+Nusapeta Route Java v4 (E1) & 22.71\,M & 46.68\,M & 693.1\,MB & 28\,s \\
 OSRM MLD Java        & ---      & ---      & 5.08\,GB  & 250\,s \\
-RouteID Java v5      & 23.46\,M & 48.32\,M & 693.3\,MB & --- \\
-RouteID Sumatra v5   & 11.95\,M & 24.49\,M & 353.3\,MB & --- \\
-RouteID Nusa v5      &  5.06\,M & 10.23\,M & 148.8\,MB & --- \\
-RouteID Indonesia v5 & 54.89\,M & 112.34\,M & 1{,}621.2\,MB & 11\,m40\,s \\
+Nusapeta Route Java v5      & 23.46\,M & 48.32\,M & 693.3\,MB & --- \\
+Nusapeta Route Sumatra v5   & 11.95\,M & 24.49\,M & 353.3\,MB & --- \\
+Nusapeta Route Nusa v5      &  5.06\,M & 10.23\,M & 148.8\,MB & --- \\
+Nusapeta Route Indonesia v5 & 54.89\,M & 112.34\,M & 1{,}621.2\,MB & 11\,m40\,s \\
 \bottomrule
 \end{tabular}
 \caption{Artefacts. E1 used format v4 with the car profile; deployed v5 carries
 car and motorcycle in one file, so E1 node/edge counts are not directly
 comparable. The national build time includes downloading the PBF; extraction
-alone is 1\,m12\,s. OSRM peak preprocessing RSS was 6.25\,GB; RouteID's national
+alone is 1\,m12\,s. OSRM peak preprocessing RSS was 6.25\,GB; Nusapeta Route's national
 build was capped at 5\,GiB.}
 \label{tab:artefacts}
 \end{table}
 
-Table~\ref{tab:artefacts} is the first result: at the Java scale the RouteID
+Table~\ref{tab:artefacts} is the first result: at the Java scale the Nusapeta Route
 artefact is 7.3$\times$ smaller than OSRM's MLD data, and preprocessing is
 9$\times$ faster. Part of that gap is expected---MLD buys query speed with
 auxiliary data---and part is the narrower feature set: no instructions, no
@@ -280,7 +280,7 @@ alternative routes, no matrix, and no map matching.
 \footnotesize
 \begin{tabular}{@{}lrrrrr@{}}
 \toprule
-bucket & matched & failed & excluded & RouteID p50/p95 & OSRM p50/p95 \\
+bucket & matched & failed & excluded & Nusapeta Route p50/p95 & OSRM p50/p95 \\
        &         &        &          & (ms)            & (ms) \\
 \midrule
 0--5\,km   & 86 &  0 & 34 &   4.0/13.8 & 0.7/1.0 \\
@@ -293,13 +293,13 @@ all        & 332 & 79 & 189 & 38.7/674.0 & 1.5/3.7 \\
 \bottomrule
 \end{tabular}
 \caption{E1 latency on the same 600 pairs, Ryzen 5 5600G, single-threaded
-RouteID. Percentiles use the 332 filter-matched pairs; failures are counted per
+Nusapeta Route. Percentiles use the 332 filter-matched pairs; failures are counted per
 straight-line bucket. OSRM is faster at every bucket.}
 \label{tab:e1lat}
 \end{table}
 
 Table~\ref{tab:e1lat} is the central performance result. OSRM is about
-$26\times$ faster at the median and $180\times$ faster at p95. RouteID is not a
+$26\times$ faster at the median and $180\times$ faster at p95. Nusapeta Route is not a
 low-latency replacement for MLD. Its advantage is the resource profile: 693\,MB
 versus 5.08\,GB on disk, 28\,s versus 250\,s to preprocess, and 17.3\,MB versus
 2.36\,GiB resident before the first query. For a workload that values a small
@@ -307,7 +307,7 @@ artefact and a restart without a multi-gigabyte warm-up, that is the relevant
 trade; for a workload that values per-query latency, OSRM wins clearly.
 
 \subsection{Distance, duration, and failures}
-On the 332 matched pairs, the relative route-distance difference (RouteID minus
+On the 332 matched pairs, the relative route-distance difference (Nusapeta Route minus
 OSRM, divided by OSRM) has median 0.23\,\%, p95 14.49\,\%, and maximum 70.44\,\%.
 Twenty-five pairs exceed 10\,\% and eight exceed 25\,\%. The pre-registered gate
 was median below 0.1\,\% and p95 below 12\,\%; both conditions fail. On duration,
@@ -315,17 +315,17 @@ the signed difference has median $-1.11$\,\% and p95 $+2.39$\,\%; the p95 of the
 absolute difference is 10.22\,\%. D4 therefore made absolute duration p95 the
 primary metric, but this is still an engine-to-engine comparison, not accuracy.
 
-RouteID returns 422 for 79 of the 600 pairs: 72 because an endpoint has no road
+Nusapeta Route returns 422 for 79 of the 600 pairs: 72 because an endpoint has no road
 within the 3\,km snap radius, and 7 because the search budget is exhausted. There
 are no \texttt{no\_route} failures in the final run. OSRM succeeds on all 79, but
 its target snap is a median of 15.3\,km from the input (p90 32.7\,km, maximum
 44.6\,km); those pairs are not a like-for-like comparison and are not counted as
-RouteID wins. The remaining 189 pairs are excluded by the symmetric snap filter.
+Nusapeta Route wins. The remaining 189 pairs are excluded by the symmetric snap filter.
 
 The residual distance spread is not a restriction defect. An audit of all 593
 skipped restriction relations and the 20 largest deviations
 (\texttt{paper/RESULTS.md}\,\S18) attributes it to differing cost functions and
-route choice: RouteID minimises drive time and keeps \texttt{track} edges, while
+route choice: Nusapeta Route minimises drive time and keeps \texttt{track} edges, while
 OSRM minimises its \texttt{weight}. Aligning the fallback speed table with
 \texttt{car.lua} reduced p95 from 21.05\,\% to 14.49\,\%, but the tail remains.
 
@@ -370,8 +370,8 @@ it to server CPUs without measurement.
 \toprule
 state & RSS & anonymous & note \\
 \midrule
-RouteID E1, start        &  17.3\,MB & --- & one Java graph \\
-RouteID E1, 600 pairs    & 815.3\,MB & --- & matched workload \\
+Nusapeta Route E1, start        &  17.3\,MB & --- & one Java graph \\
+Nusapeta Route E1, 600 pairs    & 815.3\,MB & --- & matched workload \\
 OSRM MLD, before queries &  2.36\,GiB & --- & same machine \\
 OSRM MLD, after 600 pairs & 2.45\,GiB & --- & same machine \\
 National v5, idle        &  11.1\,MB & 4.5\,MB & header only \\
@@ -478,7 +478,7 @@ as such.
 At the cap, 481 of 600 pairs succeed. Failures are 72 snap, 39 \texttt{too\_far},
 and 8 budget/exhausted. The wall-clock p50 is 39--47\,ms and p95 is
 0.94--1.32\,s, with a maximum of 9.5\,s. The tail is the cost of omitting a
-hierarchy: a 50--80\,km pair has RouteID p95 1.68\,s in E1, and the cap run
+hierarchy: a 50--80\,km pair has Nusapeta Route p95 1.68\,s in E1, and the cap run
 extends that tail. On the i3, a 6\,s budget returns 472 pairs, 16 of them marked
 budget; without a budget, 475 pairs succeed but 8 searches exhaust and the p99
 rises from 2.94\,s to 4.52\,s. The budget is a latency control, not a free win.
@@ -525,10 +525,10 @@ concurrency, and the workspace shrinks when idle.
 
 \paragraph{Where it loses.}
 OSRM is faster by 26$\times$ at the median and 180$\times$ at p95 on the same
-data. RouteID's distance tail also fails the pre-registered gate. A product that
+data. Nusapeta Route's distance tail also fails the pre-registered gate. A product that
 needs per-query latency, accurate congestion ETAs, worldwide coverage, matrix
 queries, or turn-by-turn instructions should use an established engine or a
-hosted API. The case for RouteID is narrow: bounded-radius car/motorcycle routes,
+hosted API. The case for Nusapeta Route is narrow: bounded-radius car/motorcycle routes,
 static speeds, a small VPS, and no per-request fee.
 
 \paragraph{Why the tail exists.}

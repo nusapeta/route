@@ -3,7 +3,7 @@
 
 Both upstreams get the same coordinates and ``format=polyline``. The CSV keeps
 only route-derived fields, so two runs over the same data are byte-identical;
-wall latency is intentionally absent (use rid-bench for performance). Pace is
+wall latency is intentionally absent (use nusa-bench for performance). Pace is
 4.2 s by default, just under the deployed 15 requests/minute limiter.
 
 Contoh direct upstream:

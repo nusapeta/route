@@ -7,12 +7,12 @@ ADDR="${1:-http://127.0.0.1:8080}"
 PID="${2:-}"
 
 echo "=== /metrics workspace + route counters ($ADDR) ==="
-curl -sS "$ADDR/metrics" | grep -E "^routeid_workspace_" || true
+curl -sS "$ADDR/metrics" | grep -E "^nusa_route_workspace_" || true
 
 if [ -z "$PID" ] && command -v pgrep >/dev/null; then
-    PID="$(pgrep -x rid-server | head -1 || true)"
+    PID="$(pgrep -x nusa-serve | head -1 || true)"
 fi
-[ -n "$PID" ] || { echo "no rid-server pid; pass one as \$2"; exit 0; }
+[ -n "$PID" ] || { echo "no nusa-serve pid; pass one as \$2"; exit 0; }
 
 echo "=== process $PID ==="
 ps -o pid,rss,vsz,comm -p "$PID" || true

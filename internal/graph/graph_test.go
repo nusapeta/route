@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"routeid/internal/graph"
+	"github.com/nusapeta/route/internal/graph"
 )
 
 func buildLine(t *testing.T) string {

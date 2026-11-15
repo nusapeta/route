@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M6 / E1: bangun dataset OSRM (MLD) dari pbf yang sama dengan routeid, catat
+# M6 / E1: bangun dataset OSRM (MLD) dari pbf yang sama dengan nusapeta-route, catat
 # waktu + peak RSS + ukuran artefak, lalu jalankan server untuk dibandingkan.
 #
 #   scripts/m6-osrm.sh extract data/java-latest.osm.pbf     # extract+partition+customize
@@ -11,7 +11,7 @@
 # untuk deployment hemat memori.
 #
 # RAM: osrm-extract untuk Jawa butuh ~4-6 GB. Mesin 8 GB wajib punya swap, dan
-# jangan jalankan bersamaan dengan rebuild graph routeid atau load test: angka
+# jangan jalankan bersamaan dengan rebuild graph nusapeta-route atau load test: angka
 # waktu/RSS jadi sampah.
 set -euo pipefail
 
@@ -62,7 +62,7 @@ extract)
 	run_stage osrm-customize osrm-customize "${base}.osrm"
 	echo "== artefak"
 	du -ch "${DATA}/$(basename "$base")".osrm* | tail -1
-	echo "== routeid untuk banding: $(du -sh "${DATA}/$(basename "$base" | sed 's/-latest//').graph" 2>/dev/null | cut -f1) (kalau ada)"
+	echo "== nusapeta-route untuk banding: $(du -sh "${DATA}/$(basename "$base" | sed 's/-latest//').graph" 2>/dev/null | cut -f1) (kalau ada)"
 	;;
 serve)
 	[ -n "$ARG" ] || { echo "usage: $0 serve <file.osrm>" >&2; exit 2; }

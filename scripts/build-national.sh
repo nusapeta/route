@@ -5,6 +5,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p data bin
 [ -f data/indonesia-latest.osm.pbf ] || scripts/fetch.sh indonesia
-go build -o bin/rid-extract ./cmd/rid-extract
-GOMEMLIMIT="${GOMEMLIMIT:-5GiB}" bin/rid-extract \
+go build -o bin/nusa-extract ./cmd/nusa-extract
+GOMEMLIMIT="${GOMEMLIMIT:-5GiB}" bin/nusa-extract \
   -pbf data/indonesia-latest.osm.pbf -out data/indonesia.graph

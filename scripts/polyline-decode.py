@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode polyline routeid dengan aman, apa pun bentuk inputnya.
+"""Decode polyline nusapeta-route dengan aman, apa pun bentuk inputnya.
 
 Menerima (auto-deteksi):
   1. file respons JSON /route  -> pakai polyline_b64, polyline, atau points

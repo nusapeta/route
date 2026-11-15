@@ -5,7 +5,7 @@
 #   GOMEMLIMIT=5GiB scripts/build-national.sh
 #     -> data/indonesia.graph (1,6 GB; PBF 1,7 GB)
 # Format v3 (java-v3.graph.bak) hanya terbaca oleh image pre-m5; untuk rollback
-# simpan image lama: docker tag routeid:local routeid:pre-m5
+# simpan image lama: docker tag nusapeta-route:local nusapeta-route:pre-m5
 #
 # Tiga layanan inti, satu image: profil mobil dan motor tidak boleh berada di
 # proses yang sama (dua proses membuka file yang sama; profil dipilih per
@@ -18,8 +18,8 @@
 # Graph nasional memberi cakupan lokal di seluruh Indonesia; kontrak
 # -max-route-km 100 tetap berlaku. Rute antarpulau panjang (mis. Jakarta-Medan
 # 1.882 km) belum dilayani tanpa hierarki dua tingkat.
-x-routeid: &routeid
-  image: routeid:local
+x-nusapeta-route: &nusapeta-route
+  image: nusapeta-route:local
   restart: unless-stopped
   volumes:
     - ../data:/data:ro
@@ -44,20 +44,20 @@ x-routeid: &routeid
       max-file: "3"
 
 services:
-  routeid:
-    <<: *routeid
+  nusapeta-route:
+    <<: *nusapeta-route
     build:
       context: ..
       # Dockerfile lengkap (multi-stage, butuh tarik image golang) atau
-      # deploy/Dockerfile.prebuilt (pakai bin/rid-server yang sudah dibangun).
-      dockerfile: ${ROUTEID_DOCKERFILE:-Dockerfile}
+      # deploy/Dockerfile.prebuilt (pakai bin/nusa-serve yang sudah dibangun).
+      dockerfile: ${NUSAPETA_ROUTE_DOCKERFILE:-Dockerfile}
       # Provenans image. Tanpa argumen ini /version melaporkan "dev".
       #   COMMIT=$(git rev-parse --short HEAD) BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
       #     docker compose build && docker compose up -d
       args:
         COMMIT: ${COMMIT:-dev}
         BUILT: ${BUILT:-unknown}
-    container_name: routeid
+    container_name: nusapeta-route
     ports:
       # loopback saja: yang publik adalah gateway
       - "127.0.0.1:18080:8080"
@@ -104,25 +104,25 @@ services:
       - -trust-proxy
 
   gateway:
-    image: routeid:local
-    container_name: routeid-gateway
+    image: nusapeta-route:local
+    container_name: nusapeta-gateway
     restart: unless-stopped
     # Binary yang sama, entrypoint berbeda: satu image untuk server dan gateway.
-    entrypoint: ["/usr/local/bin/rid-gateway"]
+    entrypoint: ["/usr/local/bin/nusa-gateway"]
     ports:
       # Hanya loopback: Cloudflare Tunnel yang memegang akses publik. Jangan
       # ganti ke 0.0.0.0 kecuali memang ingin membuka IP LAN lagi.
       - "127.0.0.1:8080:8080"
     depends_on:
-      - routeid
-      - routeid-motor
+      - nusapeta-route
+      - nusapeta-route-motor
     command:
       - -addr
       - :8080
       - -mobil
-      - http://routeid:8080
+      - http://nusapeta-route:8080
       - -motor
-      - http://routeid-motor:8080
+      - http://nusapeta-route-motor:8080
       - -default
       - mobil
       # Cloudflare Tunnel mengirim CF-Connecting-IP; pakai itu supaya rate
@@ -165,7 +165,7 @@ services:
   # CLOUDFLARE_TUNNEL_TOKEN di deploy/.env.
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: routeid-cloudflared
+    container_name: nusapeta-route-cloudflared
     restart: unless-stopped
     profiles: ["cloudflare"]
     command: tunnel --no-autoupdate run
@@ -182,9 +182,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  routeid-motor:
-    <<: *routeid
-    container_name: routeid-motor
+  nusapeta-route-motor:
+    <<: *nusapeta-route
+    container_name: nusapeta-route-motor
     ports:
       # port host beda; di dalam container tetap 8080
       - "127.0.0.1:18081:8080"
@@ -196,7 +196,7 @@ services:
       - -addr
       - :8080
       # Sisa flag sengaja ditulis ulang, bukan dibiarkan default: nilai default
-      # di kode bisa berubah tanpa disadari. Samakan dengan layanan routeid.
+      # di kode bisa berubah tanpa disadari. Samakan dengan layanan nusapeta-route.
       - -conc
       - "4"
       - -workspace-mb

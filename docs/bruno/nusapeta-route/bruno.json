@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "nusapeta-route",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

@@ -59,8 +59,8 @@ E1 Java, 332 pasangan cocok:
 | p95 \|Δ jarak\| | 14,49% | <12% | gagal |
 | Max \|Δ jarak\| | 70,44% | — | dicatat |
 | p95 durasi absolut | 10,22% | <15% | lulus |
-| p50 latency RouteID | 38,7 ms | — | vs OSRM 1,5 ms |
-| p95 latency RouteID | 674 ms | — | vs OSRM 3,7 ms |
+| p50 latency Nusapeta Route | 38,7 ms | — | vs OSRM 1,5 ms |
+| p95 latency Nusapeta Route | 674 ms | — | vs OSRM 3,7 ms |
 
 D4 mengganti metrik primer ke p95 durasi absolut. Jarak tetap dilaporkan dan
 gerbangnya tetap gagal. Tidak ada klaim akurasi; E1 hanya perbandingan engine.
@@ -136,16 +136,16 @@ Urutan berdasarkan risiko, bukan keinginan:
 |---|---|---|
 | Graph nasional 1,6 GB | disk, page cache, build RAM | SSD, `mem_limit` 1,5 GB, arsip graph lama |
 | Tanpa hierarchy | rute 80–100 km ekor 1–3 s | budget 6 s, tolak >100 km, ukur demand |
-| Restriction di-skip | bisa melanggar larangan langka | `rid-restcheck`, fallback metric, dokumentasi |
+| Restriction di-skip | bisa melanggar larangan langka | `nusa-restcheck`, fallback metric, dokumentasi |
 | E2 tidak ada | tidak bisa klaim akurasi | limitation eksplisit; fokus biaya per rute |
 | Image membesar | identitas "ringan" melemah | ukur tiap build; prebuilt/static |
 | Container tanpa auth | penyalahgunaan | loopback + proxy/TLS + rate limit |
 
 ## Cara mengukur
 
-- Latency/throughput: `scripts/loadtest.py`, `bin/rid-bench`.
+- Latency/throughput: `scripts/loadtest.py`, `bin/nusa-bench`.
 - Memori: `/proc/<pid>/status` (`RssAnon` vs `RssFile`), bukan `ps rss`.
 - Regresi rute: `go test ./internal/graph -run TestGoldenRoutes`.
-- Restriction: `bin/rid-restcheck`.
+- Restriction: `bin/nusa-restcheck`.
 - Setiap angka paper harus punya perintah di `paper/RESULTS.md` dan status di
   `paper/COMPARISON.md`.

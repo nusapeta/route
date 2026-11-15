@@ -167,7 +167,7 @@ func TestGoldenRoutes(t *testing.T) {
 		if err != nil && !*updateGolden {
 			t.Fatalf("read golden: %v (run with -update to create)", err)
 		}
-		body := "# routeid golden routes\n" +
+		body := "# nusapeta-route golden routes\n" +
 			"#   node,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash\n" +
 			"#   snap,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash,trim_start,trim_end,snap_from_m,snap_to_m\n" +
 			strings.Join(got, "\n") + "\n"
@@ -451,7 +451,7 @@ func TestMotorGoldenRoutes(t *testing.T) {
 		if err != nil && !*updateGolden {
 			t.Fatalf("read golden: %v (run with -update to create)", err)
 		}
-		body := "# routeid motor golden routes\n" +
+		body := "# nusapeta-route motor golden routes\n" +
 			"#   profile,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash\n" +
 			strings.Join(got, "\n") + "\n"
 		if err := os.WriteFile(goldenPath, []byte(body), 0o644); err != nil {

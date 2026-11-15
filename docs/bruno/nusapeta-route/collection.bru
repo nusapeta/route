@@ -1,0 +1,31 @@
+meta {
+  name: nusapeta-route
+}
+
+docs {
+  HTTP API nusapeta-route. Pilih environment "Local" (http://127.0.0.1:8080) atau
+  "Homelab" (https://route.arifsani.xyz) di kanan atas Bruno.
+
+  Satu base URL, dua profil: tambahkan `profile=motor` ke query untuk graf
+  motor; tanpa parameter dilayani profil mobil. Homelab memakai gateway, jadi
+  `/healthz` menjawab kedua profil sekaligus, `/healthz?profile=motor` satu
+  profil, respons membawa `X-Route-Profile`, dan `profile=truk` dijawab 400.
+  Kalau base URL langsung menuju satu server (tanpa gateway), parameter itu
+  diabaikan dan request profil tetap jalan apa adanya.
+
+  Homelab memakai -rate 15 per menit (burst 5) per IP: jalankan koleksi dengan
+  `bru run docs/bruno/nusapeta-route -r --env Homelab --delay 4300` supaya tidak 429.
+  Dengan gateway, kuota tetap per IP klien, dan request identik dengan
+  If-None-Match dibalas 304 tanpa memakan kuota.
+
+  Request di folder "region-lain" butuh graf region tsb; server lokal yang
+  hanya memuat data/java.graph menjawab 422 dan test menerima itu. Begitu juga
+  profil motor: tanpa graf java-motor dan tanpa gateway, request-nya menerima
+  422 atau 502.
+
+  Menjalankan gateway di lokal (opsional, sama seperti homelab):
+    bin/nusa-serve -graph data/java.graph -addr 127.0.0.1:18080 -trust-proxy
+    bin/nusa-serve -graph data/java-motor.graph -addr 127.0.0.1:18081 -trust-proxy
+    bin/nusa-gateway -addr 127.0.0.1:8080 -mobil http://127.0.0.1:18080 \
+      -motor http://127.0.0.1:18081
+}

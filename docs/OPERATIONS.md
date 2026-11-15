@@ -1,6 +1,6 @@
 # Operasi
 
-Panduan ini untuk membangun, menjalankan, dan merawat RouteID. Langkah deploy
+Panduan ini untuk membangun, menjalankan, dan merawat Nusapeta Route. Langkah deploy
 host yang spesifik (Compose, systemd, Cloudflare Tunnel) ada di
 [`../deploy/README.md`](../deploy/README.md); dokumen ini menjelaskan
 kontraknya.
@@ -25,12 +25,12 @@ make test           # go vet + seluruh test
 `/version` melaporkan `dev`/`unknown`. `make static` memakai `CGO_ENABLED=0`,
 `-trimpath`, dan `SOURCE_DATE_EPOCH` bila tersedia.
 
-Ukuran binary saat ini: `bin/rid-server` ±6,7 MB. Image `routeid:local` yang
+Ukuran binary saat ini: `bin/nusa-serve` ±6,7 MB. Image `nusapeta-route:local` yang
 dibangun dari Dockerfile multi-stage terukur 36,7 MB; varian prebuilt lebih
 kecil karena hanya menyalin binary ke `alpine:3.22`.
 
 > **Jebakan Alpine:** binary hasil `go build` biasa ter-link ke glibc. Di image
-> musl, hasilnya `exec /usr/local/bin/rid-server: no such file or directory`.
+> musl, hasilnya `exec /usr/local/bin/nusa-serve: no such file or directory`.
 > Selalu pakai `make static` untuk image.
 
 ## Data dan graph
@@ -47,7 +47,7 @@ Build region:
 ```bash
 make graph REGION=java MEMLIM=2GiB
 # setara:
-GOMEMLIMIT=2GiB bin/rid-extract \
+GOMEMLIMIT=2GiB bin/nusa-extract \
   -pbf data/java-latest.osm.pbf -out data/java.graph
 ```
 
@@ -63,8 +63,8 @@ Graph nasional v5: 54.891.393 node / 112.340.071 edge, 1.621.222.584 B.
 Inspeksi:
 
 ```bash
-bin/rid-graphinfo -graph data/indonesia.graph
-bin/rid-graphinfo -graph data/indonesia.graph -at=-2.5916,140.6690
+bin/nusa-graphinfo -graph data/indonesia.graph
+bin/nusa-graphinfo -graph data/indonesia.graph -at=-2.5916,140.6690
 ```
 
 `-at` melakukan snap ke koordinat dan menampilkan edge/kelas; berguna untuk
@@ -90,7 +90,7 @@ proses, ganti file, lalu start:
 ```bash
 mv data/indonesia.graph data/indonesia.graph.prev
 mv data/indonesia.graph.new data/indonesia.graph
-sudo systemctl restart routeid
+sudo systemctl restart nusapeta-route
 ```
 
 Server memetakan file read-only; mengganti isi file di tempat saat proses
@@ -109,21 +109,21 @@ ekstraksi.
 Satu profil:
 
 ```bash
-bin/rid-server -graph data/indonesia.graph -addr 127.0.0.1:8080
+bin/nusa-serve -graph data/indonesia.graph -addr 127.0.0.1:8080
 ```
 
 Dua profil + gateway:
 
 ```bash
-bin/rid-server -graph data/indonesia.graph -profile car   -addr 127.0.0.1:18080
-bin/rid-server -graph data/indonesia.graph -profile motor -addr 127.0.0.1:18081
-bin/rid-gateway -addr 127.0.0.1:8080
+bin/nusa-serve -graph data/indonesia.graph -profile car   -addr 127.0.0.1:18080
+bin/nusa-serve -graph data/indonesia.graph -profile motor -addr 127.0.0.1:18081
+bin/nusa-gateway -addr 127.0.0.1:8080
 ```
 
 Bundle geocoder (opsional, upstream milik project lain):
 
 ```bash
-bin/rid-gateway -addr 127.0.0.1:8080 \
+bin/nusa-gateway -addr 127.0.0.1:8080 \
   -place http://placeid:8090 -place-rate 240 -place-burst 40
 ```
 
@@ -148,7 +148,7 @@ Untuk mesin kecil: `-conc 1` dan `GOMEMLIMIT=512MiB`. Untuk 2 core/4 thread,
 `-conc 4` memberi throughput lebih tinggi karena query didominasi I/O halaman
 dan GC, bukan CPU murni.
 
-Flag `rid-gateway`:
+Flag `nusa-gateway`:
 
 | Flag | Default | Efek |
 |---|---|---|
@@ -174,30 +174,30 @@ Dua pilihan image:
 | Pilihan | Perintah | Butuh |
 |---|---|---|
 | multi-stage | `docker compose up -d --build` | tarik `golang:1.27-alpine` |
-| prebuilt | `ROUTEID_DOCKERFILE=deploy/Dockerfile.prebuilt docker compose up -d --build` | binary dari `make static` |
+| prebuilt | `NUSAPETA_ROUTE_DOCKERFILE=deploy/Dockerfile.prebuilt docker compose up -d --build` | binary dari `make static` |
 
 Image tidak memuat data. Graph di-bind-mount dari host ke `/data:ro`. Batas
 container `mem_limit: 1536m` cukup untuk graph nasional; halaman `mmap` yang
 bersih bisa direklaim cgroup.
 
 Status `docker compose ps` harus `healthy` setelah startup. Kalau tidak, baca
-`docker logs routeid` dan `docker logs routeid-gateway`; jangan menganggap
+`docker logs nusapeta-route` dan `docker logs nusapeta-gateway`; jangan menganggap
 `/healthz` satu container mewakili seluruh deployment.
 
 ## systemd
 
-Unit contoh ada di `deploy/routeid.service`. Intinya:
+Unit contoh ada di `deploy/nusapeta-route.service`. Intinya:
 
 ```ini
 [Service]
-User=routeid
-ExecStart=/srv/routeid/bin/rid-server -graph /srv/routeid/data/indonesia.graph -addr 127.0.0.1:8080
+User=nusapeta
+ExecStart=/srv/nusapeta-route/bin/nusa-serve -graph /srv/nusapeta-route/data/indonesia.graph -addr 127.0.0.1:8080
 Restart=on-failure
 LimitNOFILE=65536
 ```
 
 Salin graph dan binary, lalu `systemctl daemon-reload && systemctl enable
---now routeid`. Jangan jalankan sebagai root. Batasi akses port ke loopback.
+--now Nusapeta Route`. Jangan jalankan sebagai root. Batasi akses port ke loopback.
 
 ## Cloudflare Tunnel
 
@@ -219,7 +219,7 @@ Tunnel memberi TLS di edge tanpa membuka port. Detail langkah ada di
 ```bash
 scripts/smoke.sh http://127.0.0.1:8080
 scripts/memcheck.sh http://127.0.0.1:18080
-curl -s 127.0.0.1:18080/metrics | grep -E '^route_|^routeid_workspace_'
+curl -s 127.0.0.1:18080/metrics | grep -E '^route_|^nusa_route_workspace_'
 ```
 
 Yang perlu dipantau:
@@ -229,8 +229,8 @@ Yang perlu dipantau:
 | `route_requests_total{code="422"}` | snap/terlalu jauh/budget | lihat `route_errors_total{reason}` |
 | `route_errors_total{reason="budget"}` | rute kehabisan budget | naikkan `-timeout`/`-max-route-km` atau terima batas |
 | `route_rate_limited_total` | klien kena limit | naikkan `-rate`/`-burst` atau pakai proxy |
-| `routeid_workspace_bytes` | tabel A* | bandingkan dengan `-workspace-mb` |
-| `routeid_workspace_shrinks_total` | reaper bekerja | normal setelah idle |
+| `nusa_route_workspace_bytes` | tabel A* | bandingkan dengan `-workspace-mb` |
+| `nusa_route_workspace_shrinks_total` | reaper bekerja | normal setelah idle |
 | `route_request_duration_seconds` | latency | bandingkan p50/p95, bukan rata-rata |
 
 RSS yang tinggi belum tentu bocor: `mmap` graph menghitung halaman resident.

@@ -1,4 +1,4 @@
-# routeid golden routes
+# nusapeta-route golden routes
 #   node,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash
 #   snap,from_lat,from_lon,to_lat,to_lon,dist_m,time_ds,nodes,seq_hash,trim_start,trim_end,snap_from_m,snap_to_m
 node,-7.789232,110.428765,-7.799933,110.399950,4356,5545,34,bb87e8ac55332c33

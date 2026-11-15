@@ -5,18 +5,18 @@ menjadi bukti. Jangan mencampur baris dari mesin atau format graph berbeda.
 
 ## Metode
 
-- **E1** membandingkan RouteID dan OSRM pada PBF yang sama, mesin yang sama,
+- **E1** membandingkan Nusapeta Route dan OSRM pada PBF yang sama, mesin yang sama,
   dan 600 pasangan yang sama. Kedua server dijalankan bergantian; urutan request
   dibalik per pasangan untuk mengurangi bias cache.
 - 600 pasangan dibagi 120 per bucket jarak garis lurus: 0–5, 5–15, 15–30,
   30–50, 50–80 km. Generator menggeser titik tujuan dari node jalan, sehingga
   banyak target jatuh di laut/hutan.
-- Pasangan dianggap **cocok** bila snap RouteID dan OSRM ≤250 m di kedua ujung
+- Pasangan dianggap **cocok** bila snap Nusapeta Route dan OSRM ≤250 m di kedua ujung
   dan titik snap kedua engine ≤50 m. Filter ini membuang perbedaan titik snap,
   bukan menyembunyikan kegagalan; jumlah yang dibuang dilaporkan.
 - Latency adalah wall time HTTP, bukan waktu CPU. p50/p95 dihitung dari
   pasangan yang cocok.
-- Jarak adalah jarak rute final. Selisih = `(routeid - osrm) / osrm`.
+- Jarak adalah jarak rute final. Selisih = `(nusapeta-route - osrm) / osrm`.
 - Tidak ada cache rute pada bench; ETag/HTTP cache dimatikan.
 - E1 bukan ground truth. E2 tidak dijalankan; tidak ada klaim akurasi absolut.
 
@@ -31,13 +31,13 @@ menjadi bukti. Jangan mencampur baris dari mesin atau format graph berbeda.
 Jangan memakai angka i5 untuk kapasitas produksi, dan jangan memakai angka
 Ryzen untuk klaim throughput 2 core.
 
-## E1: RouteID vs OSRM MLD
+## E1: Nusapeta Route vs OSRM MLD
 
 Mesin Ryzen, Java, PBF `java-latest.osm.pbf` 899.289.655 B, 600 pasangan.
-RouteID memakai graph format 4 (22.712.775 node / 46.676.434 edge); OSRM
+Nusapeta Route memakai graph format 4 (22.712.775 node / 46.676.434 edge); OSRM
 v5.26.0 MLD dengan `car.lua`. Ini run E1 terkontrol, bukan graph v5 nasional.
 
-| Metrik | RouteID | OSRM |
+| Metrik | Nusapeta Route | OSRM |
 |---|---:|---:|
 | Artefak | **693.111.912 B** (1 file) | 5.082.571.256 B |
 | Preprocess | **28 s** | 250 s (151 + 83 + 16) |
@@ -54,7 +54,7 @@ v5.26.0 MLD dengan `car.lua`. Ini run E1 terkontrol, bukan graph v5 nasional.
 | Durasi: signed p95 | +2,39% | referensi |
 | Durasi: absolut p95 | 10,22% | referensi |
 
-RSS RouteID setelah 600 query naik karena halaman `mmap` yang tersentuh, bukan
+RSS Nusapeta Route setelah 600 query naik karena halaman `mmap` yang tersentuh, bukan
 karena graph disalin ke heap. Angka OSRM dari `docker stats --no-stream`.
 
 ### Kelayakan pasangan
@@ -63,10 +63,10 @@ karena graph disalin ke heap. Angka OSRM dari `docker stats --no-stream`.
 |---|---:|
 | Total pasangan | 600 |
 | Cocok untuk perbandingan jarak | 332 |
-| Gagal RouteID | 79 |
+| Gagal Nusapeta Route | 79 |
 | Dibuang filter snap | 189 |
 
-79 kegagalan RouteID: **72 `snap`**, **7 `budget`** (search space exhausted).
+79 kegagalan Nusapeta Route: **72 `snap`**, **7 `budget`** (search space exhausted).
 Tidak ada `no_route` pada run final. Pada 79 pasangan itu, OSRM menempel target
 dengan median **15,3 km**, p90 **32,7 km**, maksimum **44,6 km** dari koordinat
 input. OSRM tidak gagal, tetapi titiknya bukan pembanding yang setara.
@@ -76,7 +76,7 @@ sebelum kalibrasi tabel kecepatan. Jangan dipakai sebagai hasil final.
 
 ### Per bucket (final)
 
-| Bucket | Cocok | Gagal | RouteID p50 | RouteID p95 | OSRM p50 | OSRM p95 | p95 \|Δ\| | max \|Δ\| | >10% |
+| Bucket | Cocok | Gagal | Nusapeta Route p50 | Nusapeta Route p95 | OSRM p50 | OSRM p95 | p95 \|Δ\| | max \|Δ\| | >10% |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 0–5 km | 86 | 0 | 4,0 ms | 13,8 ms | 0,7 ms | 1,0 ms | 16,75% | 45,17% | 9 |
 | 5–15 km | 73 | 6 | 21,7 ms | 72,3 ms | 1,2 ms | 1,7 ms | 14,96% | 70,44% | 5 |
@@ -218,16 +218,16 @@ Ini perbaikan geometri, bukan klaim akurasi rute.
 
 ```bash
 # E1 (butuh OSRM di port 5000)
-bin/rid-server -graph data/java.graph -addr 127.0.0.1:18085 \
+bin/nusa-serve -graph data/java.graph -addr 127.0.0.1:18085 \
   -conc 1 -rate 0 -timeout 60s -max-route-km 0
 scripts/m6-compare.py --pairs paper/results/pairs-java.csv \
-  --routeid http://127.0.0.1:18085 --osrm http://127.0.0.1:5000 \
+  --route http://127.0.0.1:18085 --osrm http://127.0.0.1:5000 \
   --csv paper/results/e1-osrm-aligned.csv
 python3 scripts/e1-stats.py paper/results/e1-osrm-aligned.csv
 
 # 100 km, tiga region. m6-compare.py tidak punya flag cache;
 # ulangi request dari pairs tanpa ETag (lihat RESULTS.md §19).
-bin/rid-server -graph data/java.graph -graph data/sumatra.graph \
+bin/nusa-serve -graph data/java.graph -graph data/sumatra.graph \
   -graph data/nusa-tenggara.graph -addr 127.0.0.1:18085 \
   -conc 4 -rate 0 -timeout 20s -max-route-km 100 -workspace-mb 256
 

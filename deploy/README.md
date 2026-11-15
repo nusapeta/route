@@ -21,7 +21,7 @@ memakai ~5 GB; jangan jalankan bersamaan dengan build region lain.
 Build manual masih bisa dipakai:
 ```bash
 make build
-./bin/rid-extract -pbf data/indonesia-latest.osm.pbf -out data/indonesia.graph
+./bin/nusa-extract -pbf data/indonesia-latest.osm.pbf -out data/indonesia.graph
 ```
 
 ## 1a. Docker Compose
@@ -31,14 +31,14 @@ Dua pilihan image:
 | pilihan | cara | butuh |
 |---|---|---|
 | multi-stage | `docker compose up -d --build` | tarik image `golang:1.27-alpine` (~800 MB) |
-| prebuilt (hemat) | `ROUTEID_DOCKERFILE=deploy/Dockerfile.prebuilt docker compose up -d --build` | hanya `alpine:3.22` (~4 MB) |
+| prebuilt (hemat) | `NUSAPETA_ROUTE_DOCKERFILE=deploy/Dockerfile.prebuilt docker compose up -d --build` | hanya `alpine:3.22` (~4 MB) |
 
 Untuk pilihan prebuilt, kirim binary statisnya dulu (jangan binary dinamis,
 lihat catatan di bawah):
 
 ```bash
 make static
-rsync -a bin/static/ host:~/Projects/routeid/bin/
+rsync -a bin/static/ host:~/Projects/route/bin/
 ```
 
 Kirim juga source kalau image dibangun di host (Dockerfile build dari konteks):
@@ -48,7 +48,7 @@ rsync -az --delete \
   --exclude '.git/' --exclude 'data/' --exclude 'bin/' --exclude 'paper/' \
   --exclude 'deploy/.env' --exclude '*.graph' --exclude '*.osm.pbf' \
   --exclude '*.geojson' --exclude '*.bak*' \
-  ./ host:~/Projects/routeid/
+  ./ host:~/Projects/route/
 ```
 
 `--delete` menghapus apa pun yang tidak ada di mesin pengembang, termasuk
@@ -57,7 +57,7 @@ menjalankannya. `.env`, `data/`, dan `bin/` hanya ada di host.
 
 > **Jebakan yang sudah memakan waktu:** binary hasil `go build` biasa ter-link
 > dinamis ke glibc. Di image alpine (musl) hasilnya error
-> `exec /usr/local/bin/rid-server: no such file or directory`, pesan yang
+> `exec /usr/local/bin/nusa-serve: no such file or directory`, pesan yang
 > menyesatkan, filenya ada. Selalu pakai `make static`
 > (`CGO_ENABLED=0`) untuk image, dan jangan rsync folder `bin/` mentah-mentah.
 
@@ -82,14 +82,14 @@ stop 25 s, log diputar 3x10 MB.
 ## 1b. systemd (tanpa Docker)
 
 ```bash
-sudo useradd --system --home /srv/routeid --shell /usr/sbin/nologin routeid
-sudo mkdir -p /srv/routeid/bin && sudo cp bin/rid-server /srv/routeid/bin/
-sudo cp -r data /srv/routeid/            # indonesia.graph (1,6 GB)
-sudo chown -R routeid:routeid /srv/routeid
-sudo install -m 0644 deploy/routeid.service /etc/systemd/system/
+sudo useradd --system --home /srv/nusapeta-route --shell /usr/sbin/nologin nusapeta-route
+sudo mkdir -p /srv/nusapeta-route/bin && sudo cp bin/nusa-serve /srv/nusapeta-route/bin/
+sudo cp -r data /srv/nusapeta-route/            # indonesia.graph (1,6 GB)
+sudo chown -R nusapeta-route:nusapeta-route /srv/nusapeta-route
+sudo install -m 0644 deploy/nusapeta-route.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now routeid
-systemctl status routeid --no-pager
+sudo systemctl enable --now nusapeta-route
+systemctl status nusapeta-route --no-pager
 ```
 
 Unit sudah membatasi `MemoryMax=1200M` dan mengeraskan filesystem
@@ -103,10 +103,10 @@ menjalankan tiga container inti dari image yang sama:
 
 | container | port | isi |
 |---|---|---|
-| `routeid-gateway` | `127.0.0.1:8080` (loopback) | proxy pemilih profil |
-| `routeid` | `127.0.0.1:18080` (loopback) | `indonesia` (mobil) |
-| `routeid-motor` | `127.0.0.1:18081` (loopback) | `indonesia` dengan `-profile motor` |
-| `routeid-cloudflared` | tanpa port | opsional, profil compose `cloudflare` |
+| `nusapeta-gateway` | `127.0.0.1:8080` (loopback) | proxy pemilih profil |
+| `nusapeta-route` | `127.0.0.1:18080` (loopback) | `indonesia` (mobil) |
+| `nusapeta-route-motor` | `127.0.0.1:18081` (loopback) | `indonesia` dengan `-profile motor` |
+| `nusapeta-route-cloudflared` | tanpa port | opsional, profil compose `cloudflare` |
 
 Tidak ada port yang mendengarkan di `0.0.0.0`; akses dari luar host hanya lewat
 Cloudflare Tunnel (bagian 1d).
@@ -138,7 +138,7 @@ index Indonesia:
 
 | Path publik | Upstream |
 |---|---|
-| `https://route.arifsani.xyz/route` | `routeid` / `routeid-motor` |
+| `https://route.arifsani.xyz/route` | `nusapeta-route` / `nusapeta-route-motor` |
 | `https://route.arifsani.xyz/place/*` | `http://placeid:8090` |
 
 Prefix, bukan hostname kedua, karena hostname publik hanya punya satu route
@@ -164,13 +164,13 @@ kolomnya dinonaktifkan dan petunjuk kembali ke "klik peta", jadi tidak ada
 kolom yang menjawab `404` di setiap ketikan.
 
 ```bash
-make static                                   # bin/static/rid-extract + rid-gateway
+make static                                   # bin/static/nusa-extract + nusa-gateway
 GOMEMLIMIT=5GiB scripts/build-national.sh     # data/indonesia.graph: mobil + motor
 cd deploy && docker compose up -d             # gateway ikut dibuat
 curl -s 127.0.0.1:8080/healthz | head -c 300
 ```
 
-Sejak format v5 satu file nasional memuat kedua profil; `routeid-motor`
+Sejak format v5 satu file nasional memuat kedua profil; `nusapeta-route-motor`
 membuka file yang sama dengan `-profile motor`. Angka lama (tiga region
 terpisah, 2026-11-10/12) tetap dicatat di `docs/BACKLOG.md` dan
 `docs/PLAN-2026-11-10.md`; ukuran v5 nasional diukur ulang setelah rollout.
@@ -195,7 +195,7 @@ Port 8080 tetap loopback; tidak ada IP/LAN yang bisa dipanggil dari internet.
 
 ### Di Cloudflare
 
-1. **Networking > Tunnels > Create Tunnel**, beri nama `routeid`.
+1. **Networking > Tunnels > Create Tunnel**, beri nama `nusapeta-route`.
 2. Pilih lingkungan **Docker**. Salin token dari perintah
    `cloudflared tunnel --no-autoupdate run --token ...`.
 3. Di tunnel itu, **Routes > Add route > Published application**:
@@ -222,7 +222,7 @@ cp .env.example .env
 $EDITOR .env                 # isi CLOUDFLARE_TUNNEL_TOKEN=...
 docker compose --profile cloudflare up -d --build
 docker compose --profile cloudflare ps
-docker logs --tail 30 routeid-cloudflared   # cari "Registered tunnel connection"
+docker logs --tail 30 nusapeta-route-cloudflared   # cari "Registered tunnel connection"
 ```
 
 Token hanya ada di `deploy/.env`, yang di-ignore git. Jangan menaruhnya di
@@ -285,7 +285,7 @@ diubah.
 
 ```bash
 scripts/smoke.sh http://127.0.0.1:8080
-./bin/rid-graphinfo -graph data/indonesia.graph -at=-2.5916,140.6690  # snap Jayapura
+./bin/nusa-graphinfo -graph data/indonesia.graph -at=-2.5916,140.6690  # snap Jayapura
 ```
 
 Contoh cepat:
@@ -305,7 +305,7 @@ curl -s "127.0.0.1:8080/route?from=-6.2088,106.8456&to=-6.9175,107.6191&format=g
 | 1x rute 578 km | 613 MB |
 | puncak, 600 pasang campuran (build `8e2dc11`, historis) | ~1,1 GB (`anon` 415 MB) |
 | beban kontrak 100 km, `-conc 4 -workspace-mb 256` (Ryzen 5 5600G) | 1,02-1,10 GB (`anon` 343-425 MB, tabel 126-201 MB) |
-| homelab i3-6100T, v5, 6 rute campuran (3 region, sebelum nasional) | `routeid` 76 MB (`anon` 65 MB), `routeid-motor` 26 MB (`anon` 17 MB) |
+| homelab i3-6100T, v5, 6 rute campuran (3 region, sebelum nasional) | `nusapeta-route` 76 MB (`anon` 65 MB), `nusapeta-route-motor` 26 MB (`anon` 17 MB) |
 | graph nasional, 4x rute 96 km paralel (Ryzen, `-conc 4`) | 225 MiB (`anon` 90 MiB) |
 | graph nasional, 4x rute 80 km paralel (Ryzen, `-conc 4`) | 190 MiB (`anon` 90 MiB) |
 | graph nasional, 1x Jakarta-Medan 1.882 km (`-max-route-km 0`) | 701 MiB (`anon` 401 MiB) |
@@ -339,7 +339,7 @@ Ukur sendiri sesudah beban:
 # Gateway publik menolak /metrics; scrape proses upstream langsung.
 scripts/memcheck.sh http://127.0.0.1:18080           # mobil
 scripts/memcheck.sh http://127.0.0.1:18081           # motor
-curl -s http://127.0.0.1:18080/metrics | grep ^routeid_workspace_
+curl -s http://127.0.0.1:18080/metrics | grep ^nusa_route_workspace_
 ```
 
 ## 3b. Kapasitas (terukur di i3-6100T, 2C/4T)
@@ -362,9 +362,9 @@ Gateway sudah membatasi per IP (15/menit, burst 5). Kalau butuh batas
 kasar tambahan di reverse proxy, kuncinya harus IP klien, bukan IP proxy:
 
 ```
-routeid.lan {
+nusapeta-route.lan {
     rate_limit {
-        zone routeid { key {http.request.header.CF-Connecting-IP} events 30 window 1m }
+        zone nusapeta-route { key {http.request.header.CF-Connecting-IP} events 30 window 1m }
     }
     reverse_proxy 127.0.0.1:8080 {
         transport http { response_header_timeout 30s }
@@ -401,7 +401,7 @@ Untuk homelab:
 
 ```bash
 GOMEMLIMIT=5GiB scripts/build-national.sh
-docker compose restart      # atau: sudo systemctl restart routeid
+docker compose restart      # atau: sudo systemctl restart nusapeta-route
 ```
 
 Untuk update tanpa downtime: bangun ke nama lain (`indonesia-new.graph`), lalu

@@ -1,0 +1,40 @@
+meta {
+  name: metrics (profil motor)
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/metrics?profile=motor
+  body: none
+  auth: none
+}
+
+docs {
+  Counter per proses: route_snap_retry_total di profil motor tidak sama dengan
+  profil mobil. Butuh gateway, tanpa gateway parameter diabaikan. Gateway
+  publik memakai -block-metrics, jadi lewat domain jawabannya 404; scrape
+  http://127.0.0.1:18081/metrics langsung.
+}
+
+tests {
+  const code = res.getStatus();
+  test("200, atau 404 kalau gateway memblokir /metrics", function () {
+    expect([200, 404]).to.include(code);
+  });
+  if (code === 200) {
+    const body = res.getBody();
+    test("metrik nusapeta-route ada", function () {
+      expect(body).to.include("nusa_route_build_info");
+      expect(body).to.include("route_snap_retry_total");
+    });
+    const p = res.getHeader("X-Route-Profile");
+    if (p) {
+      test("dilayani profil motor", function () {
+        expect(p).to.equal("motor");
+      });
+    }
+  } else {
+    console.log("404: blokir /metrics di gateway, scrape upstream langsung");
+  }
+}

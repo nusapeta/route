@@ -1,6 +1,6 @@
 # HTTP API
 
-Server: `rid-server` (satu profil) atau `rid-gateway` (mobil + motor di satu
+Server: `nusa-serve` (satu profil) atau `nusa-gateway` (mobil + motor di satu
 base URL). Tidak ada autentikasi. Base URL contoh: `http://127.0.0.1:8080`.
 
 ## Ringkasan endpoint
@@ -220,7 +220,7 @@ Response server tunggal:
       "pbf_sha256": "752489d3...",
       "built_at": "2026-11-12T11:12:59Z",
       "source": "indonesia-latest.osm.pbf",
-      "extractor": "rid-extract",
+      "extractor": "nusa-extract",
       "profile": "car+motor",
       "profile_sha256": "..."
     }
@@ -271,16 +271,16 @@ Prometheus text format, tanpa dependency. Metrik utama:
 | `route_errors_total{reason}` | counter | `snap`, `too_far`, `budget`, `no_route`, `cross_region` |
 | `route_snap_retry_total` | counter | snap alternatif setelah no-route |
 | `route_cross_region_stitched_total` | counter | rute ferry lintas region |
-| `routeid_workspace_slots` | gauge | total slot tabel A* |
-| `routeid_workspace_bytes` | gauge | estimasi 12 B/slot |
-| `routeid_workspace_grows_total` | counter | rehash tumbuh |
-| `routeid_workspace_shrinks_total` | counter | rehash menyusut |
-| `routeid_build_info{commit,go_version}` | gauge | identitas build |
+| `nusa_route_workspace_slots` | gauge | total slot tabel A* |
+| `nusa_route_workspace_bytes` | gauge | estimasi 12 B/slot |
+| `nusa_route_workspace_grows_total` | counter | rehash tumbuh |
+| `nusa_route_workspace_shrinks_total` | counter | rehash menyusut |
+| `nusa_route_build_info{commit,go_version}` | gauge | identitas build |
 
 Contoh query:
 
 ```bash
-curl -s 127.0.0.1:18080/metrics | grep -E '^route_(requests|errors|expansions)|^routeid_workspace_'
+curl -s 127.0.0.1:18080/metrics | grep -E '^route_(requests|errors|expansions)|^nusa_route_workspace_'
 ```
 
 ## Integrasi Flutter
@@ -329,8 +329,8 @@ lama masih valid. Jangan cache `422`/`429`/`504`.
 
 ## Tooling
 
-- Koleksi Bruno: `docs/bruno/routeid/`.
-- Postman: `docs/routeid.postman_collection.json`.
+- Koleksi Bruno: `docs/bruno/nusapeta-route/`.
+- Postman: `docs/nusapeta-route.postman_collection.json`.
 - Smoke test: `scripts/smoke.sh http://127.0.0.1:8080`.
 
 Bruno/Postman memakai contoh koordinat dan assertion status; perbarui keduanya

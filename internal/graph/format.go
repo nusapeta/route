@@ -65,6 +65,9 @@ const (
 	// VersionMin is the oldest readable format version.
 	VersionMin = 5
 
+	// magicLE is the on-disk format identifier, not a brand: graphs built
+	// before the nusapeta rename still carry it, so it only changes with a
+	// format version bump.
 	magicLE     = 0x47444952 // "RIDG"
 	headerSize  = 320
 	numSections = 14
@@ -285,7 +288,7 @@ func Open(path string) (*Graph, error) {
 	be := binary.LittleEndian
 	if got := be.Uint32(data[0:]); got != magicLE {
 		syscall.Munmap(data)
-		return nil, errors.New("graph: bad magic (not a routeid graph)")
+		return nil, errors.New("graph: bad magic (not a nusapeta-route graph)")
 	}
 	if v := be.Uint32(data[4:]); v < VersionMin || v > Version {
 		syscall.Munmap(data)

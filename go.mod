@@ -1,4 +1,4 @@
-module routeid
+module github.com/nusapeta/route
 
 go 1.27.3
 
@@ -9,6 +9,5 @@ require (
 	github.com/paulmach/orb v0.12.0 // indirect
 	github.com/paulmach/protoscan v0.2.1 // indirect
 	go.mongodb.org/mongo-driver v1.17.4 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )

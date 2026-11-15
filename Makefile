@@ -1,4 +1,4 @@
-# routeid - build, test, and data targets.
+# nusapeta-route - build, test, and data targets.
 GO      ?= go
 REGION  ?= java
 MEMLIM  ?= 2GiB
@@ -10,7 +10,7 @@ ISLANDS  = java sumatra kalimantan sulawesi nusa-tenggara maluku papua
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 BUILT   := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.commit=$(COMMIT) -X main.buildTime=$(BUILT) \
-           -X routeid/internal/extract.Version=$(COMMIT)
+           -X github.com/nusapeta/route/internal/extract.Version=$(COMMIT)
 STATIC  := -s -w $(LDFLAGS)
 
 .PHONY: all build test vet fmt clean fetch graph java sumatra islands bench restcheck refresh
@@ -23,11 +23,11 @@ build:
 # binary statis (CGO_ENABLED=0) untuk image alpine/distroless
 static:
 	mkdir -p bin/static
-	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-server ./cmd/rid-server
-	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-gateway ./cmd/rid-gateway
-	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-extract ./cmd/rid-extract
-	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-route ./cmd/rid-route
-	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/rid-graphinfo ./cmd/rid-graphinfo
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/nusa-serve ./cmd/nusa-serve
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/nusa-gateway ./cmd/nusa-gateway
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/nusa-extract ./cmd/nusa-extract
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/nusa-route ./cmd/nusa-route
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(STATIC)' -o bin/static/nusa-graphinfo ./cmd/nusa-graphinfo
 
 test: vet
 	$(GO) test ./...
@@ -50,7 +50,7 @@ fetch:
 # One artefact carries both the car and the motorcycle profile (v5).
 graph: build
 	[ -f data/$(REGION)-latest.osm.pbf ] || scripts/fetch.sh $(REGION)
-	GOMEMLIMIT=$(MEMLIM) bin/rid-extract -pbf data/$(REGION)-latest.osm.pbf \
+	GOMEMLIMIT=$(MEMLIM) bin/nusa-extract -pbf data/$(REGION)-latest.osm.pbf \
 	  -out data/$(REGION).graph
 
 java:
@@ -64,20 +64,20 @@ islands: build
 	@for r in $(ISLANDS); do $(MAKE) graph REGION=$$r || exit 1; done
 
 bench: build
-	bin/rid-bench -graph data/java.graph -pairs paper/results/pairs-java.csv
+	bin/nusa-bench -graph data/java.graph -pairs paper/results/pairs-java.csv
 
 docker: build
 	cd deploy && docker compose build
 
 restcheck: build
-	bin/rid-restcheck -graph data/java.graph -json paper/restrcheck-java.json
+	bin/nusa-restcheck -graph data/java.graph -json paper/restrcheck-java.json
 
 # One command for a monthly data refresh: download, rebuild, census the ways,
 # run the golden suite, and do a short A/B on localhost.
 refresh: build
 	scripts/fetch.sh $(REGION)
 	$(MAKE) graph REGION=$(REGION)
-	bin/rid-tagstats -pbf data/$(REGION)-latest.osm.pbf > data/$(REGION)-tagstats.txt
-	bin/rid-graphinfo -graph data/$(REGION).graph > data/$(REGION)-graphinfo.txt
+	bin/nusa-tagstats -pbf data/$(REGION)-latest.osm.pbf > data/$(REGION)-tagstats.txt
+	bin/nusa-graphinfo -graph data/$(REGION).graph > data/$(REGION)-graphinfo.txt
 	$(MAKE) test
 	scripts/refresh-ab.sh $(REGION)

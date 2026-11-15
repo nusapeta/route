@@ -1,4 +1,4 @@
-"""Dekoder polyline routeid (precision 1e-5), satu implementasi untuk
+"""Dekoder polyline nusapeta-route (precision 1e-5), satu implementasi untuk
 scripts/polyline-decode.py dan scripts/route2geojson.py.
 
 Termasuk deteksi string terpotong dan pemilihan field JSON: polyline_b64,

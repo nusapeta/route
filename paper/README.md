@@ -1,4 +1,4 @@
-# Paper draft: RouteID
+# Paper draft: Nusapeta Route
 
 Status: **draf lengkap; E1 final 2026-11-10; E2 tidak dijalankan (D1:
 limitation).** Dikompilasi 2026-11-12 dengan Tectonic 0.17.0 (6 halaman);
@@ -33,7 +33,7 @@ Kompilasi terakhir memakai Tectonic static dan bundle cache lokal:
 
 Mesin Ryzen 5 5600G, Java, 600 pasangan; 332 cocok setelah filter snap.
 
-| Metrik | RouteID | OSRM MLD |
+| Metrik | Nusapeta Route | OSRM MLD |
 |---|---:|---:|
 | Artefak | **693 MB** (1 file) | 5,08 GB |
 | Preprocess | **28 s** | 250 s |
@@ -57,7 +57,7 @@ di tiga region Ryzen. **Belum** ada latency satu graph nasional penuh.
 
 - Artefak dan preprocess lebih kecil/cepat dari OSRM MLD pada Java.
 - RSS idle dan setelah beban lebih kecil dari OSRM.
-- RouteID lebih lambat; jangan menulis "tercepat".
+- Nusapeta Route lebih lambat; jangan menulis "tercepat".
 - Jarak relatif terhadap OSRM: median 0,23%, p95 14,49%; gerbang p95 <12%
   gagal. D4 memakai p95 durasi absolut 10,22% sebagai metrik primer.
 - ε=1,5 mempertahankan panjang rute 526/526; Hilbert 7–20% p50 lebih cepat.

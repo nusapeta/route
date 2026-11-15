@@ -53,10 +53,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-bin/rid-server -graph "$g" -addr "127.0.0.1:${mport}" -conc 1 -rate 0 -timeout 60s \
+bin/nusa-serve -graph "$g" -addr "127.0.0.1:${mport}" -conc 1 -rate 0 -timeout 60s \
 	>"$tmp/mobil.log" 2>&1 &
 pids+=("$!")
-bin/rid-server -profile motor -graph "$g" -addr "127.0.0.1:${kport}" -conc 1 -rate 0 -timeout 60s \
+bin/nusa-serve -profile motor -graph "$g" -addr "127.0.0.1:${kport}" -conc 1 -rate 0 -timeout 60s \
 	>"$tmp/motor.log" 2>&1 &
 pids+=("$!")
 

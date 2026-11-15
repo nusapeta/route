@@ -9,7 +9,7 @@ import (
 	"github.com/paulmach/osm"
 	"github.com/paulmach/osm/osmpbf"
 
-	"routeid/internal/graph"
+	"github.com/nusapeta/route/internal/graph"
 )
 
 // RestrictionStats counts how the OSM restriction relations were handled.
