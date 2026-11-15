@@ -1,36 +1,35 @@
 # Changelog
 
-Semua perubahan yang terlihat pengguna dicatat di sini. Format mengikuti
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versi mengikuti
-[SemVer](https://semver.org/). Format `.graph` punya versi sendiri (`v5`).
+All user-visible changes are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
+[SemVer](https://semver.org/). The `.graph` format has its own version (`v5`).
 
 ## [Unreleased]
 
-## [0.1.0] - belum dirilis
+## [0.1.0] - unreleased
 
-Rilis publik pertama. Nama proyek: Nusapeta Route (sebelumnya routeid).
+First public release. Project name: Nusapeta Route (previously routeid).
 
 ### Added
 
-- `nusa-extract`: PBF Indonesia menjadi satu graph mmap berisi profil mobil dan
-  motor, format v5.
-- `nusa-serve`: `/route`, `/healthz`, `/version`, `/metrics`; dua profil dari
-  satu graph.
-- `nusa-gateway`: satu base URL dengan `?profile=mobil|motor`, plus prefix
-  `/place` opsional ke geocoder Nusapeta Place.
+- `nusa-extract`: Indonesian PBF into one mmap graph with car and motorcycle
+  profiles, format v5.
+- `nusa-serve`: `/route`, `/healthz`, `/version`, `/metrics`; two profiles from
+  one graph.
+- `nusa-gateway`: one base URL with `?profile=mobil|motor`, plus an optional
+  `/place` prefix to the Nusapeta Place geocoder.
 - `nusa-bench`, `nusa-restcheck`, `nusa-graphinfo`, `nusa-tagstats`,
-  `nusa-snapcheck`, `nusa-restats`, `nusa-route` untuk operasi dan audit data.
-- Demo peta di `/` dan kumpulan request Bruno/Postman di `contrib/http/`.
-- Artefak data `data-2026.11` (graph nasional) dengan lisensi ODbL 1.0.
+  `nusa-snapcheck`, `nusa-restats`, `nusa-route` for operations and data audit.
+- Demo map at `/` and a Bruno/Postman request collection in `contrib/http/`.
+- `data-2026.11` data artifact (national graph) under ODbL 1.0.
 
 ### Known limitations
 
-- Cakupan Indonesia saja; rute antarpulau panjang belum dilayani tanpa graph
-  dua tingkat.
-- Batas rute 100 km garis lurus; di atas itu dijawab 422.
-- Akurasi ETA: gate E1 median selisih 0,23%, p95 14,49%; bukan klaim setara
-  OSRM.
-- Tanpa autentikasi bawaan; rate limit per IP.
+- Indonesia only; long inter-island routes need a two-level graph.
+- 100 km straight-line route cap; above that the server returns 422.
+- ETA accuracy: E1 gate median difference 0.23%, p95 14.49%; this is not a claim
+  of parity with OSRM.
+- No built-in authentication; per-IP rate limit only.
 
 [Unreleased]: https://github.com/nusapeta/route/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/nusapeta/route/releases/tag/v0.1.0

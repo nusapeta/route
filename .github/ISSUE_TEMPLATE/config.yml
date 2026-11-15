@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Pertanyaan penggunaan
+  - name: Usage questions
     url: https://github.com/nusapeta/route/blob/main/docs/API.md
-    about: Kontrak HTTP, error, cache, dan contoh klien ada di sini.
-  - name: Cara deploy
+    about: HTTP contract, errors, caching, and client examples.
+  - name: Deployment
     url: https://github.com/nusapeta/route/blob/main/deploy/README.md
-    about: Compose, systemd, tunnel, resource, dan batas laju.
-  - name: Kerentanan
+    about: Compose, systemd, tunnels, resources, and rate limits.
+  - name: Vulnerabilities
     url: https://github.com/nusapeta/route/security/advisories/new
-    about: Laporkan lewat private advisory, bukan issue publik.
+    about: Report through a private advisory, not a public issue.

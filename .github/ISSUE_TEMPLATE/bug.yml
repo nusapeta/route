@@ -1,52 +1,52 @@
-name: Laporan bug
-description: Perilaku yang salah, crash, atau respons HTTP tak terduga
+name: Bug report
+description: Wrong behavior, a crash, or an unexpected HTTP response
 title: "bug: "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Jangan laporkan kerentanan di sini. Baca `SECURITY.md`.
-        Untuk rute yang terasa salah tetapi tidak crash, pakai formulir
-        "Laporan data atau rute".
+        Do not report vulnerabilities here. Read `SECURITY.md`.
+        For a route that looks wrong but does not crash, use the
+        "Data or route report" form.
   - type: textarea
     id: what
     attributes:
-      label: Apa yang terjadi
-      description: Respons aktual, kode status, dan pesan error.
+      label: What happened
+      description: Actual response, status code, and error message.
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Apa yang diharapkan
+      label: What you expected
     validations:
       required: true
   - type: input
     id: request
     attributes:
       label: Request
-      description: URL lengkap atau perintah curl.
+      description: Full URL or curl command.
       placeholder: curl -s 'http://127.0.0.1:8080/route?from=...&to=...'
     validations:
       required: true
   - type: textarea
     id: graph
     attributes:
-      label: Graph dan versi
-      description: Keluaran `/healthz` (format, hash PBF, extractor) atau `nusa-graphinfo`.
+      label: Graph and version
+      description: "`/healthz` output (format, PBF hash, extractor) or `nusa-graphinfo`."
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: Versi
-      description: `/version` atau commit.
+      label: Version
+      description: "`/version` or commit."
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Log
-      description: Baris log terkait, tanpa data pribadi.
+      label: Logs
+      description: Related log lines, without personal data.
       render: text

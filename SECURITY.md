@@ -1,58 +1,57 @@
-# Keamanan
+# Security
 
-## Melaporkan masalah
+## Reporting a problem
 
-Jangan membuka issue publik untuk kerentanan yang bisa dieksploitasi. Gunakan
-GitHub private security advisory di
-<https://github.com/nusapeta/route/security/advisories/new>. Sertakan:
+Do not open a public issue for an exploitable vulnerability. Use the GitHub
+private security advisory at
+<https://github.com/nusapeta/route/security/advisories/new>. Include:
 
-- versi commit (`/version`) atau image tag;
-- langkah reproduksi;
-- dampak yang mungkin;
-- apakah masalah bisa dipicu lewat HTTP atau hanya lewat graph yang rusak.
+- the commit version (`/version`) or image tag;
+- reproduction steps;
+- possible impact;
+- whether the problem is reachable over HTTP or only through a corrupt graph.
 
-Konfirmasi penerimaan dikirim dalam 7 hari, best-effort. Tidak ada SLA dan
-tidak ada janji tanggal perbaikan. Perbaikan dicatat di `CHANGELOG.md` setelah
-rilis.
+An acknowledgement is sent within 7 days, best-effort. There is no SLA and no
+promise of a fix date. Fixes are recorded in `CHANGELOG.md` after release.
 
-## Model ancaman
+## Threat model
 
-| Aset | Ancaman | Mitigasi |
+| Asset | Threat | Mitigation |
 |---|---|---|
-| Proses server | Input HTTP berbahaya | Validasi panjang, rentang, tipe; `-max-route-km`, `-max-expansions`, `-timeout` |
-| Graph | File rusak atau dimodifikasi | Magic `RIDG`, versi format, batas offset saat mmap |
-| Parser PBF | File berbahaya | `paulmach/osm`; graph dibangun offline di host |
-| Dependency | Modul rentan | `govulncheck` di CI, Dependabot |
-| Container | Akses tulis atau root | non-root UID 65532, graph read-only, tanpa shell di image |
-| Data | Penyalahgunaan data OSM | atribusi ODbL di `/healthz` dan halaman demo |
+| Server process | Hostile HTTP input | Length, range, and type validation; `-max-route-km`, `-max-expansions`, `-timeout` |
+| Graph | Corrupt or modified file | `RIDG` magic, format version, mmap offset bounds |
+| PBF parser | Hostile file | `paulmach/osm`; the graph is built offline on the host |
+| Dependencies | Vulnerable module | `govulncheck` in CI, Dependabot |
+| Container | Write access or root | non-root UID 65532, read-only graph, no shell in the image |
+| Data | OSM data misuse | ODbL attribution in `/healthz` and the demo page |
 
-## Batas
+## Boundaries
 
-Nusapeta Route tidak menangani autentikasi, TLS, atau akun. Rate limit per IP
-ada, tetapi bukan pengganti reverse proxy bila Anda butuh kontrol akses.
-Jangan mengekspos `/metrics` ke internet; gateway memblokirnya dengan
-`-block-metrics`.
+Nusapeta Route does not handle authentication, TLS, or accounts. There is a
+per-IP rate limit, but it is not a replacement for a reverse proxy when you
+need access control. Do not expose `/metrics` to the internet; the gateway
+blocks it with `-block-metrics`.
 
-## Yang dianggap kerentanan
+## What counts as a vulnerability
 
-- Crash atau panic dari request HTTP valid.
-- Out-of-bounds read dari graph yang dibuka dengan verifikasi.
-- Eksekusi kode dari input PBF atau graph.
-- Kebocoran path filesystem atau stack trace di respons.
-- Denial of service yang tidak bisa dibatasi oleh limit yang ada.
-- Rate limit yang bisa dilewati lewat `X-Forwarded-For` saat `-trust-proxy`
-  aktif tanpa proxy tepercaya di depannya.
+- A crash or panic from a valid HTTP request.
+- An out-of-bounds read from a graph opened with verification.
+- Code execution from PBF or graph input.
+- Filesystem path or stack trace leakage in a response.
+- Denial of service that existing limits cannot bound.
+- A rate-limit bypass through `X-Forwarded-For` when `-trust-proxy` is enabled
+  without a trusted proxy in front.
 
-## Yang bukan kerentanan
+## What does not count
 
-- Rute salah karena data OSM tidak lengkap atau tag akses yang keliru.
-- Perbedaan hasil dengan OSRM atau navigasi komersial.
-- Rute di atas 100 km yang dijawab 422; itu batas produk.
-- Latency di hardware di bawah spesifikasi yang didokumentasikan.
+- Wrong routes caused by incomplete OSM data or incorrect access tags.
+- Different results from OSRM or commercial navigation.
+- Routes above 100 km answered with 422; that is a product limit.
+- Latency on hardware below the documented specification.
 
-## Dependency
+## Dependencies
 
-- `go.mod` dan `go.sum` di-commit; CI menjalankan `go mod tidy -diff`.
-- `govulncheck` dijalankan setiap push dan PR.
-- Dependency baru harus dijelaskan di pull request.
-- Graph dan PBF tidak pernah masuk git.
+- `go.mod` and `go.sum` are committed; CI runs `go mod tidy -diff`.
+- `govulncheck` runs on every push and pull request.
+- New dependencies MUST be explained in the pull request.
+- Graphs and PBFs never enter git.

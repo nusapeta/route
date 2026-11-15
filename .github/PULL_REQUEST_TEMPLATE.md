@@ -1,31 +1,31 @@
-# Ringkasan
+# Summary
 
-Perubahan apa ini?
+What does this change?
 
-## Jenis
+## Type
 
-- [ ] Perbaikan bug
-- [ ] Fitur
-- [ ] Dokumentasi
-- [ ] Data atau graph
-- [ ] CI atau build
+- [ ] Bug fix
+- [ ] Feature
+- [ ] Documentation
+- [ ] Data or graph
+- [ ] CI or build
 
-## Bukti
+## Evidence
 
-Untuk perubahan perilaku rute, isi pasangan `from`/`to` dan keluaran
-`nusa-graphinfo` (format, node, edge, hash PBF).
+For routing behavior changes, include the `from`/`to` pair and
+`nusa-graphinfo` output (format, nodes, edges, PBF hash).
 
 ```text
 from= to=
 graphinfo:
 ```
 
-Untuk klaim performa, sertakan mesin, commit, dan perintah reproduksi.
+For performance claims, include machine, commit, and reproduction command.
 
 ## Checklist
 
-- [ ] `gofmt`, `go vet`, `go test -race`, `go build` lulus.
-- [ ] Test regresi ada untuk bug perilaku.
-- [ ] Dokumentasi kontrak diperbarui bila perlu.
-- [ ] Tidak ada PBF, graph, atau file data besar.
-- [ ] Commit memakai `Signed-off-by` (DCO).
+- [ ] `gofmt`, `go vet`, `go test -race`, `go build` pass.
+- [ ] A regression test exists for the behavior bug.
+- [ ] Contract documentation is updated when needed.
+- [ ] No PBF, graph, or large data file is included.
+- [ ] Commits carry `Signed-off-by` (DCO).

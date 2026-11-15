@@ -1,54 +1,54 @@
-name: Laporan data atau rute
-description: Rute salah, jalan hilang, atau tag akses keliru
+name: Data or route report
+description: Wrong route, missing road, or incorrect access tag
 title: "data: "
 labels: ["data"]
 body:
   - type: markdown
     attributes:
       value: |
-        Kebanyakan kesalahan berasal dari data OpenStreetMap, bukan dari kode.
-        Perbaikan permanen biasanya dilakukan di OSM, lalu data bulanan
-        berikutnya ikut memperbaikinya.
+        Most errors come from OpenStreetMap data, not from the code. The
+        permanent fix usually goes into OSM, and the next monthly data release
+        picks it up.
   - type: input
     id: pair
     attributes:
-      label: Pasangan from/to
-      description: Koordinat `lat,lon` persis seperti yang dikirim.
+      label: from/to pair
+      description: Coordinates `lat,lon` exactly as sent.
       placeholder: "-6.2088,106.8456 -> -6.2297,106.8166"
     validations:
       required: true
   - type: dropdown
     id: profile
     attributes:
-      label: Profil
+      label: Profile
       options:
-        - mobil
-        - motor
+        - mobil (car)
+        - motor (motorcycle)
     validations:
       required: true
   - type: textarea
     id: result
     attributes:
-      label: Hasil sekarang
-      description: Jarak, durasi, dan ringkasan geometri. Sertakan tautan OSM bila ada.
+      label: Current result
+      description: Distance, duration, and geometry summary. Link the OSM object if available.
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Hasil yang diharapkan
-      description: Jalan mana yang seharusnya dipakai dan mengapa.
+      label: Expected result
+      description: Which road should be used, and why.
     validations:
       required: true
   - type: input
     id: graph
     attributes:
       label: Graph
-      description: Hash PBF dari `/healthz` atau nama release data.
+      description: PBF hash from `/healthz` or the data release name.
       placeholder: data-2026.11
   - type: checkboxes
     id: osm
     attributes:
-      label: Data sumber
+      label: Source data
       options:
-        - label: Saya sudah cek objek OSM terkait dan yakin datanya benar.
+        - label: I checked the related OSM objects and believe the data is correct.
