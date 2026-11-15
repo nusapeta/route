@@ -50,6 +50,7 @@ bagian `RESULTS.md` yang menjadi bukti.
 | [`../paper/RESULTS.md`](../paper/RESULTS.md) | aktif | catatan pengukuran mentah |
 | [`../paper/COMPARISON.md`](../paper/COMPARISON.md) | aktif | klaim yang boleh dan tidak boleh ditulis |
 | [`../paper/EXPERIMENTS.md`](../paper/EXPERIMENTS.md) | aktif | eksperimen yang masih kurang untuk submission |
+| [`claims/README.md`](claims/README.md) | arsip | audit prosa 2026-11-08; bukan status sekarang |
 
 ### Dokumen historis
 
@@ -63,8 +64,8 @@ memakai statusnya sebagai kondisi sekarang; gunakan `ROADMAP.md` dan
 | [`PLAN-2026-11-10.md`](PLAN-2026-11-10.md) | 2026-11-10 | rencana motor, akurasi, cakupan |
 | [`PLAN-resource-accuracy.md`](PLAN-resource-accuracy.md) | 2026-11-08 | rencana resource vs akurasi |
 
-Folder `paper/results/` berisi CSV mentah; `docs/bruno/` berisi koleksi request
-Bruno. Keduanya bukan dokumentasi naratif.
+Folder `paper/results/` berisi CSV mentah; `contrib/http/` berisi koleksi request
+Bruno dan Postman. Keduanya bukan dokumentasi naratif.
 
 ## Aturan menulis
 

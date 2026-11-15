@@ -1,0 +1,25 @@
+# Contoh override: cloudflared berjalan sebagai container terpisah di network
+# eksternal, bukan sebagai service di compose ini. Gateway diberi alias di
+# network itu supaya ingress `http://gateway:8080` resolve tanpa membuka port
+# host ke LAN.
+#
+#   export TUNNEL_NETWORK=1panel-network   # ganti sesuai network cloudflared
+#   cd deploy
+#   docker compose -f docker-compose.yml -f examples/homelab/docker-compose.override.yml up -d
+#
+# Cek nama network cloudflared lebih dulu:
+#   docker inspect cloudflared-tunnel \
+#     --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}'
+services:
+  gateway:
+    networks:
+      default:
+      tunnel:
+        aliases:
+          - gateway
+          - nusapeta-gateway
+
+networks:
+  tunnel:
+    external: true
+    name: ${TUNNEL_NETWORK:-1panel-network}

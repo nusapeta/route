@@ -329,8 +329,8 @@ lama masih valid. Jangan cache `422`/`429`/`504`.
 
 ## Tooling
 
-- Koleksi Bruno: `docs/bruno/nusapeta-route/`.
-- Postman: `docs/nusapeta-route.postman_collection.json`.
+- Koleksi Bruno: `contrib/http/bruno/nusapeta-route/`.
+- Postman: `contrib/http/nusapeta-route.postman_collection.json`.
 - Smoke test: `scripts/smoke.sh http://127.0.0.1:8080`.
 
 Bruno/Postman memakai contoh koordinat dan assertion status; perbarui keduanya

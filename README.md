@@ -77,8 +77,8 @@ p95 0,94–1,32 s. Di i3-6100T: 472 sukses; 72 gagal snap, 40 `too_far`, 16
 Butuh Go 1.27+ dan `make`.
 
 ```bash
-git clone git@github.com:arifsans/nusapeta-route.git
-cd nusapeta-route
+git clone https://github.com/nusapeta/route.git
+cd route
 
 make build                 # semua binary ke bin/
 make java                  # unduh PBF Jawa + build data/java.graph
@@ -203,6 +203,7 @@ cmd/nusa-serve       HTTP /route, /healthz, /version, /metrics
 cmd/nusa-gateway      satu base URL, ?profile=mobil|motor
 cmd/nusa-route        CLI satu rute untuk debug
 cmd/nusa-graphinfo    inspeksi header, snap, scan lubang data
+cmd/nusa-restats      census restriction per profil langsung dari PBF
 cmd/nusa-bench        benchmark latency/akurasi
 cmd/nusa-restcheck    harness kepatuhan turn restriction
 cmd/nusa-tagstats     census tag way untuk profil motor

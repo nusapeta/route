@@ -2,7 +2,7 @@
   "info": {
     "name": "nusapeta-route",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "HTTP API nusapeta-route. Ganti environment untuk berpindah host: 'nusapeta-route - local' (http://127.0.0.1:8080) atau 'nusapeta-route - homelab' (http://192.168.1.219:8080). Tanpa environment, koleksi memakai collection variable baseUrl = http://127.0.0.1:8080.\n\nCatatan: homelab membatasi -rate 15/menit (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang kali; server lokal biasanya tanpa rate limit.\n\nRequest di folder 'Region lain' butuh graf region tsb; kalau environment hanya memuat Java hasilnya 422 dan test menerima itu. Rute lintas region butuh java.graph + sumatra.graph dan -max-route-km 0; dengan cap default test menerima 422 too_far."
+    "description": "HTTP API nusapeta-route. Ganti environment untuk berpindah host: 'nusapeta-route - local' (http://127.0.0.1:8080) atau 'nusapeta-route - remote' (ganti baseUrl ke host Anda). Tanpa environment, koleksi memakai collection variable baseUrl = http://127.0.0.1:8080.\n\nCatatan: instance publik biasanya membatasi -rate 15/menit (burst 5) per IP, jadi jangan menekan Run seluruh koleksi berulang kali; server lokal biasanya tanpa rate limit.\n\nRequest di folder 'Region lain' butuh graf region tsb; kalau environment hanya memuat Java hasilnya 422 dan test menerima itu. Rute lintas region butuh java.graph + sumatra.graph dan -max-route-km 0; dengan cap default test menerima 422 too_far."
   },
   "variable": [
     {

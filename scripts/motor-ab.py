@@ -13,8 +13,8 @@ Contoh direct upstream:
 
 Contoh lewat gateway (profil dipilih di query string):
     scripts/motor-ab.py --pairs paper/results/pairs-java.csv \
-        --mobil 'http://192.168.1.219:8080?profile=mobil' \
-        --motor 'http://192.168.1.219:8080?profile=motor' \
+        --mobil 'http://127.0.0.1:8080?profile=mobil' \
+        --motor 'http://127.0.0.1:8080?profile=motor' \
         --pause 4.2 --csv paper/results/motor-ab.csv
 
 Pasangan yang jaraknya >100 km akan 422; itu dicatat sebagai error, bukan

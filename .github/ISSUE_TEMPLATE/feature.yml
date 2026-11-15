@@ -1,0 +1,42 @@
+name: Usulan fitur
+description: Kemampuan baru atau perubahan perilaku
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Baca `docs/ROADMAP.md` lebih dulu. Non-goals di sana tidak dikerjakan
+        tanpa alasan baru.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Masalah
+      description: Siapa yang terhalang dan dalam situasi apa.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Usulan
+      description: Perilaku yang diinginkan, termasuk bentuk request/respons bila relevan.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatif
+      description: Cara lain yang sudah dipertimbangkan.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Area
+      options:
+        - routing
+        - data atau ekstraksi
+        - HTTP API
+        - operasi atau deploy
+        - dokumentasi
+        - lain-lain
+    validations:
+      required: true

@@ -1,8 +1,17 @@
-# Deploy di homelab (Indonesia)
+# Deploy (contoh: satu host Linux, Indonesia)
 
 Tiga cara: Docker Compose (paling cepat), systemd (tanpa Docker), atau
 Compose + Cloudflare Tunnel untuk akses domain saja. Semua memakai graph yang
 sudah dibangun di host; image tidak pernah memuat data 1,6 GB.
+
+Contoh perintah memakai variabel berikut; isi dengan nilai Anda:
+
+```bash
+PUBLIC_HOST=route.example.com   # tanpa https://
+```
+
+`deploy/examples/homelab/` berisi contoh override untuk host yang tunnel-nya
+sudah berjalan sebagai container terpisah.
 
 ## 0. Bangun dan refresh graph (di host)
 
@@ -132,14 +141,14 @@ Tanpa parameter, profil mobil yang dipakai (perilaku lama port 8080).
 
 ### Bundle geocoder (opsional)
 
-Gateway bisa meneruskan satu prefix ke service lain di network yang sama. Di
-homelab, `placeid` adalah project Compose terpisah yang menyediakan geocoder
-index Indonesia:
+Gateway bisa meneruskan satu prefix ke service lain di network yang sama.
+Contohnya project Compose `nusapeta/place`, yang menyediakan geocoder index
+Indonesia:
 
 | Path publik | Upstream |
 |---|---|
-| `https://route.arifsani.xyz/route` | `nusapeta-route` / `nusapeta-route-motor` |
-| `https://route.arifsani.xyz/place/*` | `http://placeid:8090` |
+| `https://${PUBLIC_HOST}/route` | `nusapeta-route` / `nusapeta-route-motor` |
+| `https://${PUBLIC_HOST}/place/*` | `http://nusapeta-place:8090` |
 
 Prefix, bukan hostname kedua, karena hostname publik hanya punya satu route
 tunnel. Aturan yang dijaga gateway:
@@ -149,10 +158,10 @@ tunnel. Aturan yang dijaga gateway:
 - klien tidak punya jatah tambahan: kuota per IP terpisah untuk `/place`
   (240/menit, burst 40) karena pencariannya memindai seluruh index;
 - `/place/metrics` ikut ditutup oleh `-block-metrics`;
-- `/healthz` tetap hanya melaporkan profil routing, jadi `placeid` yang mati
+- `/healthz` tetap hanya melaporkan profil routing, jadi place yang mati
   tidak membuat gateway dianggap gagal (gejalanya `502` di `/place/*`).
 
-Kalau container `placeid` tidak ada, `/place/*` menjawab `502` dan sisa
+Kalau container place tidak ada, `/place/*` menjawab `502` dan sisa
 gateway berjalan normal. Jangan hapus flag `-place` dari compose hanya karena
 upstream sedang mati: tanpa flag itu prefix menjawab `404` dan tidak ada
 petunjuk apa pun di log.
@@ -190,7 +199,7 @@ akses ke host.
 
 ## 1d. Cloudflare Tunnel (domain saja)
 
-Tujuan: satu-satunya pintu masuk publik adalah `https://route.arifsani.xyz`.
+Tujuan: satu-satunya pintu masuk publik adalah `https://${PUBLIC_HOST}`.
 Port 8080 tetap loopback; tidak ada IP/LAN yang bisa dipanggil dari internet.
 
 ### Di Cloudflare
@@ -200,11 +209,11 @@ Port 8080 tetap loopback; tidak ada IP/LAN yang bisa dipanggil dari internet.
    `cloudflared tunnel --no-autoupdate run --token ...`.
 3. Di tunnel itu, **Routes > Add route > Published application**:
    - Hostname: `route`
-   - Domain: `arifsani.xyz`
+   - Domain: `example.com`
    - Service URL: `http://gateway:8080`
    - Jangan memakai `http://127.0.0.1:8080`: itu loopback container
      `cloudflared`, bukan gateway.
-4. Simpan. Cloudflare membuat CNAME `route.arifsani.xyz` yang proxied ke
+4. Simpan. Cloudflare membuat CNAME `route.example.com` yang proxied ke
    `<tunnel-id>.cfargotunnel.com`; jangan matikan proxy/orange cloud.
 5. SSL/TLS zona: **Automatic SSL/TLS** (atau Full). Tunnel sudah terenkripsi
    dari edge ke `cloudflared`; origin HTTP internal tidak butuh sertifikat.
@@ -228,41 +237,39 @@ docker logs --tail 30 nusapeta-route-cloudflared   # cari "Registered tunnel con
 Token hanya ada di `deploy/.env`, yang di-ignore git. Jangan menaruhnya di
 `docker-compose.yml` atau command line shell yang tersimpan di history.
 
-### Kalau cloudflared sudah berjalan
+### Kalau cloudflared sudah berjalan sebagai container
 
-Homelab memakai container `cloudflared-tunnel` dari 1Panel, jadi service
-`cloudflared` di compose tidak perlu dinyalakan. Yang wajib: cloudflared dan
-gateway berada di network Docker yang sama. Override
-`docker-compose.homelab.yml` menambahkan gateway ke `1panel-network` dengan
-alias `gateway`:
+Kalau tunnel sudah dikelola di luar compose ini, service `cloudflared` di
+compose tidak perlu dinyalakan. Yang wajib: cloudflared dan gateway berada di
+network Docker yang sama. Contoh override ada di
+`examples/homelab/docker-compose.override.yml`; ia menambahkan gateway ke
+network eksternal dengan alias `gateway`:
 
 ```bash
-docker inspect cloudflared-tunnel \
-  --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}'
-docker compose -f docker-compose.yml -f docker-compose.homelab.yml up -d
+export TUNNEL_NETWORK=1panel-network   # ganti dengan network cloudflared Anda
+docker compose -f docker-compose.yml -f examples/homelab/docker-compose.override.yml up -d
 ```
 
-Di homelab, `deploy/.env` memuat
-`COMPOSE_FILE=docker-compose.yml:docker-compose.homelab.yml`, jadi
-`docker compose up -d` biasa juga otomatis memakai override. Jangan hapus baris
-itu, dan jangan menimpa `.env` dengan `cp .env.example .env` di host ini.
+Kalau `COMPOSE_FILE=docker-compose.yml:examples/homelab/docker-compose.override.yml`
+disimpan di `deploy/.env`, `docker compose up -d` biasa juga otomatis memakai
+override. Jangan menimpa `.env` dengan `cp .env.example .env` di host itu.
 
-Jangan memakai `--profile cloudflare` di host itu: connector kedua akan
+Jangan memakai `--profile cloudflare` di host seperti itu: connector kedua akan
 menerima seluruh ingress tunnel, tetapi hanya bisa me-resolve origin yang ada
-di network compose ini, bukan origin 1Panel lainnya. Kalau network berbeda,
+di network compose ini, bukan origin container lain. Kalau network berbeda,
 gejalanya `502` dan log cloudflared berisi
 `lookup gateway ... no such host`.
 
 ### Verifikasi
 
 ```bash
-curl -sS https://route.arifsani.xyz/healthz | head -c 300; echo
-curl -sS https://route.arifsani.xyz/version; echo
-curl -sS 'https://route.arifsani.xyz/route?from=-6.2088,106.8456&to=-6.2297,106.8166&format=polyline' | head -c 120; echo
-curl -sS -o /dev/null -w 'metrics: %{http_code}\n' https://route.arifsani.xyz/metrics   # 404
+curl -sS https://${PUBLIC_HOST}/healthz | head -c 300; echo
+curl -sS https://${PUBLIC_HOST}/version; echo
+curl -sS 'https://${PUBLIC_HOST}/route?from=-6.2088,106.8456&to=-6.2297,106.8166&format=polyline' | head -c 120; echo
+curl -sS -o /dev/null -w 'metrics: %{http_code}\n' https://${PUBLIC_HOST}/metrics   # 404
 lan_ip=$(ip -4 addr show scope global | awk '/inet /{print $2; exit}' | cut -d/ -f1)
 curl -sS -o /dev/null -w 'LAN: %{http_code}\n' "http://$lan_ip:8080/healthz" || true
-METRICS_BASE=http://127.0.0.1:18080 scripts/smoke.sh https://route.arifsani.xyz
+METRICS_BASE=http://127.0.0.1:18080 scripts/smoke.sh https://${PUBLIC_HOST}
 ```
 
 `metrics: 404` dan `LAN` gagal/connection refused adalah hasil yang benar.
@@ -271,7 +278,7 @@ keluar ke Cloudflare port `7844`. Kalau domain 502: untuk tunnel compose cek
 `docker compose --profile cloudflare ps`; untuk tunnel 1Panel cek
 `docker logs --tail 50 cloudflared-tunnel`. Log
 `lookup gateway ... no such host` berarti cloudflared dan gateway tidak berada
-di network Docker yang sama; pakai `docker-compose.homelab.yml` di atas.
+di network Docker yang sama; pakai `examples/homelab/docker-compose.override.yml` di atas.
 
 Rate limit upstream tetap per klien karena gateway membaca `CF-Connecting-IP`
 dan menimpa `X-Forwarded-For` sebelum meneruskan. Tanpa `-trust-proxy`, semua
@@ -377,7 +384,7 @@ nusapeta-route.lan {
 sudah membaca `CF-Connecting-IP` lewat `-trust-proxy`.
 
 `GET /` dan `/assets/*` dilayani gateway untuk demo peta. Gateway compose
-memakai `-block-metrics`, jadi `https://route.arifsani.xyz/metrics` selalu
+memakai `-block-metrics`, jadi `https://${PUBLIC_HOST}/metrics` selalu
 `404`; dashboard internal membaca `127.0.0.1:18080/metrics` dan
 `127.0.0.1:18081/metrics` langsung. Jangan mengganti flag itu di deployment
 publik.
@@ -428,7 +435,7 @@ Arti praktisnya:
 ### Menaruh Caddy di depan gateway
 
 Deployment homelab tidak memakai Caddy: TLS dan nama domain datang dari
-Cloudflare Tunnel (`https://route.arifsani.xyz`). Bagian ini hanya untuk host
+Cloudflare Tunnel (`https://${PUBLIC_HOST}`). Bagian ini hanya untuk host
 yang belum punya tunnel dan butuh TLS lokal. Gateway sudah menjadi pintu depan,
 jadi Caddy hanya perlu meneruskan ke sana:
 

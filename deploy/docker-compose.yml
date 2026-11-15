@@ -131,14 +131,16 @@ services:
       # Jangan pernah menerbitkan /metrics lewat domain publik. Monitoring
       # membaca http://127.0.0.1:18080/metrics dan :18081/metrics langsung.
       - -block-metrics
-      # Geocoder dari project Compose lain (`placeid`) di jaringan tunnel yang
-      # sama. Prefix /place adalah satu-satunya sinyal routing: hostname publik
-      # hanya punya satu route tunnel, jadi hostname kedua tidak bisa sampai ke
-      # proses ini. Kalau container placeid mati, /place menjawab 502 dan
-      # /healthz tetap 200, sehingga gateway tidak ikut dianggap gagal.
+      # Geocoder opsional (contoh): service nusapeta/place di jaringan Compose
+      # yang sama. Hapus dua baris `-place` di bawah bila tidak memakainya;
+      # gateway tetap hidup dan /place tidak dirutekan. Prefix /place adalah
+      # satu-satunya sinyal routing: hostname publik hanya punya satu route
+      # tunnel, jadi hostname kedua tidak bisa sampai ke proses ini. Kalau
+      # container place mati, /place menjawab 502 dan /healthz tetap 200,
+      # sehingga gateway tidak ikut dianggap gagal.
       - -place
-      - http://placeid:8090
-      # Pencarian placeid memindai seluruh index: plafon terukurnya ~20 RPS,
+      - http://nusapeta-place:8090
+      # Pencarian place memindai seluruh index: plafon terukurnya ~20 RPS,
       # jadi satu klien tidak boleh menghabiskan jatah klien lain.
       - -place-rate
       - "240"

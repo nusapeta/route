@@ -287,11 +287,15 @@ func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		ProfileID string `json:"profile_sha256,omitempty"`
 	}
 	out := struct {
-		OK      bool   `json:"ok"`
-		Version string `json:"version"`
-		Commit  string `json:"commit"`
-		Regions []info `json:"regions"`
-	}{OK: true, Version: versionString(), Commit: commit}
+		OK          bool   `json:"ok"`
+		Version     string `json:"version"`
+		Commit      string `json:"commit"`
+		Attribution string `json:"attribution"`
+		DataLicense string `json:"data_license"`
+		Regions     []info `json:"regions"`
+	}{OK: true, Version: versionString(), Commit: commit,
+		Attribution: "© OpenStreetMap contributors",
+		DataLicense: "ODbL 1.0"}
 	prof, profKey := "car", "profile_sha256"
 	if s.motor {
 		prof, profKey = "motor", "motor_sha256"

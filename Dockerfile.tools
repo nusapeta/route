@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+# Tools image: build and inspect graphs without adding megabytes to the
+# runtime image. Published as ghcr.io/nusapeta/route-tools:<tag>.
+FROM golang:1.27-alpine AS build
+ARG COMMIT=dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ENV CGO_ENABLED=0
+RUN go build -trimpath -ldflags="-s -w -X github.com/nusapeta/route/internal/extract.Version=${COMMIT}" -o /out/ ./cmd/nusa-extract \
+ && go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/nusa-graphinfo \
+ && go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/nusa-restats \
+ && go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/nusa-tagstats \
+ && go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/nusa-snapcheck
+
+FROM alpine:3.22
+RUN adduser -D -H -u 65532 nusapeta && apk add --no-cache ca-certificates
+COPY --from=build /out/ /usr/local/bin/
+USER 65532:65532
+VOLUME ["/data"]
+WORKDIR /data
+ENTRYPOINT ["/usr/local/bin/nusa-extract"]

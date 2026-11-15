@@ -88,7 +88,9 @@ func TestHealthProfiles(t *testing.T) {
 		t.Fatalf("code %d: %s", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		Regions []struct {
+		Attribution string `json:"attribution"`
+		DataLicense string `json:"data_license"`
+		Regions     []struct {
 			Profile   string `json:"profile"`
 			ProfileID string `json:"profile_sha256"`
 			PBFHash   string `json:"pbf_sha256"`
@@ -97,6 +99,9 @@ func TestHealthProfiles(t *testing.T) {
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	if body.Attribution != "© OpenStreetMap contributors" || body.DataLicense != "ODbL 1.0" {
+		t.Fatalf("attribution = %q / %q", body.Attribution, body.DataLicense)
 	}
 	if len(body.Regions) != 1 {
 		t.Fatalf("regions = %d, want 1", len(body.Regions))

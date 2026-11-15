@@ -1,0 +1,54 @@
+name: Laporan data atau rute
+description: Rute salah, jalan hilang, atau tag akses keliru
+title: "data: "
+labels: ["data"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Kebanyakan kesalahan berasal dari data OpenStreetMap, bukan dari kode.
+        Perbaikan permanen biasanya dilakukan di OSM, lalu data bulanan
+        berikutnya ikut memperbaikinya.
+  - type: input
+    id: pair
+    attributes:
+      label: Pasangan from/to
+      description: Koordinat `lat,lon` persis seperti yang dikirim.
+      placeholder: "-6.2088,106.8456 -> -6.2297,106.8166"
+    validations:
+      required: true
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Profil
+      options:
+        - mobil
+        - motor
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Hasil sekarang
+      description: Jarak, durasi, dan ringkasan geometri. Sertakan tautan OSM bila ada.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Hasil yang diharapkan
+      description: Jalan mana yang seharusnya dipakai dan mengapa.
+    validations:
+      required: true
+  - type: input
+    id: graph
+    attributes:
+      label: Graph
+      description: Hash PBF dari `/healthz` atau nama release data.
+      placeholder: data-2026.11
+  - type: checkboxes
+    id: osm
+    attributes:
+      label: Data sumber
+      options:
+        - label: Saya sudah cek objek OSM terkait dan yakin datanya benar.

@@ -62,7 +62,7 @@ golden test jarak/waktu tetap lulus.
 
 ### 18. HTTPS-only
 
-**Masalah.** `http://route.arifsani.xyz/healthz` masih menjawab `200`; belum
+**Masalah.** `http://route.example.com/healthz` masih menjawab `200`; belum
 redirect ke HTTPS. Ini setelan Cloudflare, bukan kode.
 
 **Rencana.** Aktifkan **Always Use HTTPS** di Cloudflare (SSL/TLS → Edge
