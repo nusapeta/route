@@ -10,6 +10,44 @@ binary, a memory-mapped graph, weighted A*, no runtime dependencies.
 
 [Bahasa Indonesia](README.id.md) | English
 
+**A self-hosted geo stack for Indonesia: routing + geocoding, one file per
+engine, under 20 MB idle, rebuilt in minutes, no database.** This repository is
+the routing half; the geocoder is
+[`nusapeta/place`](https://github.com/nusapeta/place) and the compose bundle is
+[`nusapeta/stack`](https://github.com/nusapeta/stack).
+
+`11 MB` idle RSS · `552 MB` download · `1.6 GB` graph on disk · `28 s` to
+preprocess the Java extract. ODbL data, no runtime dependencies.
+
+## Quick start from the release artifact
+
+Requires Docker, curl, zstd, and sha256sum.
+
+```bash
+mkdir -p route-data && cd route-data
+base=https://github.com/nusapeta/route/releases/download/data-2026.11
+curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst"
+curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst.sha256"
+sha256sum -c indonesia-v5-2026.11.graph.zst.sha256
+zstd -d indonesia-v5-2026.11.graph.zst -o indonesia-v5-2026.11.graph
+
+docker run --rm -p 127.0.0.1:8080:8080 -v "$PWD:/data:ro" \
+  ghcr.io/nusapeta/route:0.1.0 \
+  -graph /data/indonesia-v5-2026.11.graph -addr :8080
+```
+
+In another terminal:
+
+```bash
+curl -s 'http://127.0.0.1:8080/route?from=-6.1754,106.8272&to=-6.5950,106.8166&format=polyline' \
+  | jq '{distance_m, duration_s, points_n, snap_from, snap_to}'
+```
+
+**Read more:** [why this exists](#why) · [measured numbers](#measured-snapshot)
+· [architecture](#architecture) · [API](#api-at-a-glance) · [build and
+operations](#build-and-operations) · [limitations](#limitations) ·
+[documentation](#documentation)
+
 ## Why
 
 Ride-hailing, logistics, and field-service apps usually need two coordinates, a
@@ -72,30 +110,6 @@ Current national graph:
 Java workload, 600 pairs, 100 km cap on the Ryzen: 481 successful, p50 39–47 ms,
 p95 0.94–1.32 s. On an i3-6100T: 472 successful; 72 snap failures, 40 `too_far`,
 16 `budget`. Details and claim limits: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
-
-## Quick start from the release artifact
-
-Requires Docker, curl, zstd, and sha256sum.
-
-```bash
-mkdir -p route-data && cd route-data
-base=https://github.com/nusapeta/route/releases/download/data-2026.11
-curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst"
-curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst.sha256"
-sha256sum -c indonesia-v5-2026.11.graph.zst.sha256
-zstd -d indonesia-v5-2026.11.graph.zst
-
-docker run --rm -p 127.0.0.1:8080:8080 -v "$PWD:/data:ro" \
-  ghcr.io/nusapeta/route:0.1.0 \
-  -graph /data/indonesia-v5-2026.11.graph -addr :8080
-```
-
-In another terminal:
-
-```bash
-curl -s 'http://127.0.0.1:8080/route?from=-6.1754,106.8272&to=-6.5950,106.8166&format=polyline' \
-  | jq '{distance_m, duration_s, points_n, snap_from, snap_to}'
-```
 
 The national download is 552 MB compressed, 1.6 GB decompressed. The Java-only
 asset is 228 MB compressed, 693 MB decompressed. The combined routing and
