@@ -34,6 +34,10 @@ The trade-off is real: without CH/MLD hierarchy, Nusapeta Route is **not** the
 fastest engine. On E1, OSRM MLD is about 26× faster at p50. Nusapeta Route wins
 on memory, artifact size, and preprocessing.
 
+Research preview, one maintainer, no SLA. Data artifacts are refreshed monthly
+on a best-effort basis. Large feature pull requests may be declined even when
+correct; open an issue before writing one.
+
 ## Measured snapshot
 
 E1: Java, same machine (Ryzen 5 5600G), same PBF, 600 identical pairs. Full
