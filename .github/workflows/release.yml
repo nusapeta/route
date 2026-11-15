@@ -44,6 +44,10 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
+      # A tag push carries no head_commit, so the old expression expanded to an
+      # empty string and /version reported built_at "". Take the commit date.
+      - id: buildtime
+        run: echo "built=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
       - name: Build and push runtime
         uses: docker/build-push-action@v7
         with:
@@ -54,7 +58,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             COMMIT=${{ github.sha }}
-            BUILT=${{ github.event.head_commit.timestamp }}
+            BUILT=${{ steps.buildtime.outputs.built }}
       - name: Build and push tools
         uses: docker/build-push-action@v7
         with:
