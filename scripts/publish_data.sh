@@ -58,7 +58,9 @@ fi
 sums=()
 for f in "${files[@]}"; do
   [[ $f == *.sha256 ]] && continue
-  sha256sum "$f" > "$f.sha256"
+  # Bare basename so sha256sum -c works after download, when the artifact sits
+  # next to its checksum instead of in the build directory.
+  (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") > "$f.sha256"
   sums+=("$f.sha256")
 done
 
