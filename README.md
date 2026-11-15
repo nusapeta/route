@@ -3,6 +3,7 @@
 **An OpenStreetMap road router for Indonesia that fits in a sidecar.** One Go
 binary, a memory-mapped graph, weighted A*, no runtime dependencies.
 
+[![CI](https://github.com/nusapeta/route/actions/workflows/ci.yml/badge.svg)](https://github.com/nusapeta/route/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Data](https://img.shields.io/badge/data-ODbL-green)](https://www.openstreetmap.org/copyright)
