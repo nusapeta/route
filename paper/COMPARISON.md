@@ -100,7 +100,7 @@ Perintah acuan sudah dibungkus jadi skrip; resep lengkap di `docs/M6.md`:
 scripts/m6-osrm.sh extract data/java-latest.osm.pbf   # + wall & peak RSS tiap tahap
 
 # serve: container detached (mode service gagal exit 1 di mesin ini)
-sudo -u arifsani -g docker docker run -d --name osrm-routed -p 5000:5000 \
+sudo -u "$USER" -g docker docker run -d --name osrm-routed -p 5000:5000 \
   -v "$PWD/data:/data" osrm/osrm-backend:latest \
   osrm-routed --algorithm mld /data/java-latest.osrm
 

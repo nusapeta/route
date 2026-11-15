@@ -758,8 +758,8 @@ GOMEMLIMIT=2GiB bin/rid-extract -pbf data/java-latest.osm.pbf -out data/java.gra
 bin/rid-server -graph data/java.graph -addr 127.0.0.1:8080 -conc 1 -rate 0 -timeout 60s
 
 # OSRM (Docker; butuh ~7 GB saat extract)
-sudo -u arifsani -g docker ./scripts/m6-osrm.sh extract data/java-latest.osm.pbf
-sudo -u arifsani -g docker docker run -d --name osrm-routed -p 5000:5000 \
+sudo -u "$USER" -g docker ./scripts/m6-osrm.sh extract data/java-latest.osm.pbf
+sudo -u "$USER" -g docker docker run -d --name osrm-routed -p 5000:5000 \
   -v "$PWD/data:/data" osrm/osrm-backend:latest \
   osrm-routed --algorithm mld /data/java-latest.osrm
 
