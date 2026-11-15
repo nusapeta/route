@@ -6,6 +6,7 @@
 `mmap`, weighted A*, tanpa dependency runtime.
 
 [![CI](https://github.com/nusapeta/route/actions/workflows/ci.yml/badge.svg)](https://github.com/nusapeta/route/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/nusapeta/route?sort=semver&label=release)](https://github.com/nusapeta/route/releases/latest)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Data](https://img.shields.io/badge/data-ODbL-green)](https://www.openstreetmap.org/copyright)
