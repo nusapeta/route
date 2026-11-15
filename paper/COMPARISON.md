@@ -1,5 +1,9 @@
 # Komparasi: apa yang boleh diklaim, apa yang belum
 
+> Catatan rename 2026-11-15: perintah di bawah memakai nama pra-rename
+> (`rid-*`); padanan nama sekarang ada di [`README.md`](README.md).
+
+
 Dokumen kerja untuk Table *positioning* (`main.tex`, `tab:positioning`).
 Aturan main: **hanya angka yang punya perintah reproduksi di `RESULTS.md` yang
 boleh masuk kolom routeid.** Kolom OSRM MLD sudah terisi dari E1 (mesin sama);

@@ -13,6 +13,24 @@ bukan uji mesin bersih dan belum submit.
 | `EXPERIMENTS.md` | Status E1–E7 dan checklist submit |
 | `results/*.csv` | CSV mentah; final E1: `e1-osrm-aligned.csv` |
 
+## Catatan rename (2026-11-15)
+
+`RESULTS.md` dan `COMPARISON.md` adalah snapshot beku: perintah di dalamnya
+memakai nama pra-rename. Padanan saat ini:
+
+| Pra-rename | Sekarang |
+|---|---|
+| `bin/rid-extract` | `bin/nusa-extract` |
+| `bin/rid-server` | `bin/nusa-serve` |
+| `bin/rid-bench` | `bin/nusa-bench` |
+| `bin/rid-graphinfo` | `bin/nusa-graphinfo` |
+| `bin/rid-restcheck` | `bin/nusa-restcheck` |
+| `bin/rid-snapcheck` | `bin/nusa-snapcheck` |
+| `--routeid` pada `m6-compare.py` | `--route` (alias lama tetap diterima) |
+| image `routeid:local` | image `nusapeta-route:local` |
+
+Angka, commit, dan nama berkas hasil tidak berubah.
+
 ## Kompilasi
 
 Tidak ada `pdflatex`/`tectonic` di mesin pengembangan. Opsi:

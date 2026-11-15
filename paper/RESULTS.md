@@ -1,5 +1,9 @@
 # Hasil pengukuran (mentah + provenance)
 
+> Catatan rename 2026-11-15: perintah di bawah memakai nama pra-rename
+> (`rid-*`); padanan nama sekarang ada di [`README.md`](README.md).
+
+
 Semua angka di `main.tex` berasal dari file ini. Mesin berbeda per bagian:
 §1–§12 dan §14–§15 di Intel Core i5-7360U (2C/4T, 2.3 GHz, RAM 7 GB);
 §13, §18, dan §19 di AMD Ryzen 5 5600G; §16 di i3-6100T; §17 di Ryzen + i3.
