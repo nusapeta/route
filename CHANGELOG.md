@@ -6,7 +6,14 @@ All user-visible changes are recorded here. The format follows
 
 ## [Unreleased]
 
-## [0.1.0] - unreleased
+### Fixed
+
+- Container image: `nusa-gateway` was built without the version stamp, so the
+  map served its assets with a constant `?v=dev` and an upgrade could leave an
+  old script in the browser cache. The Dockerfile now passes `COMMIT` to the
+  gateway build too. The published `0.1.0` image predates this fix.
+
+## [0.1.0] - 2026-11-15
 
 First public release. Project name: Nusapeta Route (previously routeid).
 

@@ -13,7 +13,9 @@ ENV CGO_ENABLED=0
 RUN go build -trimpath \
       -ldflags="-s -w -X main.commit=${COMMIT} -X main.buildTime=${BUILT} -X github.com/nusapeta/route/internal/extract.Version=${COMMIT}" \
       -o /out/nusa-serve ./cmd/nusa-serve \
- && go build -trimpath -ldflags="-s -w" -o /out/nusa-gateway ./cmd/nusa-gateway
+ && go build -trimpath \
+      -ldflags="-s -w -X main.commit=${COMMIT}" \
+      -o /out/nusa-gateway ./cmd/nusa-gateway
 
 FROM alpine:3.24
 RUN adduser -D -H -u 65532 nusapeta && apk add --no-cache ca-certificates
