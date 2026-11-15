@@ -219,6 +219,7 @@ Tunnel memberi TLS di edge tanpa membuka port. Detail langkah ada di
 ```bash
 scripts/smoke.sh http://127.0.0.1:8080
 scripts/memcheck.sh http://127.0.0.1:18080
+scripts/budget.sh          # RSS, image, artefak, ekstraksi vs batas keras
 curl -s 127.0.0.1:18080/metrics | grep -E '^route_|^nusa_route_workspace_'
 ```
 

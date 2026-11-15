@@ -211,6 +211,8 @@ Full contract, caching/ETag, rate limits, and Flutter integration:
 | `make refresh REGION=java` | re-download, build, tagstats, test, A/B |
 | `scripts/build-national.sh` | one Indonesia graph (v5) |
 | `scripts/smoke.sh <base-url>` | HTTP smoke test |
+| `scripts/budget.sh` | check RSS, image, artifact, extraction against the road map hard limits |
+| `scripts/memcheck.sh [base-url] [pid]` | workspace gauges plus the kernel's memory view |
 
 Docker Compose, systemd, Cloudflare Tunnel, graph refresh, and memory limits:
 [`docs/OPERATIONS.md`](docs/OPERATIONS.md) and [`deploy/README.md`](deploy/README.md).
