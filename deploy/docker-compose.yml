@@ -10,7 +10,7 @@
 # Tiga layanan inti, satu image: profil mobil dan motor tidak boleh berada di
 # proses yang sama (dua proses membuka file yang sama; profil dipilih per
 # proses). Kedua proses itu hanya mendengarkan di loopback (18080/18081, untuk
-# debug langsung), dan `gateway` memegang port loopback 8080: profil dipilih
+# debug langsung), dan service `api` memegang port loopback 8080: profil dipilih
 # lewat ?profile=motor, tanpa parameter dilayani profil mobil. Akses publik
 # lewat Cloudflare Tunnel (`cloudflared`, profil compose `cloudflare`), bukan
 # IP/LAN.
@@ -103,7 +103,10 @@ services:
       # klien tidak bisa memilih bucket sendiri.
       - -trust-proxy
 
-  gateway:
+  # Service ini sengaja tidak bernama `gateway`: compose menambahkan nama
+  # service sebagai alias jaringan, dan nama `gateway` dipegang container demo
+  # (repo nusapeta/demo) yang menjadi tujuan ingress tunnel.
+  api:
     image: nusapeta-route:local
     container_name: nusapeta-gateway
     restart: unless-stopped
@@ -162,8 +165,8 @@ services:
         max-file: "3"
 
   # Akses publik hanya lewat domain. Service ini memakai jaringan compose
-  # internal, jadi route Cloudflare diarahkan ke http://gateway:8080, bukan
-  # port host. Aktifkan dengan --profile cloudflare dan isi
+  # internal, jadi route Cloudflare diarahkan ke nama container di jaringan itu,
+  # bukan port host. Aktifkan dengan --profile cloudflare dan isi
   # CLOUDFLARE_TUNNEL_TOKEN di deploy/.env.
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -174,7 +177,7 @@ services:
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
-      gateway:
+      api:
         condition: service_healthy
     mem_limit: 128m
     memswap_limit: 128m

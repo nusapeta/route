@@ -13,6 +13,12 @@ All user-visible changes are recorded here. The format follows
   [`nusapeta/demo`](https://github.com/nusapeta/demo), which serves them from
   nginx and proxies `/route` and `/place` back here. `GET /` and `/assets/*`
   on a gateway-only deployment answer `404`.
+- Compose: the gateway service is now named `api` (container names unchanged).
+  Compose adds a service's own name as a network alias, so a service called
+  `gateway` would keep the tunnel name `gateway` on the API container and split
+  the ingress with the demo container that owns it. Update any
+  `docker compose up -d gateway` habit to `api`; the homelab override and
+  `deploy/README.md` follow the new name.
 
 ### Fixed
 

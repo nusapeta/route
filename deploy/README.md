@@ -175,7 +175,7 @@ kolom yang menjawab `404` di setiap ketikan.
 ```bash
 make static                                   # bin/static/nusa-extract + nusa-gateway
 GOMEMLIMIT=5GiB scripts/build-national.sh     # data/indonesia.graph: mobil + motor
-cd deploy && docker compose up -d             # gateway ikut dibuat
+cd deploy && docker compose up -d             # service api ikut dibuat
 curl -s 127.0.0.1:8080/healthz | head -c 300
 ```
 
@@ -240,10 +240,17 @@ Token hanya ada di `deploy/.env`, yang di-ignore git. Jangan menaruhnya di
 ### Kalau cloudflared sudah berjalan sebagai container
 
 Kalau tunnel sudah dikelola di luar compose ini, service `cloudflared` di
-compose tidak perlu dinyalakan. Yang wajib: cloudflared dan gateway berada di
-network Docker yang sama. Contoh override ada di
-`examples/homelab/docker-compose.override.yml`; ia menambahkan gateway ke
-network eksternal dengan alias `gateway`:
+compose tidak perlu dinyalakan. Yang wajib: cloudflared dan service `api`
+berada di network Docker yang sama. Contoh override ada di
+`examples/homelab/docker-compose.override.yml`; ia menambahkan `api` ke
+network eksternal dengan alias `nusapeta-gateway`:
+
+Ingress tunnel tidak lagi menunjuk gateway API. Halaman demo dan API-nya
+dipisah ke repo `nusapeta/demo`: halaman statis di container demo memegang nama
+`gateway`, lalu mem-proxy `/route` dan `/place` ke `nusapeta-gateway:8080`.
+Penamaan itu bukan selera: compose menambahkan nama service sebagai alias,
+jadi service ini tidak boleh bernama `gateway` kalau container lain juga
+memegang nama tersebut.
 
 ```bash
 export TUNNEL_NETWORK=1panel-network   # ganti dengan network cloudflared Anda
@@ -258,7 +265,7 @@ Jangan memakai `--profile cloudflare` di host seperti itu: connector kedua akan
 menerima seluruh ingress tunnel, tetapi hanya bisa me-resolve origin yang ada
 di network compose ini, bukan origin container lain. Kalau network berbeda,
 gejalanya `502` dan log cloudflared berisi
-`lookup gateway ... no such host`.
+`lookup nusapeta-gateway ... no such host`.
 
 ### Verifikasi
 
