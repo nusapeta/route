@@ -151,7 +151,10 @@ Detail format, invarian, dan alasan desain:
 | `GET /healthz` | kesiapan + provenance graph |
 | `GET /version` | commit, build time, Go/OS/arch |
 | `GET /metrics` | Prometheus (biasanya hanya upstream internal) |
-| `GET /` | demo peta di `nusa-gateway` |
+
+Demo peta adalah front end statis terpisah
+([`nusapeta/demo`](https://github.com/nusapeta/demo)) yang mem-proxy `/route`
+dan `/place` ke sini. Gateway menjawab JSON saja.
 
 Parameter penting: `simplify=<meter>`, `pin=1` (garis menyambung pin mentah),
 `restrictions=0` (matikan enforcement untuk debug), `profile=mobil|motor`
@@ -220,7 +223,6 @@ internal/stats       helper statistik
 docs/                arsitektur, API, operasi, benchmark, roadmap, backlog
 paper/               draf ACM, RESULTS.md, ledger klaim, data mentah
 scripts/             fetch, build nasional, smoke, load test, harness OSRM
-web/                 demo peta yang di-embed ke gateway
 ```
 
 ## Test dan benchmark

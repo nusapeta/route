@@ -20,7 +20,7 @@ v5, 54.891.393 node / 112.340.071 edge, 1.621 MB.
 
 Urutan prioritas saat dokumen bertentangan:
 
-1. **Kode dan test** di `internal/`, `cmd/`, dan `web/`.
+1. **Kode dan test** di `internal/` dan `cmd/`.
 2. **Metadata graph** dari `bin/nusa-graphinfo -graph data/indonesia.graph` dan
    respons `/healthz`.
 3. **Angka mentah** di [`../paper/RESULTS.md`](../paper/RESULTS.md), lengkap

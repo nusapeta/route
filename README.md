@@ -187,7 +187,10 @@ and the English copy at [`docs/en/ARCHITECTURE.md`](docs/en/ARCHITECTURE.md).
 | `GET /healthz` | readiness + graph provenance |
 | `GET /version` | commit, build time, Go/OS/arch |
 | `GET /metrics` | Prometheus (normally internal) |
-| `GET /` | map demo on `nusa-gateway` |
+
+The interactive map is a separate static front end
+([`nusapeta/demo`](https://github.com/nusapeta/demo)) that proxies `/route` and
+`/place` here. The gateway answers JSON only.
 
 Important parameters: `simplify=<meters>`, `pin=1` (connect raw pins),
 `restrictions=0` (disable enforcement for debugging), `profile=mobil|motor`

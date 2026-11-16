@@ -383,8 +383,10 @@ nusapeta-route.lan {
 `cloudflared`, jadi semua pengunjung akan berbagi satu bucket. Gateway sendiri
 sudah membaca `CF-Connecting-IP` lewat `-trust-proxy`.
 
-`GET /` dan `/assets/*` dilayani gateway untuk demo peta. Gateway compose
-memakai `-block-metrics`, jadi `https://${PUBLIC_HOST}/metrics` selalu
+`/`, `/assets/*`, `/route`, dan `/place/*` di hostname demo dilayani container
+`nusapeta-demo` (repo `nusapeta/demo`): nginx menyajikan halaman statis lalu
+mem-proxy `/route` dan `/place` ke gateway di `routeid-gateway:8080`. Gateway
+compose memakai `-block-metrics`, jadi `https://${PUBLIC_HOST}/metrics` selalu
 `404`; dashboard internal membaca `127.0.0.1:18080/metrics` dan
 `127.0.0.1:18081/metrics` langsung. Jangan mengganti flag itu di deployment
 publik.

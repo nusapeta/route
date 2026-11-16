@@ -6,6 +6,14 @@ All user-visible changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The map demo left this repository. `nusa-gateway` now answers JSON only;
+  the page, styles, and assets live in
+  [`nusapeta/demo`](https://github.com/nusapeta/demo), which serves them from
+  nginx and proxies `/route` and `/place` back here. `GET /` and `/assets/*`
+  on a gateway-only deployment answer `404`.
+
 ### Fixed
 
 - Container image: `nusa-gateway` was built without the version stamp, so the

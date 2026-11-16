@@ -239,9 +239,11 @@ Detail model motor dan batasnya: [`MOTOR-MODEL.md`](MOTOR-MODEL.md).
 - `?profile=mobil|motor`, default mobil;
 - `X-Route-Profile` ditambahkan;
 - `/healthz` agregat kedua profil; `/metrics` bisa diblokir;
-- menyajikan demo peta dari `web/`; kolom "Cari tempat" di demo itu memanggil
-  `/place/search` lalu mengisi titik A atau B, dan tanpa `-place` kolom itu
-  dinonaktifkan sehingga peta tetap bisa dipakai lewat klik;
+- tidak menyajikan halaman apa pun: demo peta adalah front end statis terpisah
+  (`nusapeta/demo`) yang mem-proxy `/route` dan `/place` ke sini. Kolom
+  "Cari tempat" di demo itu memanggil `/place/search` lalu mengisi titik A atau
+  B, dan tanpa `-place` kolom itu dinonaktifkan sehingga peta tetap bisa dipakai
+  lewat klik;
 - opsional `-place`: upstream geocoder pihak lain dipasang di prefix `/place`
   (lihat [`API.md`](API.md) dan [`OPERATIONS.md`](OPERATIONS.md)). Prefix itu
   satu-satunya sinyal routing karena hostname publik hanya punya satu route

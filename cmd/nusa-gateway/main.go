@@ -32,10 +32,6 @@ const (
 	placePrefix = "/place"
 )
 
-// commit is stamped by make static through -ldflags. It also versions the
-// static asset URLs so a deploy cannot mix new HTML with cached old JS.
-var commit = "dev"
-
 type upstream struct {
 	name  string
 	base  *url.URL
@@ -218,9 +214,6 @@ func forwardedClientIP(h http.Header) string {
 }
 
 func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if g.serveStatic(w, r) {
-		return
-	}
 	if r.URL.Path == placePrefix || strings.HasPrefix(r.URL.Path, placePrefix+"/") {
 		g.servePlace(w, r)
 		return

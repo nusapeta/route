@@ -241,9 +241,10 @@ Motorcycle model limits: [`MOTOR-MODEL.md`](../MOTOR-MODEL.md).
 - `?profile=mobil|motor`, default `mobil`;
 - adds `X-Route-Profile`;
 - aggregate `/healthz` for both profiles; `/metrics` can be blocked;
-- serves the map demo from `web/`; the "Cari tempat" field calls
-  `/place/search` and fills point A or B; without `-place` the field is disabled
-  and the map still works by clicking;
+- serves no page: the map demo is a separate static front end
+  (`nusapeta/demo`) that proxies `/route` and `/place` here. Its "Cari tempat"
+  field calls `/place/search` and fills point A or B; without `-place` the field
+  is disabled and the map still works by clicking;
 - optional `-place`: a third-party geocoder upstream is mounted at `/place`
   (see [`API.md`](../API.md) and [`OPERATIONS.md`](../OPERATIONS.md)). The prefix is
   the only routing signal because the public hostname has one tunnel route;

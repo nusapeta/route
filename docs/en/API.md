@@ -16,8 +16,6 @@ Indonesian file is canonical.
 | `GET` | `/healthz` | health + graph metadata |
 | `GET` | `/version` | commit, build time, Go/OS/arch |
 | `GET` | `/metrics` | Prometheus text format |
-| `GET` | `/` | map demo (gateway only) |
-| `GET` | `/assets/*` | map demo assets (gateway only) |
 | `GET` | `/place/*` | geocoder bundle (gateway with `-place`) |
 | `OPTIONS` | `*` | CORS preflight |
 

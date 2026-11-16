@@ -12,8 +12,6 @@ base URL). Tidak ada autentikasi. Base URL contoh: `http://127.0.0.1:8080`.
 | `GET` | `/healthz` | kesehatan + metadata graph |
 | `GET` | `/version` | commit, build time, Go/OS/arch |
 | `GET` | `/metrics` | Prometheus text format |
-| `GET` | `/` | demo peta (hanya gateway) |
-| `GET` | `/assets/*` | aset demo peta (hanya gateway) |
 | `GET` | `/place/*` | geocoder bundle (hanya gateway dengan `-place`) |
 | `OPTIONS` | `*` | preflight CORS |
 
