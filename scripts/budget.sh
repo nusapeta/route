@@ -32,6 +32,7 @@ pbf=data/indonesia-latest.osm.pbf
 baseline=""
 binary=""
 rss_mb=""
+base_rss_override=""
 rss_phase=idle
 check_only=0
 self_test=0
@@ -45,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --baseline) baseline=$2; shift 2 ;;
     --binary) binary=$2; shift 2 ;;
     --rss-mb) rss_mb=$2; shift 2 ;;
+    --base-rss) base_rss_override=$2; shift 2 ;;
     --phase) rss_phase=$2; shift 2 ;;
     --check-only) check_only=1; shift ;;
     --self-test) self_test=1; shift ;;
@@ -115,6 +117,9 @@ if [[ -n $baseline ]]; then
     else
         base_rss=$(jsonNum idle_rss_mb)
     fi
+fi
+if [[ -n $base_rss_override ]]; then
+    base_rss=$base_rss_override
 fi
 
 if [[ $self_test == 1 ]]; then

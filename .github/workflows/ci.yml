@@ -49,9 +49,11 @@ jobs:
   budget:
     runs-on: ubuntu-latest
     env:
-      IDLE_SECONDS: 5
+      IDLE_SECONDS: 2
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
