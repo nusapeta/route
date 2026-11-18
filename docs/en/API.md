@@ -106,9 +106,13 @@ Conditional fields:
 |---|---|
 | `ferry_m`, `has_ferry`, `ferry_spans` | the route uses a ferry |
 | `legs` | cross-region route stitched with ferry connectors |
+| `ferry_time_source` | cross-region route: `osm` (measured) or `schedule` (static table); also on the ferry leg |
 | `trimmed: {from,to}` | an initial/final spur was removed |
 | `fallback: true` | restrictions were disabled to find a route |
 | `relaxed: true`, `epsilon`, `turn_penalty` | the budget ran out and the heuristic was relaxed |
+
+`ferry_time_source` is `osm` when the connector uses a measured OSM duration,
+`schedule` when it comes from the static table.
 
 `ferry_spans` contains inclusive index ranges into the geometry array; use it to
 draw dashed lines.

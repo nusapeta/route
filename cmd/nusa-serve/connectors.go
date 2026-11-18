@@ -1,5 +1,7 @@
 package main
 
+const ferryTimeOSM = "osm"
+
 // ferryPort is one end of a cross-region ferry link. Coordinates point at the
 // terminal road, not at the water: the leg routers snap these into their own
 // graph before the crossing is added as a straight ferry segment.
@@ -20,6 +22,7 @@ type ferryConnector struct {
 	regionA    []string
 	regionB    []string
 	distanceM  uint32
+	timeSource string // "osm" for measured durations, "schedule" for static ones
 	durationDs uint32
 }
 
@@ -36,6 +39,7 @@ func defaultFerryConnectors() []ferryConnector {
 			regionB:    []string{"sumatra"},
 			distanceM:  28535,
 			durationDs: 52260,
+			timeSource: ferryTimeOSM,
 		},
 		{
 			name:       "Ketapang-Gilimanuk",
@@ -45,8 +49,18 @@ func defaultFerryConnectors() []ferryConnector {
 			regionB:    []string{"nusa-tenggara", "bali", "bali-nusra", "nusra"},
 			distanceM:  4180,
 			durationDs: 14360,
+			timeSource: ferryTimeOSM,
 		},
 	}
+}
+
+// ferryTimeSource returns the source label carried in the route response.
+// Connectors without a measured duration fall back to the static schedule.
+func ferryTimeSource(c ferryConnector) string {
+	if c.timeSource != "" {
+		return c.timeSource
+	}
+	return "schedule"
 }
 
 // connectorFor returns the connector matching a region pair. The second port

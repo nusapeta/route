@@ -680,6 +680,9 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 			legs = append(legs, leg.legJSON(keep))
 		}
 		body["legs"] = legs
+		if cross.ferryTimeSource != "" {
+			body["ferry_time_source"] = cross.ferryTimeSource
+		}
 	}
 	if res.Relaxed {
 		body["relaxed"] = true

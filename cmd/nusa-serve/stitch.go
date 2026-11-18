@@ -18,6 +18,7 @@ type routeLeg struct {
 	durationDs uint32
 	from, to   [2]float64
 	start, end int
+	timeSource string
 }
 
 // stitchedRoute is a cross-region answer. It embeds SnapRoute so the handler's
@@ -25,10 +26,11 @@ type routeLeg struct {
 // comes from two graphs and therefore cannot be a node sequence in one of them.
 type stitchedRoute struct {
 	graph.SnapRoute
-	pts        [][2]float64
-	legs       []routeLeg
-	ferrySpans [][2]int
-	region     string
+	pts             [][2]float64
+	legs            []routeLeg
+	ferrySpans      [][2]int
+	region          string
+	ferryTimeSource string
 }
 
 // routeStitched routes start -> port A and port B -> destination in their own
@@ -83,7 +85,7 @@ func (s *server) routeStitched(ctx context.Context, rgF, rgT *region, snapF, sna
 		{mode: "road", region: rgF.name, distanceM: legA.DistanceM, durationDs: legA.TimeDs,
 			from: legA.Head, to: legA.Tail, start: legAStart, end: legAEnd},
 		{mode: "ferry", name: c.name, distanceM: c.distanceM, durationDs: c.durationDs,
-			from: legA.Tail, to: legB.Head, start: ferryStart, end: ferryEnd},
+			timeSource: ferryTimeSource(c), from: legA.Tail, to: legB.Head, start: ferryStart, end: ferryEnd},
 		{mode: "road", region: rgT.name, distanceM: legB.DistanceM, durationDs: legB.TimeDs,
 			from: legB.Head, to: legB.Tail, start: legBStart, end: legBEnd},
 	}
@@ -122,11 +124,12 @@ func (s *server) routeStitched(ctx context.Context, rgF, rgT *region, snapF, sna
 		TrimEnd:   legB.TrimEnd,
 	}
 	return &stitchedRoute{
-		SnapRoute:  res,
-		pts:        pts,
-		legs:       legs,
-		ferrySpans: spans,
-		region:     rgF.name + "+" + rgT.name,
+		SnapRoute:       res,
+		pts:             pts,
+		legs:            legs,
+		ferrySpans:      spans,
+		ferryTimeSource: ferryTimeSource(c),
+		region:          rgF.name + "+" + rgT.name,
 	}, nil
 }
 
@@ -175,6 +178,9 @@ func (l routeLeg) legJSON(keep []int) map[string]any {
 		"duration_s": float64(l.durationDs) / 10,
 		"from":       []float64{round6(l.from[0]), round6(l.from[1])},
 		"to":         []float64{round6(l.to[0]), round6(l.to[1])},
+	}
+	if l.mode == "ferry" && l.timeSource != "" {
+		out["ferry_time_source"] = l.timeSource
 	}
 	if l.region != "" {
 		out["region"] = l.region

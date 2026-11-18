@@ -103,9 +103,13 @@ Field kondisional:
 |---|---|
 | `ferry_m`, `has_ferry`, `ferry_spans` | rute memakai ferry |
 | `legs` | rute lintas region dijahit dengan konektor ferry |
+| `ferry_time_source` | rute lintas region: `osm` (durasi terukur) atau `schedule` (tabel statis); juga pada leg ferry |
 | `trimmed: {from,to}` | spur awal/akhir dibuang |
 | `fallback: true` | restriction dimatikan agar rute ditemukan |
 | `relaxed: true`, `epsilon`, `turn_penalty` | budget habis, heuristic diperlonggar |
+
+`ferry_time_source` mengambil `osm` bila connector memakai durasi OSM terukur,
+`schedule` bila durasinya berasal dari tabel statis.
 
 `ferry_spans` adalah rentang indeks inklusif ke array geometri; dipakai untuk
 menggambar garis putus-putus.
