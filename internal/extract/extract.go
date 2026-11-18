@@ -188,11 +188,16 @@ var motorExtraKMH = map[string]float64{
 	"path": 12, "footway": 10, "cycleway": 15, "pedestrian": 8, "steps": 4,
 }
 
+// motorSurfaceFactor groups OSM surfaces into four quality tiers: sealed,
+// uneven paved, loose unpaved, soft. Unmapped values stay neutral.
 var motorSurfaceFactor = map[string]float64{
 	"paved": 1.0, "asphalt": 1.0, "concrete": 1.0,
+	"chipseal": 1.0, "concrete:plates": 1.0, "concrete:slabs": 1.0,
 	"paving_stones": 0.8, "compacted": 0.8, "fine_gravel": 0.8,
+	"sett": 0.8, "cobblestone": 0.8, "bricks": 0.8, "grass_paver": 0.8,
 	"gravel": 0.6, "dirt": 0.6, "ground": 0.6, "earth": 0.6, "unpaved": 0.6,
-	"sand": 0.4, "mud": 0.4,
+	"pebblestone": 0.6, "stone": 0.6, "rock": 0.6,
+	"sand": 0.4, "mud": 0.4, "grass": 0.4,
 }
 
 var motorSmoothnessFactor = map[string]float64{
@@ -773,9 +778,11 @@ func wayProfile(p Profile, tags osm.Tags) (wayInfo, bool) {
 	}, true
 }
 
-// motorExtraSpeed applies surface and smoothness quality to the classes that
-// only motorcycles may use. Unknown tags count as neutral, and the result never
-// drops below 5 km/h.
+// motorMinSpeedKMH keeps a rough motorcycle-only way traversable in the model.
+const motorMinSpeedKMH = 5
+
+// motorExtraSpeed applies surface and smoothness quality to motorcycle-only
+// classes; unknown tags stay neutral and the floor keeps rough ways routable.
 func motorExtraSpeed(t wayTags) float64 {
 	kmh := motorExtraKMH[t.highway]
 	if kmh == 0 {
@@ -787,8 +794,8 @@ func motorExtraSpeed(t wayTags) float64 {
 	if f, ok := motorSmoothnessFactor[t.smoothness]; ok {
 		kmh *= f
 	}
-	if kmh < 5 {
-		kmh = 5
+	if kmh < motorMinSpeedKMH {
+		kmh = motorMinSpeedKMH
 	}
 	return kmh
 }
