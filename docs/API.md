@@ -8,8 +8,9 @@ base URL). Tidak ada autentikasi. Base URL contoh: `http://127.0.0.1:8080`.
 | Method | Path | Guna |
 |---|---|---|
 | `GET` | `/route` | rute dari query string |
+| `GET` | `/matrix` | matriks satu-sumber banyak-tujuan |
+| `GET` | `/isochrone` | area terjangkau dalam batas waktu (GeoJSON) |
 | `POST` | `/route` | rute dari JSON body |
-| `GET` | `/isochrone` | area yang bisa dicapai dari satu titik |
 | `GET` | `/healthz` | kesehatan + metadata graph |
 | `GET` | `/version` | commit, build time, Go/OS/arch |
 | `GET` | `/metrics` | Prometheus text format |
@@ -152,6 +153,43 @@ curl -s -X POST http://127.0.0.1:8080/route \
 Field yang didukung: `from`, `to`, `format`, `simplify`, `restrictions`, `pin`.
 Field lain diabaikan. Body yang bukan JSON valid → `400`.
 
+## `GET /matrix`
+
+Matriks satu-sumber banyak-tujuan untuk pembeli logistik. Satu Dijkstra per
+sumber; semua tujuan dari sumber itu dibaca dari pencarian yang sama.
+
+```http
+GET /matrix?sources=-6.2,106.8&targets=-6.2,106.8012|-6.1988,106.8024&max_minutes=30
+```
+
+| Parameter | Wajib | Default | Nilai |
+|---|---|---|---|
+| `sources` | ya | — | 1–5 titik `lat,lng`, dipisah `|` (boleh param berulang) |
+| `targets` | ya | — | 1–25 titik `lat,lng`, dipisah `|` |
+| `max_minutes` | tidak | `60` | 1–180 menit |
+
+`sources × targets` maksimal 25. Pasangan dengan jarak garis lurus >100 km
+menjadi `too_far` tanpa pencarian. Titik yang gagal di-snap menjadi
+`snap_failed`; kalau semua titik gagal, responsnya `422 snap`.
+
+```json
+{
+  "sources": [[-6.2, 106.8]],
+  "targets": [[-6.2, 106.8012], [-6.1988, 106.8024]],
+  "matrix": [
+    [
+      {"status": "ok", "distance_m": 134, "duration_s": 60.2},
+      {"status": "no_route"}
+    ]
+  ],
+  "meta": {"max_minutes": 60, "expansions": 120, "elapsed_ms": 3}
+}
+```
+
+Status sel: `ok`, `too_far`, `snap_failed`, `no_route`. Biaya memakai waktu
+tanpa biaya belokan; `distance_m` dan `duration_s` sudah menyertakan potongan
+snap. Endpoint di region berbeda tanpa konektor ferry menjadi `no_route`.
+
 ## `GET /isochrone`
 
 Area yang bisa dicapai dari satu titik dalam batas waktu tertentu. Respons
@@ -191,7 +229,9 @@ minimal 8 vertex dan luas minimal 2000 m²; sisanya dibuang.
 |---|---|---|
 | `200` | — | rute ditemukan |
 | `304` | — | `If-None-Match` cocok; tidak ada body |
-| `400` | — | parameter/JSON/koordinat tidak valid |
+| `400` | `matrix_too_large` | lebih dari 5 sumber atau `sources × targets` > 25 |
+| `400` | `too_many_targets` | lebih dari 25 target |
+| `400` | `cutoff_too_large` | `max_minutes` > 180 |
 | `422` | `snap` | tidak ada jalan dalam radius `-snap` (default 3 km) |
 | `422` | `too_far` | jarak garis lurus atau jarak tempuh > `-max-route-km` |
 | `422` | `budget` | budget lunak habis; rute terlalu panjang |
@@ -200,8 +240,6 @@ minimal 8 vertex dan luas minimal 2000 m²; sisanya dibuang.
 | `429` | — | rate limit per IP; ada `Retry-After` |
 | `500` | — | error internal; detail hanya di log |
 | `504` | `deadline` | deadline keras `-timeout` habis |
-| `422` | `isochrone_too_large` | isochrone melewati batas internal 1,5 juta node |
-| `422` | `no_area` | tidak ada ring dengan luas ≥ 2000 m² |
 
 Bentuk error:
 
@@ -246,6 +284,7 @@ masing-masing; gateway tidak menambah rate limit sendiri.
 | Header | Isi |
 |---|---|
 | `X-Route-Ms` | wall time routing, milidetik |
+| `X-Matrix-Ms` | wall time pencarian matriks, milidetik |
 | `X-Route-Region` | nama file graph yang melayani |
 | `X-Route-Expansions` | jumlah edge yang diekspansi |
 | `X-Route-Trim` | `none`, `from`, `to`, atau `both` |
