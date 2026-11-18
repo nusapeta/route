@@ -149,8 +149,8 @@ GET /isochrone?lat=-6.1754&lon=106.8272&minutes=15&meters=5000&grid=250&simplify
 | `profile` | tidak | `mobil` | hanya gateway: `mobil` atau `motor` |
 
 Ring dibuat dari raster sel yang tercapai oleh Dijkstra dengan batas `minutes`;
-ukuran sel aktif dilaporkan di `meta.grid_m`. Ring minimal 8 vertex dan luas
-minimal 2000 m²; sisanya dibuang.
+ukuran sel aktif setelah penyesuaian otomatis dilaporkan di `meta.grid_m`. Ring
+minimal 8 vertex dan luas minimal 2000 m²; sisanya dibuang.
 
 ```json
 {
