@@ -24,6 +24,7 @@ import (
 	"github.com/paulmach/osm"
 	"github.com/paulmach/osm/osmpbf"
 
+	"github.com/nusapeta/route/internal/extract/ferryschedule"
 	"github.com/nusapeta/route/internal/graph"
 )
 
@@ -667,6 +668,7 @@ type wayTags struct {
 	motorcar                   string
 	maxspeed, oneway, junction string
 	onewayMotorcycle           string
+	name                       string
 	surface, smoothness        string
 }
 
@@ -698,6 +700,8 @@ func readWayTags(t osm.Tags) wayTags {
 			w.smoothness = kv.Value
 		case "junction":
 			w.junction = kv.Value
+		case "name":
+			w.name = kv.Value
 		}
 	}
 	return w
@@ -755,11 +759,16 @@ func wayProfile(p Profile, tags osm.Tags) (wayInfo, bool) {
 	if v, good := parseSpeedKMH(t.maxspeed); good {
 		kmh = v
 	}
-
+	durSec := ferryDuration(ferry, tags)
+	if ferry && durSec == 0 {
+		if c, ok := ferryschedule.Lookup(t.name); ok {
+			durSec = float64(c.DurationS)
+		}
+	}
 	return wayInfo{
 		speed:  kmh,
 		dir:    direction(t, p),
-		durSec: ferryDuration(ferry, tags),
+		durSec: durSec,
 		ferry:  ferry,
 	}, true
 }

@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/nusapeta/route/internal/extract/ferryschedule"
 	"github.com/paulmach/osm"
 )
 
@@ -82,6 +83,28 @@ func TestFerryDuration(t *testing.T) {
 	}
 	if got := ferryDuration(false, tags("duration", "00:30")); got != 0 {
 		t.Errorf("non-ferry duration = %v, want 0", got)
+	}
+}
+
+func TestFerryScheduleFallback(t *testing.T) {
+	base := tags("route", "ferry", "motor_vehicle", "yes", "name", "Merak – Bakauheni")
+	want, ok := ferryschedule.Lookup("Merak-Bakauheni")
+	if !ok {
+		t.Fatal("Merak-Bakauheni missing from schedule")
+	}
+	inf, ok := wayProfile(ProfileCar, base)
+	if !ok || inf.durSec != float64(want.DurationS) {
+		t.Errorf("schedule fallback = %v, %v; want %v", inf.durSec, ok, want.DurationS)
+	}
+	withOSM := tags("route", "ferry", "motor_vehicle", "yes", "name", "Merak-Bakauheni", "duration", "00:45")
+	inf, ok = wayProfile(ProfileCar, withOSM)
+	if !ok || inf.durSec != 2700 {
+		t.Errorf("OSM duration must win: got %v, %v; want 2700", inf.durSec, ok)
+	}
+	unknown := tags("route", "ferry", "motor_vehicle", "yes", "name", "Unknown-Strait")
+	inf, ok = wayProfile(ProfileCar, unknown)
+	if !ok || inf.durSec != 0 || inf.speed != 20 {
+		t.Errorf("unknown ferry = %+v, %v; want 20 km/h and no duration", inf, ok)
 	}
 }
 
