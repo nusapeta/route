@@ -92,7 +92,7 @@ func (s *server) handleIsochrone(w http.ResponseWriter, req *http.Request) {
 	if !s.rl.allowRequest(w, req, s.m) {
 		return
 	}
-	rg, _, ok := s.pickSnap(p.lat, p.lon)
+	rg, _, ok := s.pickSnap(p.lat, p.lon, 0)
 	if !ok {
 		s.m.errSnap.Add(1)
 		httpErrReason(w, 422, reasonSnap, "no road within snap distance (region not loaded?)")

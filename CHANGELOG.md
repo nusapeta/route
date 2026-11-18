@@ -6,6 +6,19 @@ All user-visible changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `/route` accepts `avoid=toll|ferry|unpaved|motorway`. The mask is applied
+  inside A* edge expansion, so it changes the path and the recorded expansion
+  count instead of filtering a finished route. Classes are inferred from the
+  graph's speed class because the artefact stores no per-edge OSM road type.
+- `/route` accepts `alt=1..3` for up to three edge-banned searches. Returned
+  `alternatives` differ from the primary route by at least 20% of edge length.
+- `/route` accepts `via=lat,lng|...` (max 5 points) and returns `legs[]` with
+  per-leg distance, duration and geometry indexes.
+- `GET /nearest?lat=&lon=&k=&max=` wraps `SnapEdges` without any graph search,
+  for pin previews and snapping diagnostics.
+
 ### Changed
 
 - The map demo left this repository. `nusa-gateway` now answers JSON only;

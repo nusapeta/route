@@ -11,6 +11,7 @@ base URL). Tidak ada autentikasi. Base URL contoh: `http://127.0.0.1:8080`.
 | `GET` | `/matrix` | matriks satu-sumber banyak-tujuan |
 | `GET` | `/isochrone` | area terjangkau dalam batas waktu (GeoJSON) |
 | `POST` | `/route` | rute dari JSON body |
+| `GET` | `/nearest` | snap koordinat ke ruas jalan tanpa pencarian rute |
 | `GET` | `/healthz` | kesehatan + metadata graph |
 | `GET` | `/version` | commit, build time, Go/OS/arch |
 | `GET` | `/metrics` | Prometheus text format |
@@ -64,6 +65,9 @@ GET /route?from=-6.1754,106.8272&to=-6.5950,106.8166&format=polyline
 | `restrictions` | tidak | `1` | `0` mematikan enforcement (debug) |
 | `pin` | tidak | `0` | `1` menambahkan titik mentah di awal/akhir |
 | `profile` | tidak | `mobil` | hanya gateway: `mobil` atau `motor` |
+| `avoid` | tidak | — | `toll`, `ferry`, `unpaved`, `motorway`; pisahkan dengan `,` atau `|` |
+| `alt` | tidak | `0` | `1`…`3` rute alternatif; maksimal 3 putaran |
+| `via` | tidak | — | `lat,lng|lat,lng|…`, maksimal 5 titik |
 
 Koordinat harus di dalam Indonesia (lat −12…8, lon 93…142). Latitude dulu,
 bukan longitude. Response selalu mengembalikan `from`/`to` hasil parse supaya
@@ -104,8 +108,9 @@ Field kondisional:
 | Field | Muncul saat |
 |---|---|
 | `ferry_m`, `has_ferry`, `ferry_spans` | rute memakai ferry |
-| `legs` | rute lintas region dijahit dengan konektor ferry |
 | `ferry_time_source` | rute lintas region: `osm` (durasi terukur) atau `schedule` (tabel statis); juga pada leg ferry |
+| `legs` | rute via atau lintas region dijahit dengan konektor ferry |
+| `alternatives` | `alt>0` dan ada rute alternatif |
 | `trimmed: {from,to}` | spur awal/akhir dibuang |
 | `fallback: true` | restriction dimatikan agar rute ditemukan |
 | `relaxed: true`, `epsilon`, `turn_penalty` | budget habis, heuristic diperlonggar |
@@ -135,6 +140,55 @@ berbasis waktu harus menanganinya di luar Nusapeta Route.
 terkunci oleh aturan yang tersimpan. Relasi conditional yang dibuang tidak
 memicunya.
 
+### `avoid`
+
+`avoid` menyaring ruas saat ekspansi A*, bukan setelah rute selesai. Jadi
+`avoid=toll,motorway` mengubah simpul yang dikunjungi, snapping endpoint, dan
+jumlah ekspansi (`/metrics` dan `X-Route-Expansions`). Kelas diperkira dari
+kelas kecepatan artefak: tol/motorway = 80 km/h ke atas, `unpaved` = 10 km/h ke
+bawah, `ferry` memakai indeks ferry. Tanpa tag OSM per-ruas di artefak ini,
+pemetaan bersifat aproksimasi.
+
+```http
+GET /route?from=-6.1754,106.8272&to=-6.5950,106.8166&avoid=toll
+```
+
+Nilai selain keempat nilai di atas → `400`.
+
+### `alt`
+
+`alt=1`…`3` menjalankan hingga tiga putaran tambahan. Setiap putaran
+melarang tepi dari rute yang sudah diterima, lalu mencari lagi; satu rute
+diterima hanya bila paling sedikit 20% panjang tepinya berbeda dari rute
+utama. Latensi dibatasi oleh plafon ekspansi yang sama dengan rute biasa.
+Field `alternatives` berisi `distance_m`, `duration_s`, `points`, `points_n`
+untuk tiap rute tambahan.
+
+### `via`
+
+`via` memecah perjalanan menjadi leg berturut-turut. Jumlah `legs` =
+jumlah titik (termasuk `from` dan `to`) dikurangi satu; `distance_m` total
+= jumlah `distance_m` leg (±1 m). Tiap leg membawa `duration_s`,
+`start_index`, `end_index`, `points_n` yang menunjuk ke array geometri.
+Rute lintas-region belum didukung untuk `via` → `422 cross_region`.
+
+## `GET /nearest`
+
+```http
+GET /nearest?lat=-6.1754&lon=106.8272&k=2&max=3000
+```
+
+| Parameter | Wajib | Default | Nilai |
+|---|---|---|---|
+| `lat`, `lon` | ya | — | derajat desimal |
+| `k` | tidak | `1` | `1`…`32` jumlah kandidat |
+| `max` | tidak | `-snap` | radius meter, maksimal 100000 |
+
+Mengembalikan `region` dan `candidates` berisi `distance_m`, `lat`, `lon`,
+`node`, `edge`, `t`. Kandidat pertama identik dengan `SnapEdge` tunggal
+pada parameter yang sama. Endpoint ini tidak menjalankan A*: ekspansi tetap
+nol, cocok untuk preview pin saat pengguna masih menggeser peta.
+
 ## `POST /route`
 
 Body maksimum 8 KiB. `from`/`to` boleh string atau objek:
@@ -150,8 +204,10 @@ curl -s -X POST http://127.0.0.1:8080/route \
   }'
 ```
 
-Field yang didukung: `from`, `to`, `format`, `simplify`, `restrictions`, `pin`.
-Field lain diabaikan. Body yang bukan JSON valid → `400`.
+Field yang didukung: `from`, `to`, `format`, `simplify`, `restrictions`, `pin`,
+`avoid`, `alt`, `via`. `avoid` berupa string (`"toll,ferry"`), `alt` bilangan
+`0`…`3`, `via` string `"lat,lng|lat,lng"`. Field lain diabaikan. Body yang
+bukan JSON valid → `400`.
 
 ## `GET /matrix`
 
