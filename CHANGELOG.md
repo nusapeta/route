@@ -20,6 +20,13 @@ All user-visible changes are recorded here. The format follows
   `docker compose up -d gateway` habit to `api`; the homelab override and
   `deploy/README.md` follow the new name.
 
+- Motorcycle `surface` speed factors now cover 24 OSM values across the same
+  four quality tiers (added chipseal, concrete plates, sett, cobblestone,
+  bricks, grass_paver, pebblestone, stone, rock, grass, and others). The car
+  profile, graph format, and 5 km/h floor are unchanged; no new runtime
+  dependency or artifact bytes. Rebuild graphs so stored `MCls` matches the
+  new `motor_sha256`.
+
 ### Documentation
 
 - `restriction:conditional` is now an explicit unsupported case with a written

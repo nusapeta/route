@@ -1372,3 +1372,37 @@ Reproduksi:
 ```bash
 go test ./internal/graph -run TestDijkstraOneToManyVsAStar -v -count=1
 ```
+## 21. Tabel kecepatan motor: cakupan `surface` (2026-11-18)
+
+Profil motor sudah menyimpan kelas kecepatan di `MCls` (format v5), tetapi
+tabel faktor kualitasnya hanya mengenal 13 nilai `surface`. Nilai umum lain
+jatuh ke faktor netral 1,0, sehingga gang berpermukaan kasar seperti
+`sett`/`cobblestone` atau `pebblestone` dapat ditaksir terlalu cepat. Tabel
+`motorSurfaceFactor` kini memetakan 24 nilai dalam empat tier yang sama:
+
+| Tier | Faktor | Nilai `surface` |
+|---|---:|---|
+| Segel, rata | 1,0 | `paved`, `asphalt`, `concrete`, `chipseal`, `concrete:plates`, `concrete:slabs` |
+| Paved, tidak rata / licin | 0,8 | `paving_stones`, `compacted`, `fine_gravel`, `sett`, `cobblestone`, `bricks`, `grass_paver` |
+| Lepas, kasar | 0,6 | `gravel`, `dirt`, `ground`, `earth`, `unpaved`, `pebblestone`, `stone`, `rock` |
+| Lunak | 0,4 | `sand`, `mud`, `grass` |
+
+Factor `smoothness` tidak berubah (1,0 sampai 0,25); batas bawah 5 km/jam
+tetap berlaku dan sekarang bernama `motorMinSpeedKMH`. Tabel ini adalah
+pemetaan tier heuristik, bukan kecepatan terukur: tidak ada klaim akurasi ETA
+baru dari perubahan ini.
+
+Anggaran artefak tetap **0 byte**: perubahan hanya pada peta statis di
+`internal/extract/extract.go`, tanpa section graph baru, tanpa dependency
+runtime, dan tanpa alokasi pada jalur request. Profil `car` tidak disentuh;
+golden 48 pasangan (`internal/graph/testdata/golden.txt`) dan
+`TestMotorGoldenRoutes` tetap menjadi pengunci regresi. Kontribusi tiap faktor,
+komposisi `surface` × `smoothness`, batas bawah, dan ketidakberubahan profil
+`car` dikunci oleh `TestMotorSurfaceFactorTable`,
+`TestMotorSmoothnessFactorTable`, `TestMotorQualityFactorsCompose`, dan
+`TestMotorOnlyRulesLeaveCarAlone`.
+
+Sesuai `docs/MOTOR-MODEL.md` §7, perubahan tabel ini mengubah `motor_sha256`;
+artefak graph harus dibangun ulang agar `MCls` pada artefak cocok dengan
+profil yang di-hash. Ukuran biner graph tidak berubah karena format v5 tidak
+ditambah kolom.

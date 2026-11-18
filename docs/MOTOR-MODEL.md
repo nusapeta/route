@@ -47,10 +47,10 @@ mengalikan kelas itu; jalan yang sudah ada di tabel mobil tidak berubah.
 
 | `surface` | faktor |
 |---|---:|
-| `paved`, `asphalt`, `concrete` | 1,0 |
-| `paving_stones`, `compacted`, `fine_gravel` | 0,8 |
-| `gravel`, `dirt`, `ground`, `earth`, `unpaved` | 0,6 |
-| `sand`, `mud` | 0,4 |
+| `paved`, `asphalt`, `concrete`, `chipseal`, `concrete:plates`, `concrete:slabs` | 1,0 |
+| `paving_stones`, `compacted`, `fine_gravel`, `sett`, `cobblestone`, `bricks`, `grass_paver` | 0,8 |
+| `gravel`, `dirt`, `ground`, `earth`, `unpaved`, `pebblestone`, `stone`, `rock` | 0,6 |
+| `sand`, `mud`, `grass` | 0,4 |
 
 | `smoothness` | faktor |
 |---|---:|
@@ -63,7 +63,8 @@ mengalikan kelas itu; jalan yang sudah ada di tabel mobil tidak berubah.
 | `very_horrible`, `impassable` | 0,25 |
 
 Nilai akhir tidak turun di bawah 5 km/jam. Tag yang tidak dikenal bersifat
-netral. Implementasi: `motorExtraSpeed`, `motorSurfaceFactor`,
+netral. Tabel ini adalah pemetaan tier heuristik, bukan kecepatan terukur.
+Implementasi: `motorMinSpeedKMH`, `motorExtraSpeed`, `motorSurfaceFactor`,
 `motorSmoothnessFactor`.
 
 ### Restriction dan ferry
