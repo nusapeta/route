@@ -45,3 +45,16 @@ jobs:
           tags: nusapeta/route-tools:ci
       - name: Smoke tools image
         run: docker run --rm nusapeta/route-tools:ci -h
+
+  budget:
+    runs-on: ubuntu-latest
+    env:
+      IDLE_SECONDS: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: budget guard (RSS/artifact/image/binary)
+        run: bash scripts/e2e.sh
