@@ -34,8 +34,11 @@ func graphFingerprint(regions []*region, maxRouteM, maxSnapM float64, eps, turnS
 // with the same points shares it with the GET form.
 func routeETag(fp string, p routeParams) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s|%.6f,%.6f|%.6f,%.6f|%s|%.3f|%t|%t",
-		fp, p.fLat, p.fLon, p.tLat, p.tLon, p.format, p.simplify, p.pin, p.restrictions)
+	fmt.Fprintf(h, "%s|%.6f,%.6f|%.6f,%.6f|%s|%.3f|%t|%t|%d|%d",
+		fp, p.fLat, p.fLon, p.tLat, p.tLon, p.format, p.simplify, p.pin, p.restrictions, uint8(p.avoid), p.alt)
+	for _, pt := range p.via {
+		fmt.Fprintf(h, "|%.6f,%.6f", pt[0], pt[1])
+	}
 	return `"` + fp[:8] + "-" + short(h, 16) + `"`
 }
 
