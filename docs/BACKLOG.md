@@ -29,11 +29,16 @@ melintasi jalan dengan conditional. Jangan menambah format sebelum ada angka.
 **Masalah.** `duration` OSM sering kosong. Merak–Bakauheni terukur 1,45 jam,
 tetapi banyak lintasan kecil jatuh ke asumsi 20 km/jam.
 
-**Rencana.** Tabel statis per lintasan (waktu, frekuensi) untuk lintasan yang
-benar-benar dipakai; jangan menambahkan jadwal real-time.
+**Status.** Tabel statis 10 lintasan ada di `internal/extract/ferryschedule`
+(nama, pelabuhan, durasi, frekuensi). `duration` OSM menang bila tersedia;
+tabel hanya mengisi yang kosong. Respons lintas region menandai
+`ferry_time_source` (`osm` / `schedule`) di root dan pada leg ferry. Jadwal
+real-time tidak dimodelkan.
 
-**Lulus bila.** Selisih ETA ferry pada 10 lintasan utama < 20% dibanding jadwal
-resmi, dan respons menandai sumber waktu.
+**Lulus bila.** Selisih ETA 10 lintasan utama < 20% dibanding jadwal resmi dan
+respons menandai sumber waktu. **Batas verifikasi:** repo hanya memuat dua
+durasi terukur (`paper/RESULTS.md` §12c); delapan lintasan tidak punya jadwal
+resmi di repo, sehingga syarat < 20% untuk 10 lintasan belum terverifikasi.
 
 ### 13b. Profil motor: sisa
 
