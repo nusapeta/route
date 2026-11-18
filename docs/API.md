@@ -9,6 +9,7 @@ base URL). Tidak ada autentikasi. Base URL contoh: `http://127.0.0.1:8080`.
 |---|---|---|
 | `GET` | `/route` | rute dari query string |
 | `POST` | `/route` | rute dari JSON body |
+| `GET` | `/isochrone` | area yang bisa dicapai dari satu titik |
 | `GET` | `/healthz` | kesehatan + metadata graph |
 | `GET` | `/version` | commit, build time, Go/OS/arch |
 | `GET` | `/metrics` | Prometheus text format |
@@ -128,6 +129,39 @@ curl -s -X POST http://127.0.0.1:8080/route \
 Field yang didukung: `from`, `to`, `format`, `simplify`, `restrictions`, `pin`.
 Field lain diabaikan. Body yang bukan JSON valid → `400`.
 
+## `GET /isochrone`
+
+Area yang bisa dicapai dari satu titik dalam batas waktu tertentu. Respons
+adalah GeoJSON `FeatureCollection`; tiap `Feature` satu ring poligon tertutup
+dengan koordinat `[lng, lat]`.
+
+```http
+GET /isochrone?lat=-6.1754&lon=106.8272&minutes=15&meters=5000&grid=250&simplify=25
+```
+
+| Parameter | Wajib | Default | Nilai |
+|---|---|---|---|
+| `lat`, `lon` | ya | — | derajat; `lng` diterima sebagai alias `lon` |
+| `minutes` | tidak | `15` | `1`…`60` |
+| `meters` | tidak | `100000` | `1`…`100000` |
+| `grid` | tidak | `250` | `50`…`10000` meter; otomatis naik bila melebihi 40000 sel |
+| `simplify` | tidak | `25` | meter; Douglas-Peucker, `0` = mati |
+| `profile` | tidak | `mobil` | hanya gateway: `mobil` atau `motor` |
+
+Ring dibuat dari raster sel yang tercapai oleh Dijkstra dengan batas `minutes`;
+ukuran sel aktif dilaporkan di `meta.grid_m`. Ring minimal 8 vertex dan luas
+minimal 2000 m²; sisanya dibuang.
+
+```json
+{
+  "type": "FeatureCollection",
+  "features": [
+    {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[106.827, -6.175], [106.828, -6.176], [106.827, -6.175]]]}}
+  ],
+  "meta": {"grid_m": 500, "nodes_visited": 3480, "area_m2": 16000000, "minutes": 15}
+}
+```
+
 ## Status dan error
 
 | Status | `reason` | Arti |
@@ -143,6 +177,8 @@ Field lain diabaikan. Body yang bukan JSON valid → `400`.
 | `429` | — | rate limit per IP; ada `Retry-After` |
 | `500` | — | error internal; detail hanya di log |
 | `504` | `deadline` | deadline keras `-timeout` habis |
+| `422` | `isochrone_too_large` | isochrone melewati batas internal 1,5 juta node |
+| `422` | `no_area` | tidak ada ring dengan luas ≥ 2000 m² |
 
 Bentuk error:
 

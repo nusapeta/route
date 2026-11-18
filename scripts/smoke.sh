@@ -14,6 +14,23 @@ curl -sf "$base/healthz" | head -c 400; echo
 echo "== GET polyline =="
 curl -sf "$base/route?from=$from&to=$to&format=polyline" | head -c 300; echo
 
+echo "== GET isochrone =="
+iso_file=$(mktemp)
+trap 'rm -f "$iso_file"' EXIT
+curl -sf -o "$iso_file" "$base/isochrone?lat=${from%%,*}&lon=${from#*,}&minutes=15"
+python3 - "$iso_file" <<'PY'
+import json, sys
+with open(sys.argv[1]) as fh:
+    body = json.load(fh)
+rings = [f["geometry"]["coordinates"][0] for f in body["features"]]
+assert body["type"] == "FeatureCollection" and rings
+assert all(len(r) >= 8 and r[0] == r[-1] for r in rings)
+assert body["meta"]["grid_m"] > 0
+print("isochrone: %d ring(s), grid_m=%s" % (len(rings), body["meta"]["grid_m"]))
+PY
+rm -f "$iso_file"
+trap - EXIT
+
 echo "== POST json =="
 curl -sf -X POST -H 'Content-Type: application/json' \
   -d "{\"from\":\"$from\",\"to\":\"$to\",\"format\":\"polyline\"}" \

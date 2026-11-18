@@ -176,6 +176,7 @@ func main() {
 	mux.HandleFunc("/version", handleVersion)
 	mux.HandleFunc("/metrics", s.m.handleMetrics)
 	mux.Handle("/route", s.m.wrap(s.handleRoute))
+	mux.Handle("/isochrone", s.m.wrap(s.handleIsochrone))
 
 	srv := &http.Server{
 		Addr:              *addr,

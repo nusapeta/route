@@ -93,6 +93,34 @@ func TestProfileSelectsUpstream(t *testing.T) {
 	}
 }
 
+// TestIsochroneProxiesByProfile keeps the new endpoint on the same profile
+// chain as /route: no gateway route of its own, just a path passthrough.
+func TestIsochroneProxiesByProfile(t *testing.T) {
+	hits := make(chan hit, 1)
+	g := newTestGateway(t, hits)
+	res := get(t, g, "/isochrone?lat=-6.2&lon=106.8&minutes=5&profile=motor", nil)
+	got := <-hits
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want the upstream 422", res.StatusCode)
+	}
+	if got.path != "/isochrone" {
+		t.Errorf("upstream path %q, want /isochrone", got.path)
+	}
+	q, err := url.ParseQuery(got.query)
+	if err != nil {
+		t.Fatalf("upstream query %q: %v", got.query, err)
+	}
+	if q.Get("minutes") != "5" || q.Get("lat") != "-6.2" || q.Get("lon") != "106.8" {
+		t.Errorf("upstream query %q lost the isochrone parameters", got.query)
+	}
+	if _, ok := q["profile"]; ok {
+		t.Errorf("upstream query %q kept the profile parameter", got.query)
+	}
+	if tag, want := res.Header.Get("ETag"), `"motor-tag"`; tag != want {
+		t.Errorf("ETag %q, want %q", tag, want)
+	}
+}
+
 // TestUnknownProfileRefused checks that a typo fails loudly instead of quietly
 // serving the wrong profile.
 func TestUnknownProfileRefused(t *testing.T) {
