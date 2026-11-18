@@ -281,14 +281,14 @@ func TestMotorSurfaceFactorTable(t *testing.T) {
 }
 
 // TestMotorSmoothnessFactorTable locks the smoothness multipliers and the
-// floor reached by the two lowest tiers on a 15 km/h base.
+// floor reached by the three lowest tiers on a 15 km/h base.
 func TestMotorSmoothnessFactorTable(t *testing.T) {
 	cases := []struct {
 		smoothness string
 		want       float64
 	}{
 		{"excellent", 15}, {"good", 13.5}, {"intermediate", 11.25},
-		{"bad", 7.5}, {"very_bad", 6}, {"horrible", 4.5},
+		{"bad", 7.5}, {"very_bad", 6}, {"horrible", 5},
 		{"very_horrible", 5}, {"impassable", 5},
 		{"unknown", 15},
 	}
@@ -296,6 +296,16 @@ func TestMotorSmoothnessFactorTable(t *testing.T) {
 		got := motorExtraSpeed(wayTags{highway: "cycleway", smoothness: c.smoothness})
 		if got != c.want {
 			t.Errorf("smoothness=%q: speed = %.3f, want %.3f", c.smoothness, got, c.want)
+		}
+	}
+	for _, low := range []struct {
+		name string
+		want float64
+	}{
+		{"horrible", 0.3}, {"very_horrible", 0.25}, {"impassable", 0.25},
+	} {
+		if f := motorSmoothnessFactor[low.name]; math.Abs(f-low.want) > 1e-9 {
+			t.Errorf("smoothness %s factor = %.3f, want %.3f", low.name, f, low.want)
 		}
 	}
 }
