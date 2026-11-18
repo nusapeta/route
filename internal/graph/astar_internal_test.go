@@ -418,3 +418,108 @@ func TestWorkspaceIdleReap(t *testing.T) {
 	}
 	t.Fatalf("reaper did not shrink idle workspace, slots = %d", wp.Stats().TotalSlots)
 }
+func avoidGraph() *Graph {
+	return &Graph{
+		NodeCount: 4, EdgeCount: 8,
+		Lat:   []int32{-6_200_000, -6_200_500, -6_200_500, -6_201_000},
+		Lon:   []int32{106_800_000, 106_800_500, 106_799_500, 106_800_000},
+		Off:   []uint32{0, 2, 4, 6, 8},
+		To:    []uint32{1, 2, 3, 0, 3, 0, 1, 2},
+		Len:   []uint16{250, 250, 250, 250, 250, 250, 250, 250},
+		Cls:   []uint8{60, 60, 180, 60, 60, 60, 180, 60},
+		Ferry: []uint32{2},
+		meta:  map[string]string{},
+	}
+}
+
+func TestAvoidMaskUsable(t *testing.T) {
+	g := avoidGraph()
+	r := NewRouter(g, 1)
+	for _, tc := range []struct {
+		name string
+		mask AvoidMask
+		edge uint32
+		want bool
+	}{
+		{"default", 0, 2, true},
+		{"toll blocks high class", AvoidToll, 2, false},
+		{"toll keeps normal class", AvoidToll, 3, true},
+		{"motorway blocks high class", AvoidMotorway, 2, false},
+		{"ferry blocks ferry edge", AvoidFerry, 2, false},
+		{"ferry keeps land edge", AvoidFerry, 3, true},
+	} {
+		if got := r.WithOptions(RouteOptions{Avoid: tc.mask}).usable(tc.edge); got != tc.want {
+			t.Errorf("%s: usable(%d) = %t, want %t", tc.name, tc.edge, got, tc.want)
+		}
+	}
+	g.Cls[3] = unpavedClassMax
+	if r.WithOptions(RouteOptions{Avoid: AvoidUnpaved}).usable(3) {
+		t.Error("unpaved mask kept a low-class edge")
+	}
+	if ban := r.WithOptions(RouteOptions{Ban: map[uint32]bool{3: true}}); ban.usable(3) {
+		t.Error("ban set kept a banned edge")
+	}
+}
+
+func TestAvoidRedirectsRoute(t *testing.T) {
+	r := NewRouter(avoidGraph(), 1)
+	base, err := r.Route(0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range base.Edges {
+		if e != 0 && e != 2 {
+			t.Fatalf("base route used edge %d, want the fast toll path 0,2", e)
+		}
+	}
+	avoided, err := r.WithOptions(RouteOptions{Avoid: AvoidToll}).Route(0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range avoided.Edges {
+		if e == 2 {
+			t.Fatal("avoid=toll still used the toll edge")
+		}
+	}
+}
+
+func TestEdgeBanForcesAlternative(t *testing.T) {
+	g := avoidGraph()
+	r := NewRouter(g, 1)
+	base, err := r.Route(0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ban := make(map[uint32]bool, len(base.Edges))
+	for _, e := range base.Edges {
+		ban[e] = true
+	}
+	alt, err := r.WithOptions(RouteOptions{Ban: ban}).Route(0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(edges []uint32) map[uint32]uint32 {
+		out := make(map[uint32]uint32, len(edges))
+		for _, e := range edges {
+			out[e] = uint32(g.Len[e])
+		}
+		return out
+	}
+	a, b := set(base.Edges), set(alt.Edges)
+	var shared, total uint32
+	for e, l := range a {
+		total += l
+		if _, ok := b[e]; ok {
+			shared += l
+		}
+	}
+	for e, l := range b {
+		total += l
+		if _, ok := a[e]; ok {
+			shared += l
+		}
+	}
+	if total == 0 || float64(2*shared)/float64(total) > 0.8 {
+		t.Fatalf("alternative too similar: shared=%d total=%d", shared, total)
+	}
+}
