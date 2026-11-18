@@ -9,7 +9,7 @@ ditunda, **P3** riset/opsional.
 
 ## P1 — korektnes data
 
-### 16b. Restriction conditional
+### 16b. Restriction conditional (diputuskan: tidak didukung, NUSA-14)
 
 **Masalah.** Relasi yang hanya punya `restriction:conditional` (jam sekolah,
 jam pasar, ganjil-genap) dihitung sebagai `conditional` lalu dibuang. Graph
@@ -23,6 +23,13 @@ statis tidak bisa mengevaluasi waktu.
 
 **Lulus bila.** Pilihan eksplisit + angka dampak pada 30 pasangan yang
 melintasi jalan dengan conditional. Jangan menambah format sebelum ada angka.
+
+**Keputusan NUSA-14.** Pilihan 1 dipakai: tidak didukung dengan reason eksplisit.
+Graph v5 tidak punya waktu berangkat atau zona waktu, tidak ada fixture jendela
+berlaku, dan v6 menuntut pembaruan anggaran kolom 07 ENG lebih dulu. Relasi tetap
+dihitung sebagai `conditional` lalu dibuang; 0 aturan tambahan, 0 byte tambahan,
+fallback tidak berubah. Detail dan angka ada di `paper/RESULTS.md` §14e dan
+`docs/API.md`. Angka dampak 30 pasangan belum tersedia, jadi opsi 2 tertahan.
 
 ### 14b. Jadwal ferry
 
