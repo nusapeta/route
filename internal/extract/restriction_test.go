@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/paulmach/osm"
@@ -189,5 +190,39 @@ func TestOtherClassTag(t *testing.T) {
 	}
 	if otherClassTag(osm.Tags{{Key: "restriction:conditional", Value: "no_left_turn @ (06:00-10:00)"}}) {
 		t.Error("conditional is handled separately, not as a class")
+	}
+}
+
+func TestConditionalRestrictionUnsupported(t *testing.T) {
+	res := restResult{stats: RestrictionStats{Relations: 2}}
+	for _, tags := range []osm.Tags{
+		{
+			{Key: "type", Value: "restriction"},
+			{Key: "restriction:conditional", Value: "no_left_turn @ (Mo-Fr 07:00-09:00)"},
+		},
+		{
+			{Key: "type", Value: "restriction"},
+			{Key: "restriction", Value: "no_left_turn"},
+			{Key: "restriction:conditional", Value: "no_left_turn @ (Mo-Fr 07:00-09:00)"},
+		},
+	} {
+		res.addRelation(&restView{}, &osm.Relation{Tags: tags})
+	}
+
+	if res.stats.Conditional != 2 {
+		t.Errorf("conditional = %d, want 2", res.stats.Conditional)
+	}
+	if res.stats.Usable != 0 || res.stats.Ban != 0 || res.stats.Only != 0 ||
+		len(res.ban) != 0 || len(res.only) != 0 {
+		t.Fatalf("conditional relation stored as a rule: stats=%+v ban=%v only=%v", res.stats, res.ban, res.only)
+	}
+	if got := res.stats.Skipped(); got != 2 {
+		t.Errorf("skipped = %d, want 2", got)
+	}
+	if got := res.stats.ConditionalNote(); got != ConditionalUnsupportedReason {
+		t.Errorf("ConditionalNote = %q, want %q", got, ConditionalUnsupportedReason)
+	}
+	if s := res.stats.String(); !strings.Contains(s, "conditional_note="+ConditionalUnsupportedReason) {
+		t.Errorf("String() does not expose the reason: %s", s)
 	}
 }
