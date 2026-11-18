@@ -56,6 +56,7 @@ type server struct {
 	fp         string
 	m          *metrics
 	rl         *limiter
+	matrixPool *matrixPool
 	motor      bool // this process serves the motorcycle profile
 }
 
@@ -141,6 +142,7 @@ func main() {
 		budget:     softBudget,
 		maxAge:     *maxAge,
 		m:          m,
+		matrixPool: newMatrixPool(*conc, *workspaceMB),
 		motor:      motor,
 	}
 	for _, p := range expand(graphs) {
@@ -176,8 +178,8 @@ func main() {
 	mux.HandleFunc("/version", handleVersion)
 	mux.HandleFunc("/metrics", s.m.handleMetrics)
 	mux.Handle("/route", s.m.wrap(s.handleRoute))
+	mux.Handle("/matrix", s.m.wrap(s.handleMatrix))
 	mux.Handle("/isochrone", s.m.wrap(s.handleIsochrone))
-
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           cors(gzipWrap(mux)),
@@ -889,7 +891,7 @@ func cors(h http.Handler) http.Handler {
 		// ETag/Cache-Control/Retry-After are exposed so a Flutter web client can
 		// revalidate a cached route and read the back-off hint on a 429.
 		w.Header().Set("Access-Control-Expose-Headers",
-			"X-Route-Ms, X-Route-Region, X-Route-Expansions, X-Route-Trim, ETag, Cache-Control, Retry-After")
+			"X-Route-Ms, X-Route-Region, X-Route-Expansions, X-Route-Trim, X-Matrix-Ms, ETag, Cache-Control, Retry-After")
 		// Chrome asks for this before an HTTPS page may reach a LAN/localhost
 		// service (Private Network Access), e.g. hoppscotch.io -> localhost.
 		if r.Header.Get("Access-Control-Request-Private-Network") == "true" {

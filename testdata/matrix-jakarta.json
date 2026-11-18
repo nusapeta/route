@@ -1,0 +1,49 @@
+{
+  "response": {
+    "sources": [
+      [
+        -6.2,
+        106.8
+      ]
+    ],
+    "targets": [
+      [
+        -6.2,
+        106.8012
+      ],
+      [
+        -6.1988,
+        106.8024
+      ],
+      [
+        -6.1964,
+        106.8048
+      ]
+    ],
+    "matrix": [
+      [
+        {
+          "status": "ok",
+          "distance_m": 132,
+          "duration_s": 16.4
+        },
+        {
+          "status": "ok",
+          "distance_m": 396,
+          "duration_s": 49.2
+        },
+        {
+          "status": "ok",
+          "distance_m": 924,
+          "duration_s": 114.7
+        }
+      ]
+    ],
+    "meta": {
+      "max_minutes": 60,
+      "expansions": 34,
+      "elapsed_ms": 1
+    }
+  },
+  "uri": "/matrix?sources=-6.2,106.8\u0026targets=-6.2,106.8012|-6.1988,106.8024|-6.1964,106.8048"
+}

@@ -93,6 +93,31 @@ func TestProfileSelectsUpstream(t *testing.T) {
 	}
 }
 
+// TestMatrixForwarded checks that the matrix endpoint shares the profile chain
+// with /route, without leaking the routing-only parameter upstream.
+func TestMatrixForwarded(t *testing.T) {
+	hits := make(chan hit, 1)
+	g := newTestGateway(t, hits)
+	res := get(t, g, "/matrix?sources=-6.2,106.8&targets=-6.21,106.81&profile=motor", nil)
+	got := <-hits
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want the upstream 422", res.StatusCode)
+	}
+	if got.path != "/matrix" {
+		t.Fatalf("upstream path %q, want /matrix", got.path)
+	}
+	q, err := url.ParseQuery(got.query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Get("sources") != "-6.2,106.8" || q.Get("targets") != "-6.21,106.81" {
+		t.Fatalf("upstream query %q lost the matrix parameters", got.query)
+	}
+	if _, ok := q["profile"]; ok {
+		t.Fatalf("upstream query %q kept the profile parameter", got.query)
+	}
+}
+
 // TestIsochroneProxiesByProfile keeps the new endpoint on the same profile
 // chain as /route: no gateway route of its own, just a path passthrough.
 func TestIsochroneProxiesByProfile(t *testing.T) {
