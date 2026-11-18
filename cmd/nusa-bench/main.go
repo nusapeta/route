@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
+	"net/url"
 	"os"
 	"runtime/pprof"
 	"sort"
@@ -29,9 +32,18 @@ func main() {
 	pairsOut := flag.String("emit-pairs", "", "write the sampled coordinate pairs and exit")
 	noStrict := flag.Bool("no-restrictions", false, "ignore turn restrictions (baseline)")
 	profile := flag.String("profile", "car", "vehicle profile: car|motor")
+	mode := flag.String("mode", "route", "benchmark mode: route|matrix")
+	baseURL := flag.String("url", "http://127.0.0.1:8080", "base URL for -mode matrix")
 	cpuProf := flag.String("cpuprofile", "", "write CPU profile")
 	flag.Parse()
 
+	if *mode == "matrix" {
+		runMatrixBench(*baseURL, *n, *seed)
+		return
+	}
+	if *mode != "route" {
+		die(fmt.Errorf("unknown -mode %q (want route|matrix)", *mode))
+	}
 	if *cpuProf != "" {
 		f, err := os.Create(*cpuProf)
 		if err != nil {
@@ -300,4 +312,51 @@ func runPairs(g *graph.Graph, r *graph.Router, path, csvOut string, motor bool) 
 			stats.Percentile(a.ms, 0.50), stats.Percentile(a.ms, 0.95), stats.Percentile(a.ms, 0.99),
 			stats.Percentile(a.exp, 0.50), a.fail)
 	}
+}
+
+// runMatrixBench hits a live nusa-serve with one source and ten targets in a
+// 20 km radius. Start the server with -rate 0 to avoid 429s skewing the result.
+func runMatrixBench(base string, n int, seed int64) {
+	const (
+		lat0   = -6.2088
+		lon0   = 106.8456
+		target = 10
+	)
+	rng := rand.New(rand.NewSource(seed))
+	coords := make([]string, target)
+	for i := range coords {
+		lat := lat0 + (rng.Float64()-0.5)*0.36
+		lon := lon0 + (rng.Float64()-0.5)*0.36/math.Cos(lat0*math.Pi/180)
+		coords[i] = fmt.Sprintf("%.6f,%.6f", lat, lon)
+	}
+	q := url.Values{}
+	q.Set("sources", fmt.Sprintf("%.6f,%.6f", lat0, lon0))
+	q.Set("targets", strings.Join(coords, "|"))
+	endpoint := strings.TrimRight(base, "/") + "/matrix?" + q.Encode()
+	client := &http.Client{Timeout: 30 * time.Second}
+	ms := make([]float64, 0, n)
+	fails := 0
+	for range n {
+		start := time.Now()
+		res, err := client.Get(endpoint)
+		if err != nil {
+			fails++
+			continue
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			fails++
+			continue
+		}
+		ms = append(ms, float64(time.Since(start).Microseconds())/1000)
+	}
+	fmt.Printf("mode=matrix targets=%d n=%d ok=%d fail=%d", target, n, len(ms), fails)
+	if len(ms) == 0 {
+		fmt.Println()
+		return
+	}
+	sort.Float64s(ms)
+	fmt.Printf(" p50_ms=%.1f p95_ms=%.1f p99_ms=%.1f\n",
+		stats.Percentile(ms, 0.50), stats.Percentile(ms, 0.95), stats.Percentile(ms, 0.99))
 }
