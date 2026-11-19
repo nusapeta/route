@@ -1299,3 +1299,43 @@ print(codes, 'p50 %.0f ms' % lat[len(lat)//2], 'p95 %.0f ms' % lat[int(len(lat)*
       'max %.1f km' % (dist[-1]/1000))
 PY
 ```
+
+## 20. Dijkstra satu-sumber banyak-tujuan (NUSA-6, 2026-11-18)
+
+Core bersama untuk `/matrix` dan `/isochrone`. `DijkstraOneToMany` memakai
+`WorkspacePool` yang sudah ada: kunci node disimpan di tabel open-addressing
+yang sama dengan kunci tepi A*, jadi tidak ada array `dist[]` dense seukuran
+54,9 juta node (219 MB per request). Dua fungsi biaya dipakai bergantian:
+`edgeTimeDs` (waktu tempuh per profil, desidetik) dan `EdgeLenM` (panjang tepi,
+meter). Plafon ekspansi memakai `SetMaxExpansions`, batas biaya memakai
+`maxCost`, dan `Bound{Truncated}` menandai hasil yang terhenti oleh plafon
+bukan oleh cutoff. Workspace dikembalikan ke pool lewat `defer` sebelum
+handler selesai.
+
+### 20a. Metode
+
+Graf sintetis 30x30 dari `cityGraph` (900 node, spasi ~133 m, variasi
+kecepatan per baris). 100 sumber dan 10 tujuan per sumber dibangkitkan
+deterministik (seed `0x243f6a8885a308d3`). Satu `DijkstraOneToMany` per
+sumber, lalu 10 `Router.Route` A* per sumber dengan setting kirim (eps 1,5,
+`turnScale` 0,25). A* berstate tepi dan memasukkan biaya belok; Dijkstra
+node-based mengabaikan riwayat masuk, sehingga biayanya harus lebih rendah
+atau sama. Selisih diukur sebagai `(A* - Dijkstra) / A * 100` atas `TimeDs`.
+
+### 20b. Hasil
+
+1000 pengukuran (100 pasangan x 10 tujuan): median 0,88%, p95 2,62%,
+maksimum 5,42%. Tidak ada sampel dengan Dijkstra lebih mahal dari A*.
+Target median <= 2% dan p95 <= 8% terpenuhi, jadi tidak perlu naik ke
+Dijkstra edge-state atau menaikkan anggaran `07 ENG`.
+
+Angka ini berasal dari graf sintetis, bukan artefak nasional atau beban
+produksi. Golden 48 pasangan tidak berubah dan `go test ./...` hijau.
+Perubahan tidak menambah dependency runtime maupun alokasi global; alokasi
+tabel tetap berada di pool workspace yang sudah ada.
+
+Reproduksi:
+
+```bash
+go test ./internal/graph -run TestDijkstraOneToManyVsAStar -v -count=1
+```

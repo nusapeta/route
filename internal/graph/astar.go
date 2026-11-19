@@ -196,6 +196,26 @@ func (wp *WorkspacePool) get(g *Graph) (*workspace, error) {
 	return ws, nil
 }
 
+// getNodeKeyed acquires a workspace whose key space covers node indexes as
+// well as edge indexes. A* keys edges; DijkstraOneToMany keys nodes. Sharing
+// one pool avoids a dense dist[] sized to every node of the graph, which for
+// the national extract would cost 219 MB per request.
+func (wp *WorkspacePool) getNodeKeyed(g *Graph) (*workspace, error) {
+	ws := <-wp.ch
+	if ws.idle(time.Now()) && ws.shrinkIdle() {
+		wp.shrinksTotal.Add(1)
+	}
+	entries := g.EdgeCount
+	if g.NodeCount > entries {
+		entries = g.NodeCount
+	}
+	if err := ws.resetEntries(entries); err != nil {
+		wp.ch <- ws
+		return nil, err
+	}
+	return ws, nil
+}
+
 func (wp *WorkspacePool) put(ws *workspace) {
 	ws.trimPathBuffers()
 	ws.shrinkIfNeeded()
@@ -357,7 +377,14 @@ func floorPow2(v uint32) uint32 {
 }
 
 func (w *workspace) resetForGraph(g *Graph) error {
-	bits := workspaceBits(g.EdgeCount)
+	return w.resetEntries(g.EdgeCount)
+}
+
+// resetEntries configures the packed key space for entries states. The A*
+// path passes EdgeCount; the Dijkstra path passes the larger of NodeCount and
+// EdgeCount so a graph with sink nodes still fits every node index.
+func (w *workspace) resetEntries(entries uint32) error {
+	bits := workspaceBits(entries)
 	if bits > maxWorkspaceBits {
 		return ErrWorkspaceOverflow
 	}
