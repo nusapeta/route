@@ -13,6 +13,7 @@ Indonesian file is canonical.
 |---|---|---|
 | `GET` | `/route` | route from query parameters |
 | `POST` | `/route` | route from a JSON body |
+| `GET` | `/isochrone` | area reachable from one point |
 | `GET` | `/healthz` | health + graph metadata |
 | `GET` | `/version` | commit, build time, Go/OS/arch |
 | `GET` | `/metrics` | Prometheus text format |
@@ -153,6 +154,39 @@ curl -s -X POST http://127.0.0.1:8080/route \
 Supported fields: `from`, `to`, `format`, `simplify`, `restrictions`, `pin`.
 Other fields are ignored. Invalid JSON returns `400`.
 
+## `GET /isochrone`
+
+Area reachable from a single point within a travel-time budget. The response is
+a GeoJSON `FeatureCollection`; each `Feature` is one closed polygon ring with
+`[lng, lat]` coordinates.
+
+```http
+GET /isochrone?lat=-6.1754&lon=106.8272&minutes=15&meters=5000&grid=250&simplify=25
+```
+
+| Parameter | Required | Default | Values |
+|---|---|---|---|
+| `lat`, `lon` | yes | n/a | degrees; `lng` accepted as an alias of `lon` |
+| `minutes` | no | `15` | `1`…`60` |
+| `meters` | no | `100000` | `1`…`100000` |
+| `grid` | no | `250` | `50`…`10000` metres; grows automatically past 40000 cells |
+| `simplify` | no | `25` | metres; Douglas-Peucker, `0` = off |
+| `profile` | no | `mobil` | gateway only: `mobil` or `motor` |
+
+Rings come from a raster of cells visited by a cutoff-bounded Dijkstra search;
+the effective cell size is reported in `meta.grid_m`. Rings have at least 8
+vertices and 2000 m² of area; smaller ones are dropped.
+
+```json
+{
+  "type": "FeatureCollection",
+  "features": [
+    {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[106.827, -6.175], [106.828, -6.176], [106.827, -6.175]]]}}
+  ],
+  "meta": {"grid_m": 500, "nodes_visited": 3480, "area_m2": 16000000, "minutes": 15}
+}
+```
+
 ## Status and errors
 
 | Status | `reason` | Meaning |
@@ -168,6 +202,8 @@ Other fields are ignored. Invalid JSON returns `400`.
 | `429` | n/a | per-IP rate limit; includes `Retry-After` |
 | `500` | n/a | internal error; details only in logs |
 | `504` | `deadline` | hard `-timeout` deadline expired |
+| `422` | `isochrone_too_large` | search exceeded the internal 1.5M node limit |
+| `422` | `no_area` | no ring reached 2000 m² |
 
 Error shape:
 

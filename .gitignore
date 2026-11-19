@@ -8,6 +8,7 @@ r.json
 rp.json
 r.polyline
 *.geojson
+!internal/graph/testdata/iso-monas-15m.geojson
 
 # Cloudflare Tunnel token; jangan commit.
 deploy/.env
