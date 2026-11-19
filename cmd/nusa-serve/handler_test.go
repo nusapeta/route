@@ -66,13 +66,14 @@ func testServer(t *testing.T, snapM float64) *server {
 	t.Helper()
 	rg := testRegion(t)
 	return &server{
-		regions:  []*region{rg},
-		maxSnapM: snapM,
-		timeout:  5 * time.Second,
-		budget:   3 * time.Second,
-		maxAge:   3600,
-		m:        &metrics{},
-		fp:       graphFingerprint([]*region{rg}, 0, snapM, 1.5, 0.25),
+		regions:    []*region{rg},
+		maxSnapM:   snapM,
+		timeout:    5 * time.Second,
+		budget:     3 * time.Second,
+		maxAge:     3600,
+		m:          &metrics{},
+		matrixPool: newMatrixPool(1, 0),
+		fp:         graphFingerprint([]*region{rg}, 0, snapM, 1.5, 0.25),
 	}
 }
 

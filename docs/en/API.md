@@ -12,8 +12,9 @@ Indonesian file is canonical.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/route` | route from query parameters |
+| `GET` | `/matrix` | one-to-many travel matrix |
+| `GET` | `/isochrone` | reachable area within a time budget (GeoJSON) |
 | `POST` | `/route` | route from a JSON body |
-| `GET` | `/isochrone` | area reachable from one point |
 | `GET` | `/healthz` | health + graph metadata |
 | `GET` | `/version` | commit, build time, Go/OS/arch |
 | `GET` | `/metrics` | Prometheus text format |
@@ -154,6 +155,43 @@ curl -s -X POST http://127.0.0.1:8080/route \
 Supported fields: `from`, `to`, `format`, `simplify`, `restrictions`, `pin`.
 Other fields are ignored. Invalid JSON returns `400`.
 
+## `GET /matrix`
+
+One-to-many matrix for logistics buyers. One Dijkstra per source; every
+target of that source is read from the same search.
+
+```http
+GET /matrix?sources=-6.2,106.8&targets=-6.2,106.8012|-6.1988,106.8024&max_minutes=30
+```
+
+| Parameter | Required | Default | Values |
+|---|---|---|---|
+| `sources` | yes | n/a | 1–5 `lat,lng` points separated by `|` (or repeated params) |
+| `targets` | yes | n/a | 1–25 `lat,lng` points separated by `|` |
+| `max_minutes` | no | `60` | 1–180 minutes |
+
+`sources × targets` is capped at 25. A pair over 100 km apart in a straight
+line is `too_far` without a search. A point that cannot be snapped yields
+`snap_failed`; if every point fails, the response is `422 snap`.
+
+```json
+{
+  "sources": [[-6.2, 106.8]],
+  "targets": [[-6.2, 106.8012], [-6.1988, 106.8024]],
+  "matrix": [
+    [
+      {"status": "ok", "distance_m": 134, "duration_s": 60.2},
+      {"status": "no_route"}
+    ]
+  ],
+  "meta": {"max_minutes": 60, "expansions": 120, "elapsed_ms": 3}
+}
+```
+
+Cell statuses: `ok`, `too_far`, `snap_failed`, `no_route`. Costs use travel
+time without turn penalties; `distance_m`/`duration_s` include the snap spurs.
+Endpoints in different regions without a ferry connector become `no_route`.
+
 ## `GET /isochrone`
 
 Area reachable from a single point within a travel-time budget. The response is
@@ -193,7 +231,9 @@ vertices and 2000 m² of area; smaller ones are dropped.
 |---|---|---|
 | `200` | n/a | route found |
 | `304` | n/a | `If-None-Match` matched; no body |
-| `400` | n/a | invalid parameter/JSON/coordinate |
+| `400` | `matrix_too_large` | over 5 sources or `sources × targets` > 25 |
+| `400` | `too_many_targets` | over 25 targets |
+| `400` | `cutoff_too_large` | `max_minutes` > 180 |
 | `422` | `snap` | no road within `-snap` (default 3 km) |
 | `422` | `too_far` | straight-line or travel distance exceeds `-max-route-km` |
 | `422` | `budget` | soft budget exhausted; route too long |
@@ -202,8 +242,6 @@ vertices and 2000 m² of area; smaller ones are dropped.
 | `429` | n/a | per-IP rate limit; includes `Retry-After` |
 | `500` | n/a | internal error; details only in logs |
 | `504` | `deadline` | hard `-timeout` deadline expired |
-| `422` | `isochrone_too_large` | search exceeded the internal 1.5M node limit |
-| `422` | `no_area` | no ring reached 2000 m² |
 
 Error shape:
 
@@ -248,6 +286,7 @@ buckets; the gateway adds no routing rate limit of its own.
 | Header | Content |
 |---|---|
 | `X-Route-Ms` | routing wall time, milliseconds |
+| `X-Matrix-Ms` | matrix search wall time, milliseconds |
 | `X-Route-Region` | graph file name that served the request |
 | `X-Route-Expansions` | number of expanded edges |
 | `X-Route-Trim` | `none`, `from`, `to`, or `both` |
