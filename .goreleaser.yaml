@@ -55,16 +55,16 @@ release:
   draft: false
   prerelease: auto
   header: |
-    First public release of Nusapeta Route 0.1.0.
+    Release {{ .Version }} of Nusapeta Route.
 
-    Release notes: [`CHANGELOG.md`](https://github.com/nusapeta/route/blob/v0.1.0/CHANGELOG.md).
-    Data artifacts are published separately under the `data-2026.11` tag.
+    Release notes: [`CHANGELOG.md`](https://github.com/nusapeta/route/blob/{{ .Tag }}/CHANGELOG.md).
+    Data artifacts are published separately under the `data-2026.11.1` tag.
 
     Verification:
 
     ```bash
     sha256sum -c SHA256SUMS
-    tar xzf nusapeta-route_0.1.0_linux_amd64.tar.gz
+    tar xzf nusapeta-route_{{ .Version }}_linux_amd64.tar.gz
     ./nusa-serve -graph <graph-file> -addr 127.0.0.1:8080
     ```
 

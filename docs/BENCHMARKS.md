@@ -158,6 +158,7 @@ Graph nasional v5, Ryzen:
 | Keadaan | RSS | `RssAnon` |
 |---|---:|---:|
 | Idle (0.1.0 image, `-conc 2 -workspace-mb 384`) | **17,8 MB** | 11,6 MB |
+| Idle (0.2.0 binary, `-conc 2 -workspace-mb 384`, graph v0.2) | **14,7 MB** | 6,6 MB |
 | Idle (bare binary, default flags) | 15,6 MB | 7,0 MB |
 | 4× rute 96 km paralel | 225 MiB | 90 MiB |
 | 4× rute 80 km paralel | 190 MiB | 90 MiB |

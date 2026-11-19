@@ -18,7 +18,7 @@ the routing half; the geocoder is
 [`nusapeta/place`](https://github.com/nusapeta/place) and the compose bundle is
 [`nusapeta/stack`](https://github.com/nusapeta/stack).
 
-`17 MB` idle RSS · `552 MB` download · `1.6 GB` graph on disk · `28 s` to
+`15 MB` idle RSS · `552 MB` download · `1.6 GB` graph on disk · `28 s` to
 preprocess the Java extract. ODbL data, no runtime dependencies.
 
 ## Quick start from the release artifact
@@ -27,14 +27,14 @@ Requires Docker, curl, zstd, and sha256sum.
 
 ```bash
 mkdir -p route-data && cd route-data
-base=https://github.com/nusapeta/route/releases/download/data-2026.11
+base=https://github.com/nusapeta/route/releases/download/data-2026.11.1
 curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst"
 curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst.sha256"
 sha256sum -c indonesia-v5-2026.11.graph.zst.sha256
 zstd -d indonesia-v5-2026.11.graph.zst -o indonesia-v5-2026.11.graph
 
 docker run --rm -p 127.0.0.1:8080:8080 -v "$PWD:/data:ro" \
-  ghcr.io/nusapeta/route:0.1.0 \
+  ghcr.io/nusapeta/route:0.2.0 \
   -graph /data/indonesia-v5-2026.11.graph -addr :8080
 ```
 
@@ -61,8 +61,8 @@ of RAM.
 Nusapeta Route takes the opposite trade-off:
 
 - **The graph is mapped, not copied to the heap.** Untouched pages stay out of
-  RSS. The 1.6 GB national graph idles at 17 MB; the Java graph used in E1 idles
-  at 15 MB.
+  RSS. The 1.6 GB national graph idles at 15 MB on the 0.2.0 binary; the Java
+  graph used in E1 idles at 15 MB.
 - **One artifact serves cars and motorcycles.** Format v5 stores two speed-class
   tables and two turn-restriction sets in one file.
 - **Rebuilds are cheap.** The Java extract takes 28 s on the test machine; the
@@ -87,7 +87,7 @@ numbers and reproduction commands are in [`paper/RESULTS.md`](paper/RESULTS.md)
 | Metric | Nusapeta Route (Java, E1) | OSRM MLD v5.26.0 | Winner |
 |---|---:|---:|---|
 | Graph on disk | **693 MB** (1 file) | 5.08 GB (many files) | Nusapeta |
-| RSS before queries | **17 MB** | 2.36 GiB | Nusapeta |
+| RSS before queries | **15 MB** | 2.36 GiB | Nusapeta |
 | Preprocess | **28 s** | 250 s (peak 6.25 GB) | Nusapeta |
 | p50, 332 matched pairs | 38.7 ms | **1.5 ms** | OSRM |
 | p95, 332 matched pairs | 674 ms | **3.7 ms** | OSRM |
@@ -105,7 +105,7 @@ Current national graph:
 | Nodes / edges | 54,891,393 / 112,340,071 |
 | Format | v5 `car+motor`, Hilbert order |
 | Artifact | 1,621 MB |
-| Idle RSS | 17.8 MB (`RssAnon` 11.6 MB), measured 2026-11-15 on the 0.1.0 image |
+| Idle RSS | 14.7 MB (`RssAnon` 6.6 MB), measured 2026-11-20 on the 0.2.0 binary |
 | 4× 96 km routes in parallel | 225 MiB RSS (`anon` 90 MiB) |
 | Build | 11m40s including download; extraction 1m12s |
 

@@ -6,7 +6,7 @@ Requires Docker, curl, zstd, and sha256sum.
 
 ```bash
 mkdir -p route-data && cd route-data
-base=https://github.com/nusapeta/route/releases/download/data-2026.11
+base=https://github.com/nusapeta/route/releases/download/data-2026.11.1
 
 curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst"
 curl -fsSLO "$base/indonesia-v5-2026.11.graph.zst.sha256"
@@ -14,7 +14,7 @@ sha256sum -c indonesia-v5-2026.11.graph.zst.sha256
 zstd -d indonesia-v5-2026.11.graph.zst
 
 docker run --rm -p 127.0.0.1:8080:8080 -v "$PWD:/data:ro" \
-  ghcr.io/nusapeta/route:0.1.0 \
+  ghcr.io/nusapeta/route:0.2.0 \
   -graph /data/indonesia-v5-2026.11.graph -addr :8080
 ```
 

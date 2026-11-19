@@ -30,7 +30,7 @@ import (
 
 // Version is the extractor version stamped into every graph's provenance. It is
 // overridable at link time: -X github.com/nusapeta/route/internal/extract.Version=<git describe>.
-var Version = "0.1.0"
+var Version = "0.2.0"
 
 // ProfileHash is a stable digest of one routing profile (name, per-class
 // fallback speeds and skipped classes). Two graphs with the same PBF hash but

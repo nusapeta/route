@@ -6,8 +6,30 @@ All user-visible changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
+Sprint 18–19 November 2026. Binary and data release: the graph must be rebuilt
+because the motorcycle profile changed (`motor_sha256`); routing behaviour with
+the old graph is unchanged.
+
 ### Added
 
+- `GET /matrix`: one-to-many travel matrix, up to 5 sources × 25 targets
+  (25 pairs maximum), one Dijkstra per source, `max_minutes` 1–180. Cells are
+  `ok`, `too_far`, `snap_failed` or `no_route`; straight-line pairs above
+  100 km never reach the search.
+- `GET /isochrone`: reachable area as a GeoJSON `FeatureCollection` built from
+  a bounded Dijkstra raster, with `minutes`, `meters`, `grid`, `simplify` and
+  gateway-only `profile`. Rings below 8 vertices or 2000 m² are dropped.
+- Static ferry table for the ten main crossings (Merak–Bakauheni,
+  Ketapang–Gilimanuk, Padang Bai–Lembar, Lembar–Poto Tano, Poto Tano–Sape,
+  Sape–Bima, Ujung–Kamal, Batam–Tanjung Pinang, Sibolga–Teluk Dalam,
+  Makassar–Parepare). OSM `duration` still wins at extraction; the table fills
+  gaps and annotates responses. `ferry_time_source` is `osm` or `schedule`;
+  no live timetable is queried.
+- One-source many-target Dijkstra (`DijkstraTree`) behind `/matrix`, so a
+  source's targets are read from a single search.
+- CI budget guard on RSS, artifact size, image size and binary size.
 - `/route` accepts `avoid=toll|ferry|unpaved|motorway`. The mask is applied
   inside A* edge expansion, so it changes the path and the recorded expansion
   count instead of filtering a finished route. Classes are inferred from the
@@ -81,5 +103,6 @@ First public release. Project name: Nusapeta Route (previously routeid).
   of parity with OSRM.
 - No built-in authentication; per-IP rate limit only.
 
-[Unreleased]: https://github.com/nusapeta/route/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nusapeta/route/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nusapeta/route/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nusapeta/route/releases/tag/v0.1.0
