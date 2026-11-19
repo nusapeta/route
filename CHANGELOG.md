@@ -6,6 +6,8 @@ All user-visible changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-20
+
 ### Fixed
 
 - `/route` no longer answers 422 for a short trip whose nearest segment snaps
@@ -119,6 +121,7 @@ First public release. Project name: Nusapeta Route (previously routeid).
   of parity with OSRM.
 - No built-in authentication; per-IP rate limit only.
 
-[Unreleased]: https://github.com/nusapeta/route/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nusapeta/route/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/nusapeta/route/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/nusapeta/route/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nusapeta/route/releases/tag/v0.1.0
