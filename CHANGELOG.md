@@ -6,6 +6,22 @@ All user-visible changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `/route` no longer answers 422 for a short trip whose nearest segment snaps
+  into a dead pocket while a usable segment sits tens of metres away. The snap
+  retry now probes its candidate pairs across the whole candidate span instead
+  of taking the nearest few, because a dead cluster wider than the retry can be
+  interleaved with live segments by distance. Measured on the Jakarta extract,
+  `-6.1754,106.8272 -> -6.20,106.80` with `avoid=toll` now answers 200 with a
+  41 m snap instead of 422 after exhausting the budget (22 of the 32 goal
+  candidates were dead, the first live one at 32 m).
+- A retry search is now capped by the distance between its own two snaps
+  instead of the whole request budget, so a dead candidate fails in well
+  under a second rather than each walking a whole component. `RouteOptions`
+  gained `Expansions` for this one-query override, honoured by both the A*
+  router and the one-to-many Dijkstra.
+
 ## [0.2.0] - 2026-11-20
 
 Sprint 18–19 November 2026. Binary and data release: the graph must be rebuilt

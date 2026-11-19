@@ -308,6 +308,10 @@ const (
 type RouteOptions struct {
 	Avoid AvoidMask
 	Ban   map[uint32]bool // edge indexes excluded from the search
+	// Expansions overrides the router's per-query expansion cap for this
+	// request; zero keeps the router value. The snap retry uses it so a
+	// candidate that cannot finish fails in well under the request budget.
+	Expansions uint32
 }
 
 // WithOptions scopes options to one query through a shallow copy. The graph and
@@ -418,6 +422,19 @@ func (r *Router) SetMaxExpansions(n uint32) {
 		n = defaultMaxExpansions
 	}
 	r.maxExpansions = n
+}
+
+// MaxExpansions reports the router's per-query expansion cap, so a caller can
+// size a tighter cap for one request and still know the full budget.
+func (r *Router) MaxExpansions() uint32 { return r.maxExpansions }
+
+// capFor returns the expansion cap this query may spend: the per-request
+// override when set, otherwise the router value.
+func (r *Router) capFor() uint32 {
+	if r.opts.Expansions != 0 {
+		return r.opts.Expansions
+	}
+	return r.maxExpansions
 }
 
 // SetEpsilon adjusts the heuristic weight (1.0 = optimal but slow).
@@ -834,7 +851,7 @@ func (r *Router) search(ctx context.Context, src, dst uint32, restrict bool, eps
 			continue // stale entry
 		}
 		expanded++
-		if expanded > int(r.maxExpansions) {
+		if expanded > int(r.capFor()) {
 			return Route{}, ErrTooFar
 		}
 		// Checking a context costs a load and a compare; once per 256 pops it is

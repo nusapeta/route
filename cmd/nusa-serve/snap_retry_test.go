@@ -222,3 +222,153 @@ func TestRouteSkipsPocketStart(t *testing.T) {
 		t.Errorf("snapRetry = %d, want 1", got)
 	}
 }
+
+// sliverRegion models the goal-side shape measured on the Jakarta extract in
+// the Monas failure: the segment snaps around the goal pin form a dead cluster
+// - 22 stubs nearer than the 10 segments that actually connect, all inside a
+// ~100 m radius. Choosing the nearest few retry pairs spends every attempt
+// inside the cluster, which is how the real request burned its budget and
+// answered 422 while a working frontage road sat 40 m away.
+//
+// The connecting road runs parallel to the pin, 330 m east, exactly like a
+// frontage road behind the lots that the stub cluster covers.
+func sliverRegion(t *testing.T) *region {
+	t.Helper()
+	const chainN, deadN, liveN = 600, 22, 10
+	const mPerDeg = 8.98e-6    // degrees of latitude per metre
+	const mPerDegLon = 8.98e-6 // degrees of longitude per metre at this latitude
+
+	type arc struct {
+		to  uint32
+		m   uint16
+		cls uint8
+	}
+	lat := make([]int32, 0, chainN+2*(deadN+liveN))
+	lon := make([]int32, 0, chainN+2*(deadN+liveN))
+	adj := make([][]arc, 0, chainN+2*(deadN+liveN))
+
+	grow := func(latDeg, lonDeg float64) uint32 {
+		id := uint32(len(lat))
+		lat = append(lat, int32(latDeg*1e7))
+		lon = append(lon, int32(lonDeg*1e7))
+		adj = append(adj, nil)
+		return id
+	}
+	link := func(a, b uint32, m uint16) {
+		adj[a] = append(adj[a], arc{b, m, 60})
+		adj[b] = append(adj[b], arc{a, m, 60})
+	}
+
+	const pinLat, pinLon = -6.20000, 106.80000
+	const chainLon = pinLon + 330*mPerDegLon
+
+	// The frontage road: long enough that every start snap clears the
+	// reachability floor the retry applies to starts.
+	chainFirst := len(lat)
+	for i := 0; i < chainN; i++ {
+		grow(pinLat+(float64(i)-0.5*chainN)*2.2*mPerDeg, chainLon)
+	}
+	for i := 0; i+1 < chainN; i++ {
+		link(uint32(chainFirst+i), uint32(chainFirst+i+1), 2)
+	}
+	chainAt := func(latDeg float64) uint32 {
+		i := int(math.Round((latDeg-pinLat)/(2.2*mPerDeg))) + chainN/2
+		if i < 0 {
+			i = 0
+		}
+		if i >= chainN {
+			i = chainN - 1
+		}
+		return uint32(chainFirst + i)
+	}
+
+	// Each stub is a 5 m segment centred on its offset from the pin.
+	pair := func(offsetM float64) (uint32, uint32) {
+		a := grow(pinLat+(offsetM+2.5)*mPerDeg, pinLon)
+		b := grow(pinLat+(offsetM-2.5)*mPerDeg, pinLon)
+		return a, b
+	}
+	for j := 0; j < deadN; j++ {
+		a, b := pair(4.0 + 0.75*float64(j))
+		link(a, b, 5) // self-contained: nothing outside reaches it
+	}
+	for j := 0; j < liveN; j++ {
+		a, b := pair(30.0 + 5.0*float64(j))
+		link(a, b, 5)
+		link(a, chainAt((pinLat+(30.0+5.0*float64(j))+2.5)*mPerDeg), 330)
+	}
+
+	off := make([]uint32, 0, len(lat)+1)
+	to := make([]uint32, 0, 512)
+	length := make([]uint16, 0, 512)
+	cls := make([]uint8, 0, 512)
+	for u := range adj {
+		off = append(off, uint32(len(to)))
+		for _, e := range adj[u] {
+			to = append(to, e.to)
+			length = append(length, e.m)
+			cls = append(cls, e.cls)
+		}
+	}
+	off = append(off, uint32(len(to)))
+
+	b := &graph.Builder{Lat: lat, Lon: lon, Off: off, To: to, Len: length, Cls: cls}
+	b.BuildGrid(0.02)
+	path := filepath.Join(t.TempDir(), "sliver.graph")
+	if err := b.Write(path); err != nil {
+		t.Fatalf("write graph: %v", err)
+	}
+	g, err := graph.Open(path)
+	if err != nil {
+		t.Fatalf("open graph: %v", err)
+	}
+	t.Cleanup(func() { g.Close() })
+	mnLat, mnLon, mxLat, mxLon := g.Bounds()
+	const pad = 0.05
+	return &region{
+		name: "sliver", g: g, r: graph.NewRouter(g, 1),
+		minLat: mnLat - pad, maxLat: mxLat + pad,
+		minLon: mnLon - pad, maxLon: mxLon + pad,
+	}
+}
+
+// TestRouteRetriesPastDeadGoalCluster is the Monas goal-side regression: a dead
+// goal cluster wider than the retry has attempts for sits nearer than the
+// segments that connect.
+func TestRouteRetriesPastDeadGoalCluster(t *testing.T) {
+	rg := sliverRegion(t)
+	m := &metrics{}
+	s := &server{
+		regions: []*region{rg}, maxSnapM: 3000, timeout: 5 * time.Second, m: m,
+		fp: graphFingerprint([]*region{rg}, 0, 3000, 1.5, 0.25),
+	}
+	const query = "/route?from=-6.206,106.8&to=-6.2,106.8"
+
+	// Premise: the nearest goal snap alone cannot reach the start.
+	fSnap, tSnap, ok := s.snapBoth(rg, -6.206, 106.8, -6.2, 106.8)
+	if !ok {
+		t.Fatal("snapBoth found no road")
+	}
+	if _, err := rg.r.RouteSnapCtx(context.Background(), fSnap, tSnap, true); err == nil {
+		t.Fatalf("nearest goal snap (node %d) routed; the graph no longer models a dead cluster", tSnap.Node)
+	}
+
+	rec := httptest.NewRecorder()
+	testHandler(s).ServeHTTP(rec, httptest.NewRequest("GET", query, nil))
+	body := rec.Body.String()
+	if rec.Code != 200 {
+		t.Fatalf("code %d, want 200 (%s)", rec.Code, body)
+	}
+	var out struct {
+		SnapTo float64 `json:"snap_to_m"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("decode body: %v (%s)", err, body)
+	}
+	if out.SnapTo < 25 {
+		t.Errorf("snap_to_m = %.0f, want a live segment past the dead cluster", out.SnapTo)
+	}
+	if got := m.snapRetry.Load(); got != 1 {
+		t.Errorf("snapRetry = %d, want 1", got)
+	}
+}

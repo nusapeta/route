@@ -111,7 +111,7 @@ relax:
 			continue
 		}
 		expanded++
-		if expanded > int(r.maxExpansions) {
+		if expanded > int(r.capFor()) {
 			res.Bound.Truncated = true
 			break
 		}

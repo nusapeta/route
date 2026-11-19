@@ -341,7 +341,7 @@ func round6(v float64) float64 { return math.Round(v*1e6) / 1e6 }
 // almost every time, and a retry costs a full search.
 const (
 	snapRetryCandidates = 32
-	snapRetryTries      = 4
+	snapRetryTries      = 8
 	// snapRetryDeep is the wider scan used when every candidate near the pin
 	// reaches almost nothing, which is what a pin inside a dead pocket looks
 	// like: a park, a private forecourt, a few service roads behind a gate.
@@ -349,7 +349,37 @@ const (
 	// snapRetryPocket is the reachability floor for a usable start. Below it
 	// the search would walk a few dozen nodes and give up.
 	snapRetryPocket = 512
+	// snapRetryTooFarKm is the straight-line range below which an ErrTooFar is
+	// a snapping defect rather than a genuinely long route. A short trip that
+	// exhausts the cap means the search walked a component it could not leave.
+	snapRetryTooFarKm = 60.0
+	// searchCapFloor is the smallest cap the distance scale may pick. It covers
+	// the turn-cost-heavy short city routes measured on the Jakarta extract
+	// (16 km spent 322k expansions) with room to spare.
+	searchCapFloor = 500_000
+	// searchCapPerKm2 scales the cap with the square of the straight-line
+	// distance. Expansion cost grows roughly quadratically with trip length
+	// (measured, route distance: 16 km 322k, 31 km 488k, 45 km 1.23M, 65 km
+	// 2.47M, 87 km 3.34M). 4000 per km^2 stays above every observation with
+	// room to spare, because a legitimate route that hits its cap is a
+	// regression while a doomed one merely costs more before failing.
+	searchCapPerKm2 = 4000.0
 )
+
+// retryableSearchError reports whether a failed search is worth re-running from
+// alternative snaps. ErrNoRoute is always retried: a dead-end snap expands
+// nothing. ErrTooFar is retried only for short requests, where exhausting the
+// cap means the goal is walled off, because a legitimately long route needs its
+// full budget and would burn four capped retries before returning the same 422.
+func retryableSearchError(err error, fLat, fLon, tLat, tLon float64) bool {
+	if errors.Is(err, graph.ErrNoRoute) {
+		return true
+	}
+	if errors.Is(err, graph.ErrTooFar) {
+		return graph.Haversine(fLat, fLon, tLat, tLon)/1000 <= snapRetryTooFarKm
+	}
+	return false
+}
 
 // Error reasons are shared by the HTTP body and route_errors_total, so the
 // metric labels and the client-facing vocabulary cannot drift apart.
@@ -394,7 +424,14 @@ func (s *server) failRoute(w http.ResponseWriter, err error, budget time.Duratio
 // Snapping only looks at geometry, so a pin in a park or inside a forecourt
 // lands on a dead end while a connected road may sit a few dozen metres away;
 // a dead-end start expands nothing, which is why the first search returns in
-// microseconds.
+// microseconds. A goal that sits in a pocket under the query's avoid mask looks
+// different: the search walks the whole reachable component and stops at the
+// expansion cap with ErrTooFar, so this path also covers that error.
+//
+// Each retry is sized to its own pair, because the point of the retry is to
+// find a different snap cheaply: the first search keeps the request's full
+// budget, while every retry must fail fast so four dead candidates cannot eat
+// the budget the good one needs.
 func (s *server) retryNoRoute(ctx context.Context, rg *region, p routeParams, fLat, fLon, tLat, tLon float64, failF, failT graph.Snap) (graph.SnapRoute, graph.Snap, graph.Snap, bool) {
 	// Only starts that actually reach somewhere are worth a search. A pocket
 	// is often dozens of nodes wide, so the first scan can consist entirely of
@@ -426,12 +463,45 @@ func (s *server) retryNoRoute(ctx context.Context, rg *region, p routeParams, fL
 		}
 	}
 	sort.Slice(pairs, func(i, j int) bool { return pairs[i].d < pairs[j].d })
-	for i := 0; i < len(pairs) && i < snapRetryTries; i++ {
+	// Distance order alone is not enough. Measured on the Jakarta extract, the
+	// goal snaps around a pin that sits between a toll ramp and a frontage road
+	// interleave: the 4 m, 11 m and 16 m candidates are walled off under the
+	// mask while the 32 m and 41 m ones route, all inside a 72 m cluster. Taking
+	// the nearest few tries therefore spends every attempt inside the sliver.
+	// Probe across the span instead, one pair per distinct end node, so the
+	// attempt set covers the cluster rather than its closest corner.
+	distinct := make([]pair, 0, snapRetryTries)
+	seenF := make(map[uint32]bool, snapRetryCandidates)
+	seenT := make(map[uint32]bool, snapRetryCandidates)
+	for _, pr := range pairs {
+		if seenF[pr.a.Node] || seenT[pr.b.Node] {
+			continue
+		}
+		seenF[pr.a.Node], seenT[pr.b.Node] = true, true
+		distinct = append(distinct, pr)
+	}
+	chosen := make([]pair, 0, snapRetryTries)
+	last := -1
+	for i := 0; i < snapRetryTries && len(distinct) > 0; i++ {
+		idx := i * len(distinct) / snapRetryTries
+		if idx == last {
+			continue
+		}
+		last = idx
+		chosen = append(chosen, distinct[idx])
+	}
+	for _, pr := range chosen {
 		if ctx.Err() != nil {
 			break
 		}
-		if res, err := rg.r.RouteSnapCtx(ctx, pairs[i].a, pairs[i].b, p.restrictions); err == nil {
-			return res, pairs[i].a, pairs[i].b, true
+		// The retry keeps the request's avoid mask; routing it on the bare
+		// router would let a retry drive the very class the query asked to
+		// skip, and would report a route the first search was forbidden to
+		// take. The cap is sized per pair, so a dead candidate fails in well
+		// under the request budget instead of walking its whole component.
+		r := rg.r.WithOptions(graph.RouteOptions{Avoid: p.avoid, Expansions: searchCapFor(pr.a, pr.b, rg.r.MaxExpansions())})
+		if res, err := r.RouteSnapCtx(ctx, pr.a, pr.b, p.restrictions); err == nil {
+			return res, pr.a, pr.b, true
 		}
 	}
 	return graph.SnapRoute{}, graph.Snap{}, graph.Snap{}, false
@@ -570,8 +640,11 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		res, snapF, snapT, viaPts, viaLegs = v.res, v.f, v.t, v.pts, v.legs
 	} else if cross == nil {
 		res, err = s.routeOnce(sctx, rg, snapF, snapT, p, nil)
-		if err != nil && errors.Is(err, graph.ErrNoRoute) {
+		if err != nil && retryableSearchError(err, fLat, fLon, tLat, tLon) {
 			// A dead-end snap is worth one more look before the client sees 422.
+			// So is a goal in a pocket under the avoid mask: that search walks
+			// the whole reachable component and stops at the cap with
+			// ErrTooFar, which is a snapping problem, not a long route.
 			if res2, a, b, ok := s.retryNoRoute(sctx, rg, p, fLat, fLon, tLat, tLon, snapF, snapT); ok {
 				res, snapF, snapT, err = res2, a, b, nil
 				s.m.snapRetry.Add(1)

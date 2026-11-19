@@ -46,9 +46,33 @@ func parseViaValues(raw string) ([][2]float64, error) {
 	return out, nil
 }
 
+// searchCapFor sizes one search's expansion budget from the straight-line
+// distance between the two snaps, never above the router's configured cap.
+//
+// The cap exists because the failure it prevents is expensive and the failure
+// it allows is cheap. A search that cannot reach its goal walks the whole
+// reachable component, which on a Jakarta-sized extract is millions of
+// expansions and seconds of CPU; a search that is merely long needs far fewer,
+// because the heuristic keeps it inside a corridor. Measured on the Jakarta
+// extract, the expensive end of ordinary traffic is 322k expansions at 16 km
+// and 1.23M at 45 km straight line, so the floor and the quadratic term both
+// leave headroom over observation.
+func searchCapFor(a, b graph.Snap, configured uint32) uint32 {
+	km := graph.Haversine(a.Lat, a.Lon, b.Lat, b.Lon) / 1000
+	n := uint32(math.Ceil(searchCapPerKm2 * km * km))
+	if n < searchCapFloor {
+		n = searchCapFloor
+	}
+	if configured != 0 && n > configured {
+		n = configured
+	}
+	return n
+}
+
 // routeOnce runs one A* search with the request's mask and optional ban set.
 func (s *server) routeOnce(ctx context.Context, rg *region, a, b graph.Snap, p routeParams, ban map[uint32]bool) (graph.SnapRoute, error) {
-	return rg.r.WithOptions(graph.RouteOptions{Avoid: p.avoid, Ban: ban}).RouteSnapCtx(ctx, a, b, p.restrictions)
+	cap := searchCapFor(a, b, rg.r.MaxExpansions())
+	return rg.r.WithOptions(graph.RouteOptions{Avoid: p.avoid, Ban: ban, Expansions: cap}).RouteSnapCtx(ctx, a, b, p.restrictions)
 }
 
 // pickSnap returns the region whose graph has the closest usable road segment.
