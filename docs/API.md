@@ -246,6 +246,13 @@ Status sel: `ok`, `too_far`, `snap_failed`, `no_route`. Biaya memakai waktu
 tanpa biaya belokan; `distance_m` dan `duration_s` sudah menyertakan potongan
 snap. Endpoint di region berbeda tanpa konektor ferry menjadi `no_route`.
 
+Satu sel juga bisa `no_route` padahal `/route` untuk pasangan yang sama
+menjawab 200. Pencarian matrix memakai satu snap per titik dan satu Dijkstra
+tanpa percobaan ulang, sedangkan `/route` mengulang snap ke kandidat lain saat
+edge terdekat masuk kantong mati. Contoh terukur pada graph nasional 19 November
+2026: `-6.1754,106.8272 -> -6.2,106.8166` menjadi `no_route` di `/matrix`,
+tetapi `/route` menjawab 4.808 m.
+
 ## `GET /isochrone`
 
 Area yang bisa dicapai dari satu titik dalam batas waktu tertentu. Respons
