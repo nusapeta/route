@@ -1,0 +1,13 @@
+{
+  "fixture": "testdata/java-mini.graph (genfixture, 600-node chain)",
+  "measured_at": "2026-11-18",
+  "measured_on": "linux/amd64, go1.27.4, /proc/<pid>/status VmRSS in MiB",
+  "note": "Measured on this fixture, not a production claim. Idle is after /healthz succeeds; loaded is after 200 sequential /route requests. Limits mirror docs/ROADMAP.md Budget; the 2 MB delta is the PRD PR-01 regression gate.",
+  "idle_rss_mb": 14.8,
+  "loaded_rss_mb": 21.8,
+  "delta_limit_mb": 2.0,
+  "rss_hard_mb": 32.0,
+  "image_max_mb": 40.0,
+  "binary_max_mb": 12.0,
+  "artifact_max_mb": 2048.0
+}
