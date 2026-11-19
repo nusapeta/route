@@ -12,6 +12,12 @@ import (
 	"github.com/nusapeta/route/internal/graph"
 )
 
+// ConditionalUnsupportedReason records why time-based restriction:conditional
+// is not enforced: the static v5 graph has no departure-time or timezone
+// input, no fixture verifies when a condition is active, and v6 time windows
+// need an artifact-budget update first.
+const ConditionalUnsupportedReason = "unsupported: static v5 graph has no departure-time or timezone model, no verified time-window fixture, and v6 time windows need an ENG budget update first"
+
 // RestrictionStats counts how the OSM restriction relations were handled.
 // Usable counts stored rules only; every reason a rule was not stored is part
 // of Skipped(), so Usable + Skipped() == Relations. ReachCap counts searches
@@ -27,7 +33,7 @@ type RestrictionStats struct {
 	NotCar        uint32 // relation type or from/to way not usable by this profile
 	NotClass      uint32 // only restriction:<other vehicle class> tags present
 	Missing       uint32 // relation lacks from/to members
-	Conditional   uint32 // restriction:conditional (time dependent, not modelled)
+	Conditional   uint32 // restriction:conditional skipped by decision; see ConditionalUnsupportedReason
 	Except        uint32 // except=motorcar/motor_vehicle/vehicle
 	BadType       uint32 // no usable restriction= or unknown restriction value
 	Unresolved    uint32 // via node not present in the graph / no matching edge
@@ -49,7 +55,7 @@ func (s *RestrictionStats) String() string {
 	if s.Profile != "" {
 		name += "(" + s.Profile + ")"
 	}
-	return name + ": seen=" + u(s.Relations) +
+	out := name + ": seen=" + u(s.Relations) +
 		" usable=" + u(s.Usable) +
 		" via_node=" + u(s.ViaNode) +
 		" via_way=" + u(s.ViaWay) +
@@ -70,6 +76,19 @@ func (s *RestrictionStats) String() string {
 		" no_in=" + u(s.RNoIn) +
 		" no_out=" + u(s.RNoOut) +
 		"}}"
+	if note := s.ConditionalNote(); note != "" {
+		out += " conditional_note=" + note
+	}
+	return out
+}
+
+// ConditionalNote returns the reason conditional relations were skipped, or
+// "" when none were. It keeps the limitation visible in extract build logs.
+func (s RestrictionStats) ConditionalNote() string {
+	if s.Conditional == 0 {
+		return ""
+	}
+	return ConditionalUnsupportedReason
 }
 
 // restView is the read-only view of the built graph that restriction

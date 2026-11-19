@@ -838,6 +838,36 @@ perbedaan fungsi biaya, bukan akurasi.
 - 167 `restriction:conditional` tetap batasan model (butuh evaluasi waktu),
   dicatat di `BACKLOG.md`.
 
+### 14e. Keputusan NUSA-14: `restriction:conditional` tidak didukung
+
+Dari 593 restriction yang di-skip pada rebuild (§14a), 167 adalah
+`restriction:conditional`. Keputusannya: **tidak didukung** dengan reason
+eksplisit, bukan evaluasi jam berlaku.
+
+Alasannya:
+
+1. Graph v5 tidak menyimpan waktu berangkat, jendela berlaku, atau zona waktu.
+   Titik enforcement satunya (`SpanFor(...).Forbidden(...)` di A*) bekerja per
+   transisi edge statis.
+2. Tidak ada fixture yang menyatakan kapan suatu syarat aktif. 167 relasi hanya
+   diketahui jumlahnya, bukan jadwal terverifikasinya. BACKLOG 16b mensyaratkan
+   angka dampak pada 30 pasangan sebelum format ditambah, dan angka itu belum ada.
+3. Menegakkan semua conditional secara konservatif (selalu aktif) akan menutup
+   jalan di luar jamnya, jadi lebih merusak daripada tidak mendukungnya.
+4. Jendela waktu v6 menuntut pembaruan anggaran artefak kolom 07 ENG lebih dulu.
+   Itu di luar PBI ini, jadi format tetap `Version = 5`, anggaran tidak berubah
+   (0 byte tambahan), dan tidak ada dependency runtime baru.
+
+Perilaku yang dikunci: relasi conditional dihitung sebagai `conditional` lalu
+dibuang sebelum resolusi way/edge. Ia tidak masuk `Ban`/`Only`, tidak mengubah
+biaya edge, dan tidak menaikkan fallback. Tes
+`TestConditionalRestrictionUnsupported` memastikan tidak ada aturan yang
+tersimpan dan alasan tampil di log build lewat `conditional_note=`. Angka §7
+tetap berlaku: 0 pelanggaran dan 0 fallback pada 3.463 pasangan strict, masih
+di bawah target ROADMAP ≤1%. Golden 48 pasangan tidak berubah karena tidak ada
+perubahan format, urutan node, maupun fungsi biaya; `go test ./...` tetap
+menjadi gerbang.
+
 ## 15. Penalti belok: implementasi dan dampaknya pada E1
 Dasar: §14 menyimpulkan selisih jarak berasal dari fungsi biaya. Penalti belok
 dicoba lebih dulu karena ia satu-satunya bagian `weight` OSRM yang bisa

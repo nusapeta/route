@@ -20,6 +20,15 @@ All user-visible changes are recorded here. The format follows
   `docker compose up -d gateway` habit to `api`; the homelab override and
   `deploy/README.md` follow the new name.
 
+### Documentation
+
+- `restriction:conditional` is now an explicit unsupported case with a written
+  reason: the static v5 graph has no departure time or timezone model, no
+  verified time-window fixture exists, and v6 windows need an ENG budget update
+  first. Relations stay counted as skipped and never enter the graph, so
+  fallback, golden routes, and artifact size are unchanged. Extract logs now
+  emit `conditional_note=` when such relations are present.
+
 ### Fixed
 
 - Container image: `nusa-gateway` was built without the version stamp, so the

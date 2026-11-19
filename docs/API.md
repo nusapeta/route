@@ -110,6 +110,25 @@ Field kondisional:
 `ferry_spans` adalah rentang indeks inklusif ke array geometri; dipakai untuk
 menggambar garis putus-putus.
 
+### Restriction
+
+Graph v5 menyimpan dua aturan belok yang ditegakkan saat routing: pasangan
+`no_*` (`TurnOff`) dan penerus `only_*` (`TurnTo`), untuk profil mobil dan
+motor. `restriction:conditional` **tidak didukung**. Relasi dengan tag itu
+dihitung sebagai `conditional` di statistik build lalu dibuang; ia tidak masuk
+graph dan tidak menambah `fallback`.
+
+Alasannya eksplisit: graph statis tidak memiliki waktu berangkat atau model zona
+waktu Indonesia, tidak ada fixture yang memvalidasi kapan suatu syarat aktif,
+dan jendela waktu v6 mensyaratkan pembaruan anggaran artefak kolom 07 ENG
+terlebih dahulu. Menegakkan semua syarat secara konservatif akan menutup jalan
+di luar jam berlakunya, sehingga tidak dipilih. Klien yang memerlukan pembatasan
+berbasis waktu harus menanganinya di luar Nusapeta Route.
+
+`fallback: true` pada respons tetap berarti enforcement dimatikan karena rute
+terkunci oleh aturan yang tersimpan. Relasi conditional yang dibuang tidak
+memicunya.
+
 ## `POST /route`
 
 Body maksimum 8 KiB. `from`/`to` boleh string atau objek:

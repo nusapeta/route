@@ -113,6 +113,24 @@ Conditional fields:
 `ferry_spans` contains inclusive index ranges into the geometry array; use it to
 draw dashed lines.
 
+### Restrictions
+
+Graph v5 enforces two turn rules per profile: forbidden `no_*` transitions
+(`TurnOff`) and permitted `only_*` successors (`TurnTo`).
+`restriction:conditional` is **unsupported**. A relation carrying that tag is
+counted as `conditional` in build stats and discarded; it never enters the
+graph and never adds a `fallback`.
+
+The reason is explicit: the static graph has no departure time or Indonesian
+timezone model, no fixture verifies when a condition is active, and v6 time
+windows require updating the column 07 ENG artifact budget first. Enforcing
+every condition unconditionally would close roads outside their active hours,
+so it is not done. Clients needing time-based restrictions must handle them
+outside Nusapeta Route.
+
+`fallback: true` still means enforcement was disabled because a stored rule
+locked the route. Discarded conditional relations never cause it.
+
 ## `POST /route`
 
 Maximum body size is 8 KiB. `from`/`to` may be strings or objects:
