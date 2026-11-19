@@ -641,6 +641,39 @@ Leg Sumatra Jakarta -> Medan 1.797 km masih melewati batas ekspansi 6 juta;
 W5 tidak mengubah heuristik. Default `-max-route-km 40` tetap menolak kedua
 query sebelum snap. Ini bukti fungsional, bukan klaim akurasi.
 
+### 12g. Jadwal ferry statis (NUSA-11, 2026-11-18)
+
+Tabel 10 lintasan utama di `internal/extract/ferryschedule` memuat nama,
+pelabuhan, durasi referensi (s), dan frekuensi. Tag `duration` OSM tetap
+menang saat ada; tabel hanya mengisi durasi kosong saat ekstraksi. Respons
+rute lintas region menandai `ferry_time_source` di root dan pada leg ferry:
+`osm` untuk dua konektor terukur, `schedule` untuk konektor tanpa durasi OSM.
+
+| lintasan | durasi (s) | sumber durasi |
+|---|---|---|
+| Merak–Bakauheni | 5226 | OSM, §12c |
+| Ketapang–Gilimanuk | 1436 | OSM, §12c |
+| Padang Bai–Lembar | 5400 | referensi statis |
+| Lembar–Poto Tano | 7200 | referensi statis |
+| Poto Tano–Sape | 5400 | referensi statis |
+| Sape–Bima | 3600 | referensi statis |
+| Ujung–Kamal | 1800 | referensi statis |
+| Batam–Tanjung Pinang | 7200 | referensi statis |
+| Sibolga–Teluk Dalam | 28800 | referensi statis |
+| Makassar–Parepare | 25200 | referensi statis |
+
+**Batas verifikasi.** Repo memuat dua durasi ferry terukur (baris pertama);
+keduanya memakai angka OSM yang sama sehingga selisih ETA terhadap data repo
+adalah 0%. Tidak ada jadwal resmi untuk 10 lintasan di repo, jadi kriteria
+"selisih ETA < 20% dibanding jadwal resmi" **belum terverifikasi** untuk 8
+lintasan sisanya. Frekuensi pada tabel juga referensi statis, bukan jadwal
+berangkat.
+
+Tabel ini berupa konstanta sumber: 0 byte tambahan pada artefak graph, tanpa
+dependency runtime baru, tanpa alokasi global (RSS idle tidak diukur ulang).
+Golden 48 pasangan dan `ferry_spans` dijaga oleh `TestGoldenRoutes`,
+`TestFerrySpanIndexing`, dan `TestCrossRegionStitchesLegs`.
+
 ## 13. E1: routeid vs OSRM MLD, mesin yang sama
 
 > **Historis pra-penalti belok.** Angka final ada di §18. Jangan memakai

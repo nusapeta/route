@@ -81,6 +81,7 @@ func testConnector() ferryConnector {
 		regionB:    []string{"east"},
 		distanceM:  50_000,
 		durationDs: 36_000,
+		timeSource: ferryTimeOSM,
 	}
 }
 
@@ -96,18 +97,20 @@ func TestCrossRegionStitchesLegs(t *testing.T) {
 		t.Fatalf("code %d (%s)", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		DistanceM  uint32       `json:"distance_m"`
-		DurationS  float64      `json:"duration_s"`
-		Region     string       `json:"region"`
-		FerryM     uint32       `json:"ferry_m"`
-		FerrySpans [][2]int     `json:"ferry_spans"`
-		Points     [][2]float64 `json:"points"`
-		Legs       []struct {
+		DistanceM       uint32       `json:"distance_m"`
+		DurationS       float64      `json:"duration_s"`
+		Region          string       `json:"region"`
+		FerryM          uint32       `json:"ferry_m"`
+		FerryTimeSource string       `json:"ferry_time_source"`
+		FerrySpans      [][2]int     `json:"ferry_spans"`
+		Points          [][2]float64 `json:"points"`
+		Legs            []struct {
 			Mode       string  `json:"mode"`
 			Region     string  `json:"region"`
 			Name       string  `json:"name"`
 			DistanceM  uint32  `json:"distance_m"`
 			DurationS  float64 `json:"duration_s"`
+			TimeSource string  `json:"ferry_time_source"`
 			PointStart int     `json:"point_start"`
 			PointEnd   int     `json:"point_end"`
 		} `json:"legs"`
@@ -129,6 +132,9 @@ func TestCrossRegionStitchesLegs(t *testing.T) {
 	}
 	if body.Legs[1].Name != "Test-Strait" || body.Legs[1].DistanceM != 50_000 {
 		t.Fatalf("ferry leg = %+v", body.Legs[1])
+	}
+	if body.FerryTimeSource != "osm" || body.Legs[1].TimeSource != "osm" {
+		t.Fatalf("ferry_time_source = %q / leg %q, want osm", body.FerryTimeSource, body.Legs[1].TimeSource)
 	}
 	var sumM uint32
 	var sumDs uint32
@@ -163,6 +169,37 @@ func TestCrossRegionStitchesLegs(t *testing.T) {
 	}
 	if got := s.m.crossRegionStitched.Load(); got != 1 {
 		t.Fatalf("stitched counter = %d, want 1", got)
+	}
+}
+
+// TestCrossRegionScheduleSource checks that a connector without a measured
+// OSM duration reports the static schedule as its time source.
+func TestCrossRegionScheduleSource(t *testing.T) {
+	c := testConnector()
+	c.timeSource = "schedule"
+	s := stitchServer(t, []ferryConnector{c})
+	rec := httptest.NewRecorder()
+	testHandler(s).ServeHTTP(rec, httptest.NewRequest("GET", "/route?from=-6,106.001&to=-6,107.059", nil))
+	if rec.Code != 200 {
+		t.Fatalf("code %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		FerryTimeSource string `json:"ferry_time_source"`
+		Legs            []struct {
+			Mode       string `json:"mode"`
+			TimeSource string `json:"ferry_time_source"`
+		} `json:"legs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.FerryTimeSource != "schedule" {
+		t.Fatalf("ferry_time_source = %q, want schedule", body.FerryTimeSource)
+	}
+	for _, leg := range body.Legs {
+		if leg.Mode == "ferry" && leg.TimeSource != "schedule" {
+			t.Errorf("ferry leg time source = %q, want schedule", leg.TimeSource)
+		}
 	}
 }
 
