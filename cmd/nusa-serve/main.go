@@ -180,6 +180,7 @@ func main() {
 	mux.Handle("/route", s.m.wrap(s.handleRoute))
 	mux.Handle("/matrix", s.m.wrap(s.handleMatrix))
 	mux.Handle("/isochrone", s.m.wrap(s.handleIsochrone))
+	mux.HandleFunc("/nearest", s.m.wrap(s.handleNearest))
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           cors(gzipWrap(mux)),
@@ -233,27 +234,6 @@ func expand(in []string) []string {
 		out = append(out, p)
 	}
 	return out
-}
-
-// pickSnap returns the region whose graph has the closest road segment to the
-// point. Bounding boxes overlap between island extracts, so snapping decides.
-func (s *server) pickSnap(lat, lon float64) (*region, graph.Snap, bool) {
-	var bestRg *region
-	var best graph.Snap
-	bestD := s.maxSnapM
-	for _, rg := range s.regions {
-		if !rg.contains(lat, lon) {
-			continue
-		}
-		sn, ok := rg.r.SnapEdge(lat, lon, bestD)
-		if ok && sn.Dist <= bestD {
-			bestRg, best, bestD = rg, sn, sn.Dist
-		}
-	}
-	if bestRg == nil {
-		return nil, graph.Snap{}, false
-	}
-	return bestRg, best, true
 }
 
 // snapBoth attaches both endpoints inside one region, which is how a route
@@ -336,6 +316,9 @@ type routeParams struct {
 	simplify               float64
 	restrictions           bool
 	pin                    bool // include the raw pin as first/last geometry point
+	avoid                  graph.AvoidMask
+	alt                    int
+	via                    [][2]float64
 }
 
 func trimLabel(from, to bool) string {
@@ -416,16 +399,19 @@ func (s *server) retryNoRoute(ctx context.Context, rg *region, p routeParams, fL
 	// Only starts that actually reach somewhere are worth a search. A pocket
 	// is often dozens of nodes wide, so the first scan can consist entirely of
 	// dead starts; widen it once before falling back to plain distance order.
-	starts := rg.r.SnapEdges(fLat, fLon, s.maxSnapM, snapRetryCandidates)
+	// Avoid-aware snapping keeps the retry from falling back onto the very
+	// class of road the query asked to skip.
+	snapper := rg.r.WithOptions(graph.RouteOptions{Avoid: p.avoid})
+	starts := snapper.SnapEdgesAllowed(fLat, fLon, s.maxSnapM, snapRetryCandidates)
 	usable := usableStarts(rg.g, starts)
 	if len(usable) == 0 {
-		starts = rg.r.SnapEdges(fLat, fLon, s.maxSnapM, snapRetryDeep)
+		starts = snapper.SnapEdgesAllowed(fLat, fLon, s.maxSnapM, snapRetryDeep)
 		usable = usableStarts(rg.g, starts)
 	}
 	if len(usable) == 0 {
 		usable = starts
 	}
-	candsT := rg.r.SnapEdges(tLat, tLon, s.maxSnapM, snapRetryCandidates)
+	candsT := snapper.SnapEdgesAllowed(tLat, tLon, s.maxSnapM, snapRetryCandidates)
 	type pair struct {
 		a, b graph.Snap
 		d    float64
@@ -508,8 +494,8 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	rgF, snapF, ok1 := s.pickSnap(fLat, fLon)
-	rgT, snapT, ok2 := s.pickSnap(tLat, tLon)
+	rgF, snapF, ok1 := s.pickSnap(fLat, fLon, p.avoid)
+	rgT, snapT, ok2 := s.pickSnap(tLat, tLon, p.avoid)
 	if !ok1 || !ok2 {
 		s.m.errSnap.Add(1)
 		httpErrReason(w, 422, reasonSnap, "no road within snap distance (region not loaded?)")
@@ -541,14 +527,14 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 
 	var cross *stitchedRoute
 	rg := rgF
-	if rgF != rgT {
+	if rgF != rgT && len(p.via) == 0 {
 		// Region extracts overlap (the Java file carries Bali, the Nusa Tenggara
 		// file starts there), so the nearest region per endpoint can differ even
 		// when one file holds both ends. Retry inside each candidate before
 		// declaring the route cross-region.
-		if sa, sb, ok := s.snapBoth(rgF, fLat, fLon, tLat, tLon); ok {
+		if sa, sb, ok := s.snapBothOpts(rgF, fLat, fLon, tLat, tLon, p.avoid); ok {
 			rg, snapF, snapT = rgF, sa, sb
-		} else if sa, sb, ok := s.snapBoth(rgT, fLat, fLon, tLat, tLon); ok {
+		} else if sa, sb, ok := s.snapBothOpts(rgT, fLat, fLon, tLat, tLon, p.avoid); ok {
 			rg, snapF, snapT = rgT, sa, sb
 		} else if c, portF, portT, ok := connectorFor(s.connectors, rgF.name, rgT.name); ok {
 			cross, err = s.routeStitched(sctx, rgF, rgT, snapF, snapT, c, portF, portT, p)
@@ -568,8 +554,22 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var res graph.SnapRoute
-	if cross == nil {
-		res, err = rg.r.RouteSnapCtx(sctx, snapF, snapT, p.restrictions)
+	var alts []routeAlternative
+	var viaLegs []viaLeg
+	var viaPts [][2]float64
+	if len(p.via) > 0 {
+		waypoints := make([][2]float64, 0, len(p.via)+2)
+		waypoints = append(waypoints, [2]float64{fLat, fLon})
+		waypoints = append(waypoints, p.via...)
+		waypoints = append(waypoints, [2]float64{tLat, tLon})
+		v, verr := s.routeVia(sctx, rgF, waypoints, p)
+		if verr != nil {
+			fail(verr)
+			return
+		}
+		res, snapF, snapT, viaPts, viaLegs = v.res, v.f, v.t, v.pts, v.legs
+	} else if cross == nil {
+		res, err = s.routeOnce(sctx, rg, snapF, snapT, p, nil)
 		if err != nil && errors.Is(err, graph.ErrNoRoute) {
 			// A dead-end snap is worth one more look before the client sees 422.
 			if res2, a, b, ok := s.retryNoRoute(sctx, rg, p, fLat, fLon, tLat, tLon, snapF, snapT); ok {
@@ -584,6 +584,11 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	}
 	if cross != nil {
 		res = cross.SnapRoute
+	}
+	if len(p.via) == 0 && cross == nil && p.alt > 0 {
+		var extra int64
+		alts, extra = s.routeAlternatives(sctx, rg, snapF, snapT, p, res)
+		s.m.expansions.Add(extra)
 	}
 	if s.maxRouteM > 0 && float64(res.DistanceM) > s.maxRouteM {
 		s.m.tooFar.Add(1)
@@ -601,9 +606,12 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 	// Geometry follows the road: it starts and ends at the projected points.
 	// The raw pin can still be requested with &pin=1 (straight spur included).
 	var pts [][2]float64
-	if cross != nil {
+	switch {
+	case viaPts != nil:
+		pts = viaPts
+	case cross != nil:
 		pts = cross.pts
-	} else {
+	default:
 		pts = make([][2]float64, 0, len(res.Nodes)+2)
 		if p.pin {
 			pts = append(pts, [2]float64{fLat, fLon})
@@ -646,6 +654,12 @@ func (s *server) handleRoute(w http.ResponseWriter, req *http.Request) {
 		// projected points (on the road) as [lat, lng], for a pin layer
 		"snap_from": []float64{round6(snapF.Lat), round6(snapF.Lon)},
 		"snap_to":   []float64{round6(snapT.Lat), round6(snapT.Lon)},
+	}
+	if len(viaLegs) > 0 {
+		body["legs"] = viaLegs
+	}
+	if len(alts) > 0 {
+		body["alternatives"] = alts
 	}
 	if res.FerryM > 0 {
 		body["ferry_m"] = res.FerryM
@@ -759,6 +773,27 @@ func readRouteParams(req *http.Request) (routeParams, error) {
 		}
 		out.simplify = v
 	}
+	if raw := q.Get("avoid"); raw != "" {
+		mask, err := parseAvoidValues(raw)
+		if err != nil {
+			return out, err
+		}
+		out.avoid = mask
+	}
+	if raw := q.Get("alt"); raw != "" {
+		n, err := parseAltValue(raw)
+		if err != nil {
+			return out, err
+		}
+		out.alt = n
+	}
+	if raw := q.Get("via"); raw != "" {
+		pts, err := parseViaValues(raw)
+		if err != nil {
+			return out, err
+		}
+		out.via = pts
+	}
 
 	if req.Method == http.MethodPost {
 		var body struct {
@@ -768,6 +803,9 @@ func readRouteParams(req *http.Request) (routeParams, error) {
 			Simplify     *float64        `json:"simplify"`
 			Restrictions *bool           `json:"restrictions"`
 			Pin          *bool           `json:"pin"`
+			Avoid        string          `json:"avoid"`
+			Alt          *int            `json:"alt"`
+			Via          string          `json:"via"`
 		}
 		dec := json.NewDecoder(io.LimitReader(req.Body, 8<<10))
 		if err := dec.Decode(&body); err != nil {
@@ -793,6 +831,26 @@ func readRouteParams(req *http.Request) (routeParams, error) {
 		}
 		if body.Pin != nil {
 			out.pin = *body.Pin
+		}
+		if body.Avoid != "" {
+			mask, err := parseAvoidValues(body.Avoid)
+			if err != nil {
+				return out, err
+			}
+			out.avoid = mask
+		}
+		if body.Alt != nil {
+			if *body.Alt < 0 || *body.Alt > 3 {
+				return out, fmt.Errorf("alt must be 0..3")
+			}
+			out.alt = *body.Alt
+		}
+		if body.Via != "" {
+			pts, err := parseViaValues(body.Via)
+			if err != nil {
+				return out, err
+			}
+			out.via = pts
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/bits"
 	"runtime/debug"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -33,6 +34,9 @@ type Route struct {
 	Epsilon float32
 	// TurnScale records the turn cost multiplier used for the answer.
 	TurnScale float32
+	// Edges holds the traversed edge indexes in path order (src..dst). A route
+	// alternative bans these edges to force a genuinely different path.
+	Edges []uint32
 }
 
 // ErrNoRoute is returned when the destination is unreachable.
@@ -234,7 +238,8 @@ type Router struct {
 
 	maxSpeedMps float64 // heuristic bound; never above maxSpeedMps global
 
-	maxExpansions uint32 // per-query expansion cap; see SetMaxExpansions
+	maxExpansions uint32       // per-query expansion cap; see SetMaxExpansions
+	opts          RouteOptions // per-query controls, set by WithOptions
 }
 
 // NewRouter creates a router; concurrency bounds peak memory.
@@ -284,13 +289,115 @@ func (r *Router) SnapEdges(lat, lon, maxMeters float64, k int) []Snap {
 	return r.g.SnapEdgesFor(lat, lon, maxMeters, k, r.motor)
 }
 
-// usable reports whether this profile may drive edge e. A zero class is the
-// format's "no access" marker, used by v5 union graphs.
-func (r *Router) usable(e uint32) bool {
-	if r.motor {
-		return r.g.MCls[e] != 0
+// AvoidMask selects road classes a route must exclude. The artefact stores a
+// speed class per edge, not an OSM road type, so the classes are derived from
+// that byte: toll roads and motorways share the top speed band, unpaved roads
+// the bottom one, and ferries have their own sparse index.
+type AvoidMask uint8
+
+const (
+	AvoidToll AvoidMask = 1 << iota
+	AvoidFerry
+	AvoidUnpaved
+	AvoidMotorway
+)
+
+// RouteOptions holds per-query controls. It is copied into a Router with
+// WithOptions instead of mutating the shared router, so concurrent requests
+// cannot see each other's mask or ban set.
+type RouteOptions struct {
+	Avoid AvoidMask
+	Ban   map[uint32]bool // edge indexes excluded from the search
+}
+
+// WithOptions scopes options to one query through a shallow copy. The graph and
+// workspace pool stay shared, so the copy costs one small struct allocation.
+func (r *Router) WithOptions(o RouteOptions) *Router {
+	c := *r
+	c.opts = o
+	return &c
+}
+
+// ParseAvoid maps API values ("toll,ferry") to a mask. Both commas and pipes
+// are accepted so the parameter composes with the via syntax.
+func ParseAvoid(values []string) (AvoidMask, error) {
+	var m AvoidMask
+	for _, v := range values {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "toll":
+			m |= AvoidToll
+		case "ferry":
+			m |= AvoidFerry
+		case "unpaved":
+			m |= AvoidUnpaved
+		case "motorway":
+			m |= AvoidMotorway
+		case "":
+		default:
+			return 0, fmt.Errorf("unknown avoid class %q", v)
+		}
 	}
-	return r.g.Cls[e] != 0
+	return m, nil
+}
+
+const (
+	// SpeedClassScale units: 160 = 80 km/h. The extractor assigns 90 km/h to
+	// motorways, which is the band that carries Indonesian toll roads too.
+	highClassMin = 160
+	// 20 = 10 km/h; unpaved surfaces fall at or below this band.
+	unpavedClassMax = 20
+)
+
+// SnapEdgesAllowed returns up to k snaps on edges the current options allow.
+func (r *Router) SnapEdgesAllowed(lat, lon, maxMeters float64, k int) []Snap {
+	all := r.SnapEdges(lat, lon, maxMeters, 2*k+4)
+	out := all[:0]
+	for _, s := range all {
+		if !r.usable(s.Edge) {
+			continue
+		}
+		out = append(out, s)
+		if len(out) == k {
+			break
+		}
+	}
+	return out
+}
+
+// SnapEdgeAllowed is the single-candidate form used for endpoint snapping.
+func (r *Router) SnapEdgeAllowed(lat, lon, maxMeters float64) (Snap, bool) {
+	got := r.SnapEdgesAllowed(lat, lon, maxMeters, 1)
+	if len(got) == 0 {
+		return Snap{}, false
+	}
+	return got[0], true
+}
+
+// usable reports whether this profile may drive edge e under the query's
+// avoid mask and ban set. A zero class is the format's "no access" marker.
+func (r *Router) usable(e uint32) bool {
+	cls := r.g.Cls[e]
+	if r.motor {
+		cls = r.g.MCls[e]
+	}
+	if cls == 0 {
+		return false
+	}
+	if r.opts.Ban != nil && r.opts.Ban[e] {
+		return false
+	}
+	if r.opts.Avoid != 0 {
+		if cls >= highClassMin && r.opts.Avoid&(AvoidToll|AvoidMotorway) != 0 {
+			return false
+		}
+		if cls <= unpavedClassMax && r.opts.Avoid&AvoidUnpaved != 0 {
+			return false
+		}
+		if r.opts.Avoid&AvoidFerry != 0 && r.g.IsFerry(e) {
+			return false
+		}
+	}
+	return true
 }
 
 // SetTurnScale scales the turn cost table; 0 disables turn costs entirely
@@ -895,8 +1002,13 @@ func (r *Router) reconstruct(w *workspace, src, goal uint32) (Route, error) {
 	// chains the old edge/node appends produced.
 	out := make([]uint32, len(nodes))
 	copy(out, nodes)
+	edgeOut := make([]uint32, len(edges))
+	for i, e := range edges {
+		edgeOut[len(edges)-1-i] = e
+	}
 	return Route{
 		Nodes:      out,
+		Edges:      edgeOut,
 		DistanceM:  dist,
 		TimeDs:     uint32(math.Round(float64(tm))),
 		FerryM:     ferry,

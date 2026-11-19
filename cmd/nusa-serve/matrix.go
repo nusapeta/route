@@ -482,7 +482,7 @@ func snapMatrixPoints(s *server, pts [][2]float64) []matrixEndpoint {
 		if !inIndonesia(pt[0], pt[1]) {
 			continue
 		}
-		if rg, snap, ok := s.pickSnap(pt[0], pt[1]); ok {
+		if rg, snap, ok := s.pickSnap(pt[0], pt[1], 0); ok {
 			out[i].rg, out[i].snap, out[i].ok = rg, snap, true
 		}
 	}

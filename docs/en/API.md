@@ -15,6 +15,7 @@ Indonesian file is canonical.
 | `GET` | `/matrix` | one-to-many travel matrix |
 | `GET` | `/isochrone` | reachable area within a time budget (GeoJSON) |
 | `POST` | `/route` | route from a JSON body |
+| `GET` | `/nearest` | snap a coordinate to road segments without routing |
 | `GET` | `/healthz` | health + graph metadata |
 | `GET` | `/version` | commit, build time, Go/OS/arch |
 | `GET` | `/metrics` | Prometheus text format |
@@ -67,6 +68,9 @@ GET /route?from=-6.1754,106.8272&to=-6.5950,106.8166&format=polyline
 | `restrictions` | no | `1` | `0` disables enforcement (debug) |
 | `pin` | no | `0` | `1` adds raw pins at the ends |
 | `profile` | no | `mobil` | gateway only: `mobil` or `motor` |
+| `avoid` | no | n/a | `toll`, `ferry`, `unpaved`, `motorway`; separate with `,` or `|` |
+| `alt` | no | `0` | `1`…`3` alternative routes; at most 3 rounds |
+| `via` | no | n/a | `lat,lng|lat,lng|…`, at most 5 points |
 
 Coordinates must be inside Indonesia (lat −12…8, lon 93…142). Latitude comes
 first, not longitude. Responses always echo the parsed `from`/`to` so a swapped
@@ -107,8 +111,9 @@ Conditional fields:
 | Field | Appears when |
 |---|---|
 | `ferry_m`, `has_ferry`, `ferry_spans` | the route uses a ferry |
-| `legs` | cross-region route stitched with ferry connectors |
 | `ferry_time_source` | cross-region route: `osm` (measured) or `schedule` (static table); also on the ferry leg |
+| `legs` | a via itinerary or a cross-region route stitched with ferry connectors |
+| `alternatives` | `alt>0` and extra routes were found |
 | `trimmed: {from,to}` | an initial/final spur was removed |
 | `fallback: true` | restrictions were disabled to find a route |
 | `relaxed: true`, `epsilon`, `turn_penalty` | the budget ran out and the heuristic was relaxed |
@@ -137,6 +142,54 @@ outside Nusapeta Route.
 `fallback: true` still means enforcement was disabled because a stored rule
 locked the route. Discarded conditional relations never cause it.
 
+### `avoid`
+
+`avoid` filters edges during A* expansion, not after the route is complete.
+So `avoid=toll,motorway` changes the visited nodes, endpoint snapping and the
+expansion count (`/metrics` and `X-Route-Expansions`). Classes are inferred
+from the artefact's speed class: toll/motorway at 80 km/h and up, `unpaved`
+at 10 km/h and below, `ferry` from the sparse ferry index. The artefact has
+no per-edge OSM road-type tag, so the mapping is an approximation.
+
+```http
+GET /route?from=-6.1754,106.8272&to=-6.5950,106.8166&avoid=toll
+```
+
+Any other value returns `400`.
+
+### `alt`
+
+`alt=1`…`3` runs up to three extra rounds. Each round bans the edges of every
+accepted route and searches again; a candidate is accepted only when at least
+20% of its edge length differs from the primary route. Latency is bounded by
+the same expansion ceiling as an ordinary route. `alternatives` carries
+`distance_m`, `duration_s`, `points`, `points_n` per extra route.
+
+### `via`
+
+`via` splits the trip into consecutive legs. The number of `legs` equals the
+number of points (including `from` and `to`) minus one; total `distance_m`
+equals the sum of the leg values (±1 m). Each leg carries `duration_s`,
+`start_index`, `end_index`, `points_n` pointing into the geometry array.
+Cross-region via is not supported yet → `422 cross_region`.
+
+## `GET /nearest`
+
+```http
+GET /nearest?lat=-6.1754&lon=106.8272&k=2&max=3000
+```
+
+| Parameter | Required | Default | Values |
+|---|---|---|---|
+| `lat`, `lon` | yes | n/a | decimal degrees |
+| `k` | no | `1` | `1`…`32` candidate count |
+| `max` | no | `-snap` | radius in metres, up to 100000 |
+
+Returns `region` and `candidates` with `distance_m`, `lat`, `lon`, `node`,
+`edge`, `t`. The first candidate is identical to a single `SnapEdge` with the
+same parameters. The endpoint runs no A*: expansions stay at zero, which makes
+it suitable for previewing a pin while the user drags the map.
+
 ## `POST /route`
 
 Maximum body size is 8 KiB. `from`/`to` may be strings or objects:
@@ -152,8 +205,10 @@ curl -s -X POST http://127.0.0.1:8080/route \
   }'
 ```
 
-Supported fields: `from`, `to`, `format`, `simplify`, `restrictions`, `pin`.
-Other fields are ignored. Invalid JSON returns `400`.
+Supported fields: `from`, `to`, `format`, `simplify`, `restrictions`, `pin`,
+`avoid`, `alt`, `via`. `avoid` is a string (`"toll,ferry"`), `alt` an integer
+`0`…`3`, `via` a string `"lat,lng|lat,lng"`. Other fields are ignored.
+Invalid JSON returns `400`.
 
 ## `GET /matrix`
 

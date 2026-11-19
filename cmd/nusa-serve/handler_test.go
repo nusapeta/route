@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -507,5 +508,195 @@ func TestFerrySpanIndexing(t *testing.T) {
 					a, b, body.Points[a], body.Points[b], ferryFrom, ferryTo)
 			}
 		}
+	}
+}
+
+// testRegionDiamond gives two disjoint paths between the endpoints, so avoid
+// and alt can be checked through the HTTP response rather than a stub.
+func testRegionDiamond(t *testing.T) *region {
+	t.Helper()
+	const lat, lon = -62_000_000, 1_068_000_000
+	b := &graph.Builder{
+		Lat: []int32{lat, lat - 50_000, lat - 50_000, lat - 100_000},
+		Lon: []int32{lon, lon + 50_000, lon - 50_000, lon},
+		Off: []uint32{0, 2, 4, 6, 8},
+		To:  []uint32{1, 2, 3, 0, 3, 0, 1, 2},
+		Len: []uint16{1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000},
+		Cls: []uint8{60, 60, 180, 60, 60, 60, 180, 60},
+	}
+	b.BuildGrid(0.02)
+	b.PBFHash = make([]byte, 32)
+	b.BuildUnix = 1_700_000_000
+	b.Meta = map[string]string{"source": "diamond.osm.pbf", "extractor": "test", "profile": "car"}
+	path := filepath.Join(t.TempDir(), "diamond.graph")
+	if err := b.Write(path); err != nil {
+		t.Fatalf("write graph: %v", err)
+	}
+	g, err := graph.Open(path)
+	if err != nil {
+		t.Fatalf("open graph: %v", err)
+	}
+	t.Cleanup(func() { g.Close() })
+	mnLat, mnLon, mxLat, mxLon := g.Bounds()
+	const pad = 0.05
+	return &region{
+		name: "diamond", g: g, r: graph.NewRouter(g, 1),
+		minLat: mnLat - pad, maxLat: mxLat + pad,
+		minLon: mnLon - pad, maxLon: mxLon + pad,
+	}
+}
+
+func testDiamondServer(t *testing.T) *server {
+	t.Helper()
+	rg := testRegionDiamond(t)
+	return &server{
+		regions: []*region{rg}, maxSnapM: 3000,
+		timeout: 5 * time.Second, budget: 3 * time.Second, maxAge: 3600,
+		m: &metrics{}, fp: graphFingerprint([]*region{rg}, 0, 3000, 1.5, 0.25),
+	}
+}
+
+func decodeRoute(t *testing.T, h http.Handler, query string) map[string]json.RawMessage {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", query, nil))
+	if rec.Code != 200 {
+		t.Fatalf("code %d for %s: %s", rec.Code, query, rec.Body.String())
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return body
+}
+
+func TestRouteAvoidToll(t *testing.T) {
+	s := testDiamondServer(t)
+	base := decodeRoute(t, testHandler(s), "/route?from=-6.2,106.8&to=-6.21,106.8")
+	avoid := decodeRoute(t, testHandler(s), "/route?from=-6.2,106.8&to=-6.21,106.8&avoid=toll")
+	var basePts, avoidPts [][2]float64
+	json.Unmarshal(base["points"], &basePts)
+	json.Unmarshal(avoid["points"], &avoidPts)
+	tollNode := [2]float64{-6.205, 106.805}
+	found := false
+	for _, p := range basePts {
+		if p == tollNode {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("base route skipped the toll branch: %v", basePts)
+	}
+	for _, p := range avoidPts {
+		if p == tollNode {
+			t.Fatalf("avoid=toll still used the toll branch: %v", avoidPts)
+		}
+	}
+	if s.m.expansions.Load() == 0 {
+		t.Fatal("avoid route recorded no expansions in metrics")
+	}
+}
+
+func TestRouteAlternatives(t *testing.T) {
+	s := testDiamondServer(t)
+	body := decodeRoute(t, testHandler(s), "/route?from=-6.2,106.8&to=-6.21,106.8&alt=1")
+	var alts []struct {
+		DistanceM uint32       `json:"distance_m"`
+		Points    [][2]float64 `json:"points"`
+	}
+	if err := json.Unmarshal(body["alternatives"], &alts); err != nil {
+		t.Fatalf("decode alternatives: %v", err)
+	}
+	if len(alts) != 1 {
+		t.Fatalf("alternatives = %d, want 1", len(alts))
+	}
+	var primary [][2]float64
+	json.Unmarshal(body["points"], &primary)
+	if fmt.Sprint(alts[0].Points) == fmt.Sprint(primary) {
+		t.Fatal("alternative geometry identical to primary")
+	}
+}
+
+func TestRouteViaLegs(t *testing.T) {
+	s := testServer(t, 3000)
+	body := decodeRoute(t, testHandler(s), "/route?from=-6.2,106.8&to=-6.21,106.81&via=-6.205,106.805")
+	var legs []struct {
+		DistanceM uint32 `json:"distance_m"`
+		StartIdx  int    `json:"start_index"`
+		EndIdx    int    `json:"end_index"`
+	}
+	if err := json.Unmarshal(body["legs"], &legs); err != nil {
+		t.Fatalf("decode legs: %v", err)
+	}
+	if len(legs) != 2 {
+		t.Fatalf("legs = %d, want 2", len(legs))
+	}
+	var total uint32
+	json.Unmarshal(body["distance_m"], &total)
+	var sum uint32
+	for i, leg := range legs {
+		sum += leg.DistanceM
+		if leg.StartIdx < 0 || leg.EndIdx < leg.StartIdx {
+			t.Fatalf("leg %d has invalid indexes %d..%d", i, leg.StartIdx, leg.EndIdx)
+		}
+	}
+	if diff := int64(sum) - int64(total); diff < -1 || diff > 1 {
+		t.Fatalf("leg sum %d != total %d", sum, total)
+	}
+}
+
+func TestNearestHandler(t *testing.T) {
+	s := testServer(t, 3000)
+	rec := httptest.NewRecorder()
+	http.HandlerFunc(s.handleNearest).ServeHTTP(rec, httptest.NewRequest("GET", "/nearest?lat=-6.2&lon=106.8&k=2", nil))
+	if rec.Code != 200 {
+		t.Fatalf("code %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Candidates []struct {
+			DistanceM float64 `json:"distance_m"`
+			Node      uint32  `json:"node"`
+			Edge      uint32  `json:"edge"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want, ok := s.regions[0].r.SnapEdge(-6.2, 106.8, 3000)
+	if !ok || len(body.Candidates) == 0 {
+		t.Fatalf("no candidates: ok=%v body=%s", ok, rec.Body.String())
+	}
+	if body.Candidates[0].Node != want.Node || body.Candidates[0].Edge != want.Edge {
+		t.Fatalf("first candidate = %+v, want node %d edge %d", body.Candidates[0], want.Node, want.Edge)
+	}
+	if s.m.expansions.Load() != 0 {
+		t.Fatal("/nearest ran a graph search")
+	}
+}
+
+func TestControlParamValidation(t *testing.T) {
+	for _, query := range []string{
+		"/route?from=-6.2,106.8&to=-6.21,106.81&alt=4",
+		"/route?from=-6.2,106.8&to=-6.21,106.81&avoid=tol",
+		"/route?from=-6.2,106.8&to=-6.21,106.81&via=-6.2,106.8|-6.2,106.8|-6.2,106.8|-6.2,106.8|-6.2,106.8|-6.2,106.8",
+	} {
+		rec := httptest.NewRecorder()
+		testHandler(testServer(t, 3000)).ServeHTTP(rec, httptest.NewRequest("GET", query, nil))
+		if rec.Code != 400 {
+			t.Fatalf("code %d for %s, want 400", rec.Code, query)
+		}
+	}
+}
+
+func TestETagIncludesControls(t *testing.T) {
+	s := testServer(t, 3000)
+	p := routeParams{fLat: -6.2, fLon: 106.8, tLat: -6.21, tLon: 106.81}
+	base := routeETag(s.fp, p)
+	p2 := p
+	p2.avoid = graph.AvoidToll
+	p2.alt = 2
+	p2.via = [][2]float64{{-6.205, 106.805}}
+	if got := routeETag(s.fp, p2); got == base {
+		t.Fatal("avoid/alt/via did not change the ETag")
 	}
 }
